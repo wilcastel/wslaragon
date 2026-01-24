@@ -20,6 +20,7 @@ WSLaragon es un ecosistema potente diseñado para transformar Windows + WSL2 en 
 2.  [**Uso del CLI**](CLI.md): Listado completo de comandos y cómo crear tu primer sitio.
 3.  [**SSL y Base de Datos**](SSL-DB.md): Cómo confiar en el certificado en Windows y configurar MariaDB.
 4.  [**Arquitectura**](STRUCTURE.md): Entiende cómo se organiza el proyecto y dónde están tus archivos.
+5.  [**Roadmap**](ROADMAP.md): Próximas funciones planificadas (Node.js, Redis, Varnish).
 
 ## 🚀 Inicio Rápido (60 segundos)
 
