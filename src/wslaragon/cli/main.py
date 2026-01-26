@@ -32,7 +32,8 @@ def site():
 @click.option('--mysql/--no-mysql', default=False, help='Create MySQL database')
 @click.option('--ssl/--no-ssl', default=False, help='Enable SSL')
 @click.option('--database', help='Custom database name')
-def create(name, php, mysql, ssl, database):
+@click.option('--public/--no-public', default=False, help='Point document root to public/ directory')
+def create(name, php, mysql, ssl, database, public):
     """Create a new site"""
     config = Config()
     nginx = NginxManager(config)
@@ -48,7 +49,8 @@ def create(name, php, mysql, ssl, database):
         return
 
     with console.status(f"[bold green]Creating site {name}..."):
-        result = site_mgr.create_site(name, php=php, mysql=mysql, ssl=ssl, database_name=database)
+        result = site_mgr.create_site(name, php=php, mysql=mysql, ssl=ssl, 
+                                    database_name=database, public_dir=public)
     
     if result['success']:
         site_info = result['site']
@@ -141,6 +143,34 @@ def enable(name):
     else:
         console.print(f"[red]✗ Failed to enable site: {result['error']}[/red]")
 
+@site.command('public')
+@click.argument('name')
+@click.option('--enable/--disable', default=True, help='Enable/Disable public directory serving')
+def set_public(name, enable):
+    """Set site root to public/ directory (Laravel/Symfony)"""
+    config = Config()
+    nginx = NginxManager(config)
+    mysql_mgr = MySQLManager(config)
+    site_mgr = SiteManager(config, nginx, mysql_mgr)
+    
+    # Ensure sudo permissions
+    try:
+        subprocess.run(['sudo', '-v'], check=True)
+    except subprocess.CalledProcessError:
+        console.print("[red]✗ This command requires sudo privileges[/red]")
+        return
+
+    action = "Enabling" if enable else "Disabling"
+    with console.status(f"[bold green]{action} public directory for {name}..."):
+        result = site_mgr.update_site_root(name, public_dir=enable)
+    
+    if result['success']:
+        console.print(f"[green]✓ Site rules updated for {name}[/green]")
+        path = "public/" if enable else "./"
+        console.print(f"[dim]Web root now points to: {path}[/dim]")
+    else:
+        console.print(f"[red]✗ Failed to update site: {result['error']}[/red]")
+
 @site.command()
 @click.argument('name')
 def disable(name):
@@ -157,6 +187,31 @@ def disable(name):
         console.print(f"[yellow]✓ Site '{name}' disabled[/yellow]")
     else:
         console.print(f"[red]✗ Failed to disable site: {result['error']}[/red]")
+
+@site.command('fix-permissions')
+@click.argument('name')
+def fix_permissions(name):
+    """Fix file permissions for a site"""
+    config = Config()
+    nginx = NginxManager(config)
+    mysql_mgr = MySQLManager(config)
+    site_mgr = SiteManager(config, nginx, mysql_mgr)
+    
+    # Validate sudo permissions
+    try:
+        subprocess.run(['sudo', '-v'], check=True)
+    except subprocess.CalledProcessError:
+        console.print("[red]✗ This command requires sudo privileges[/red]")
+        return
+
+    with console.status(f"[bold green]Fixing permissions for {name}..."):
+        result = site_mgr.fix_permissions(name)
+    
+    if result['success']:
+        console.print(f"[green]✓ Permissions fixed for '{name}'[/green]")
+        console.print(f"[dim]Owner set to current user, Group set to www-data (775)[/dim]")
+    else:
+        console.print(f"[red]✗ Failed to fix permissions: {result['error']}[/red]")
 
 @cli.group()
 def service():

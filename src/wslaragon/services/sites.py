@@ -1,5 +1,6 @@
 import json
 import subprocess
+import os
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
@@ -40,7 +41,7 @@ class SiteManager:
     
     def create_site(self, site_name: str, php: bool = True, 
                    mysql: bool = False, ssl: bool = False,
-                   database_name: str = None) -> Dict:
+                   database_name: str = None, public_dir: bool = False) -> Dict:
         """Create a new site"""
         try:
             # Validate site name
@@ -51,12 +52,17 @@ class SiteManager:
             if site_name in self.sites:
                 return {'success': False, 'error': 'Site already exists'}
             
-            # Create document root
-            site_doc_root = self.document_root / site_name
-            site_doc_root.mkdir(exist_ok=True, parents=True)
+            # Create document root (always base directory)
+            site_base_dir = self.document_root / site_name
+            site_base_dir.mkdir(exist_ok=True, parents=True)
+            
+            # Define actual Nginx web root
+            web_root = site_base_dir / "public" if public_dir else site_base_dir
+            if public_dir:
+                web_root.mkdir(exist_ok=True)
             
             # Create index file
-            index_file = site_doc_root / "index.php"
+            index_file = web_root / "index.php"
             if php:
                 index_content = f"""<?php
 echo "<h1>Welcome to {site_name}{self.tld}!</h1>";
@@ -99,7 +105,7 @@ phpinfo();
             # Create Nginx configuration
             nginx_created, nginx_error = self.nginx.add_site(
                 site_name, 
-                str(site_doc_root), 
+                str(web_root), 
                 ssl=ssl, 
                 php=php
             )
@@ -111,7 +117,8 @@ phpinfo();
             site_info = {
                 'name': site_name,
                 'domain': f"{site_name}{self.tld}",
-                'document_root': str(site_doc_root),
+                'document_root': str(site_base_dir), # Base directory for management
+                'web_root': str(web_root),           # Actual web root for Nginx
                 'php': php,
                 'mysql': mysql,
                 'ssl': ssl,
@@ -127,6 +134,52 @@ phpinfo();
             
         except Exception as e:
             return {'success': False, 'error': str(e)}
+
+    def update_site_root(self, site_name: str, public_dir: bool = True) -> Dict:
+        """Update site document root (e.g. to point to public/)"""
+        try:
+            if site_name not in self.sites:
+                return {'success': False, 'error': 'Site not found'}
+            
+            site_info = self.sites[site_name]
+            base_dir = Path(site_info['document_root'])
+            old_web_root = site_info.get('web_root', site_info['document_root'])
+            
+            new_web_root = base_dir / "public" if public_dir else base_dir
+            if public_dir:
+                new_web_root.mkdir(exist_ok=True)
+            
+            # Update Nginx config
+            # We need to recreate the config completely to update root
+            self.nginx.remove_site(site_name)
+            
+            success, error = self.nginx.add_site(
+                site_name,
+                str(new_web_root),
+                ssl=site_info.get('ssl', False),
+                php=site_info.get('php', True)
+            )
+            
+            if not success:
+                # Try to revert
+                self.nginx.add_site(
+                    site_name,
+                    str(old_web_root),
+                    ssl=site_info.get('ssl', False),
+                    php=site_info.get('php', True)
+                )
+                return {'success': False, 'error': f"Failed to update Nginx: {error}"}
+            
+            # Update registry
+            site_info['web_root'] = str(new_web_root)
+            self._save_sites()
+            
+            return {'success': True}
+            
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+            
+
     
     def delete_site(self, site_name: str, remove_files: bool = False, 
                     remove_database: bool = False) -> Dict:
@@ -266,3 +319,38 @@ phpinfo();
             protocol = 'https' if self.sites[site_name].get('ssl') else 'http'
             return f"{protocol}://{site_name}{self.tld}"
         return None
+
+    def fix_permissions(self, site_name: str) -> Dict:
+        """Fix file owner and permissions for a site"""
+        try:
+            if site_name not in self.sites:
+                return {'success': False, 'error': 'Site not found'}
+            
+            site_info = self.sites[site_name]
+            doc_root = site_info['document_root']
+            
+            # Get current user
+            current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+            
+            # Set owner to current_user:www-data
+            cmd_chown = ['sudo', 'chown', '-R', f'{current_user}:www-data', doc_root]
+            subprocess.run(cmd_chown, check=True, capture_output=True)
+            
+            # Set permissions to 775 (rwxrwxr-x)
+            # User: rwx (Full)
+            # Group (Web Server): rwx (Full) - Needed for writing logs, caching, storage
+            # Others: r-x (Read/Execute)
+            cmd_chmod = ['sudo', 'chmod', '-R', '775', doc_root]
+            subprocess.run(cmd_chmod, check=True, capture_output=True)
+            
+            # Additional fix for storage folders commonly used in frameworks (Laravel, etc)
+            # This ensures even new files created inherit the group 'www-data'
+            cmd_guid = ['sudo', 'find', doc_root, '-type', 'd', '-exec', 'chmod', 'g+s', '{}', '+']
+            subprocess.run(cmd_guid, check=True, capture_output=True)
+            
+            return {'success': True}
+            
+        except subprocess.CalledProcessError as e:
+            return {'success': False, 'error': f"Command failed: {str(e)}"}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
