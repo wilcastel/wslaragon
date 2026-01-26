@@ -46,6 +46,25 @@ wslaragon site disable mi-web
 wslaragon site enable mi-web
 ```
 
+### 5. Reparar Permisos
+Si tienes problemas de escritura (ej. logs, cache, uploads) o has copiado archivos desde Windows, usa este comando para reasignar el propietario y permisos.
+
+```bash
+wslaragon site fix-permissions mi-web
+```
+
+### 6. Configuración de Directorio Público (Laravel/Symfony)
+Configura Nginx para servir el sitio desde el directorio `public/` en lugar de la raíz.
+
+```bash
+# Crear sitio directamente con soporte public/
+wslaragon site create mi-blog --public
+
+# O cambiar un sitio existente
+wslaragon site public mi-blog --enable   # Apunta a public/
+wslaragon site public mi-blog --disable  # Apunta a la raíz ./
+```
+
 ---
 
 ## 🔧 Gestión de Servicios (`service`)
@@ -54,6 +73,38 @@ Consulta el estado de Nginx, MySQL y PHP-FPM.
 
 ```bash
 wslaragon service status
+```
+
+---
+
+## 🐘 Gestión de PHP (`php`)
+
+### 1. Configuración de runtime (ini)
+Modifica valores comunes como límite de memoria o tamaño de subida sin editar archivos manualmente.
+
+```bash
+# Ver valores actuales
+wslaragon php config list
+
+# Cambiar un valor (reinicia FPM automáticamente)
+wslaragon php config set upload_max_filesize 100M
+wslaragon php config set memory_limit 512M
+
+# Consultar valor específico
+wslaragon php config get post_max_size
+```
+
+### 2. Versiones y Extensiones
+```bash
+# Listar versiones instaladas
+wslaragon php versions
+
+# Cambiar versión activa
+wslaragon php switch 8.2
+
+# Gestionar extensiones
+wslaragon php enable_ext mbstring
+wslaragon php disable_ext xdebug
 ```
 
 ---
