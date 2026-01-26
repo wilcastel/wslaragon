@@ -1,4 +1,5 @@
 import click
+import subprocess
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -38,6 +39,14 @@ def create(name, php, mysql, ssl, database):
     mysql_mgr = MySQLManager(config)
     site_mgr = SiteManager(config, nginx, mysql_mgr)
     
+    
+    # Ensure sudo permissions before showing spinner
+    try:
+        subprocess.run(['sudo', '-v'], check=True)
+    except subprocess.CalledProcessError:
+        console.print("[red]✗ This command requires sudo privileges[/red]")
+        return
+
     with console.status(f"[bold green]Creating site {name}..."):
         result = site_mgr.create_site(name, php=php, mysql=mysql, ssl=ssl, database_name=database)
     
@@ -52,12 +61,7 @@ def create(name, php, mysql, ssl, database):
                            title=f"Site: {name}"))
         
         if ssl:
-            ssl_mgr = SSLManager(config)
-            ssl_result = ssl_mgr.setup_ssl_for_site(name, config.get('sites.tld'))
-            if ssl_result['success']:
-                console.print(f"[green]✓ SSL configured for {ssl_result['domain']}[/green]")
-            else:
-                console.print(f"[red]✗ SSL setup failed: {ssl_result['error']}[/red]")
+             console.print(f"[green]✓ SSL configured for {site_info['domain']}[/green]")
     else:
         console.print(f"[red]✗ Failed to create site: {result['error']}[/red]")
 

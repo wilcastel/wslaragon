@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
 
+from ..services.ssl import SSLManager
+
 class SiteManager:
     def __init__(self, config, nginx_manager, mysql_manager):
         self.config = config
@@ -87,6 +89,13 @@ phpinfo();
                 if not db_created:
                     return {'success': False, 'error': f'Failed to create database: {db_error}'}
             
+            # Generate SSL certificates if requested
+            if ssl:
+                ssl_mgr = SSLManager(self.config)
+                ssl_result = ssl_mgr.setup_ssl_for_site(site_name, self.tld)
+                if not ssl_result['success']:
+                    return {'success': False, 'error': f"Failed to generate SSL: {ssl_result['error']}"}
+
             # Create Nginx configuration
             nginx_created, nginx_error = self.nginx.add_site(
                 site_name, 
