@@ -57,6 +57,7 @@ class NginxManager:
         fastcgi_pass unix:/var/run/php/php{self.config.get('php.version')}-fpm.sock;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         include fastcgi_params;
+        client_max_body_size 100M;
     }}"""
 
         # Common configuration elements

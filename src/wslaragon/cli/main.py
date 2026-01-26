@@ -308,6 +308,76 @@ def disable_ext(extension):
     else:
         console.print(f"[red]✗ Failed to disable extension {extension}[/red]")
 
+@php.group()
+def config():
+    """Manage PHP configuration"""
+    pass
+
+@config.command('list')
+def list_config():
+    """List common PHP configuration settings"""
+    config = Config()
+    php_mgr = PHPManager(config)
+    
+    # Common settings to display
+    common_keys = [
+        'memory_limit', 
+        'upload_max_filesize', 
+        'post_max_size', 
+        'max_execution_time',
+        'max_input_time',
+        'display_errors',
+        'date.timezone'
+    ]
+    
+    current_config = php_mgr.read_ini()
+    
+    table = Table(title="PHP Configuration")
+    table.add_column("Setting", style="cyan")
+    table.add_column("Value", style="green")
+    
+    for key in common_keys:
+        value = current_config.get(key, 'Not set')
+        table.add_row(key, value)
+    
+    console.print(table)
+
+@config.command('set')
+@click.argument('key')
+@click.argument('value')
+def set_config(key, value):
+    """Set a PHP configuration value"""
+    config = Config()
+    php_mgr = PHPManager(config)
+    
+    # Validate sudo permissions
+    try:
+        subprocess.run(['sudo', '-v'], check=True)
+    except subprocess.CalledProcessError:
+        console.print("[red]✗ This command requires sudo privileges[/red]")
+        return
+
+    with console.status(f"[bold green]Updating {key} to {value}..."):
+        result = php_mgr.update_config(key, value)
+    
+    if result:
+        console.print(f"[green]✓ Updated {key} to {value}[/green]")
+        console.print("[dim]PHP-FPM restarted[/dim]")
+    else:
+        console.print(f"[red]✗ Failed to update configuration[/red]")
+
+@config.command('get')
+@click.argument('key')
+def get_config(key):
+    """Get a PHP configuration value"""
+    config = Config()
+    php_mgr = PHPManager(config)
+    
+    current_config = php_mgr.read_ini()
+    value = current_config.get(key, 'Not set')
+    
+    console.print(f"[cyan]{key}[/cyan] = [green]{value}[/green]")
+
 @cli.group()
 def mysql():
     """MySQL management commands"""

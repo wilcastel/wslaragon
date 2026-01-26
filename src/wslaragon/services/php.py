@@ -77,16 +77,16 @@ class PHPManager:
         """Write PHP configuration to php.ini"""
         try:
             # Read current file
-            lines = []
             with open(self.php_ini_path, 'r') as f:
                 lines = f.readlines()
             
-            # Update configuration
+            # Update configuration in memory
             updated_lines = []
             config_keys = set(config.keys())
             
             for line in lines:
                 stripped = line.strip()
+                # Match strict key=value pairs, ignoring comments
                 if stripped and not stripped.startswith(';') and '=' in stripped:
                     key = stripped.split('=', 1)[0].strip()
                     if key in config:
@@ -97,15 +97,42 @@ class PHPManager:
                 else:
                     updated_lines.append(line)
             
-            # Add new configurations
-            for key in config_keys:
-                updated_lines.append(f"{key} = {config[key]}\n")
+            # Add new configurations that weren't found
+            if config_keys:
+                updated_lines.append("\n; Added by WSLaragon\n")
+                for key in config_keys:
+                    updated_lines.append(f"{key} = {config[key]}\n")
             
-            # Write back
-            with open(self.php_ini_path, 'w') as f:
-                f.writelines(updated_lines)
+            # Write back using sudo tee
+            process = subprocess.Popen(['sudo', 'tee', str(self.php_ini_path)],
+                                     stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE,
+                                     text=True)
+            process.communicate(input=''.join(updated_lines))
             
-            return True
+            return process.returncode == 0
+        except Exception:
+            return False
+
+    def update_config(self, key: str, value: str) -> bool:
+        """Update a specific PHP configuration directive"""
+        try:
+            if self.write_ini({key: value}):
+                # Restart PHP-FPM to apply changes
+                version = self.get_current_version()
+                if version:
+                    # Parse version to get major.minor
+                    v_match = re.search(r'(\d+\.\d+)', version)
+                    if v_match:
+                        short_version = v_match.group(1)
+                        subprocess.run(['sudo', 'systemctl', 'restart', f'php{short_version}-fpm'], check=True)
+                        return True
+                
+                # Fallback if version detection fails
+                subprocess.run('sudo systemctl restart php*-fpm', shell=True, check=True)
+                return True
+            return False
         except Exception:
             return False
     
