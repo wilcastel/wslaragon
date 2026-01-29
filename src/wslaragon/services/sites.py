@@ -41,7 +41,8 @@ class SiteManager:
     
     def create_site(self, site_name: str, php: bool = True, 
                    mysql: bool = False, ssl: bool = False,
-                   database_name: str = None, public_dir: bool = False) -> Dict:
+                   database_name: str = None, public_dir: bool = False,
+                   proxy_port: int = None) -> Dict:
         """Create a new site"""
         try:
             # Validate site name
@@ -61,17 +62,18 @@ class SiteManager:
             if public_dir:
                 web_root.mkdir(exist_ok=True)
             
-            # Create index file
-            index_file = web_root / "index.php"
-            if php:
-                index_content = f"""<?php
+            # Create index file (only if not proxying, or even if proxying just as a placeholder)
+            if not proxy_port:
+                index_file = web_root / "index.php"
+                if php:
+                    index_content = f"""<?php
 echo "<h1>Welcome to {site_name}{self.tld}!</h1>";
 echo "<p>PHP Version: " . phpversion() . "</p>";
 echo "<p>Server Time: " . date('Y-m-d H:i:s') . "</p>";
 phpinfo();
 ?>"""
-            else:
-                index_content = f"""<!DOCTYPE html>
+                else:
+                    index_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <title>Welcome to {site_name}{self.tld}!</title>
@@ -81,9 +83,9 @@ phpinfo();
     <p>Static site is working!</p>
 </body>
 </html>"""
-            
-            with open(index_file, 'w') as f:
-                f.write(index_content)
+                
+                with open(index_file, 'w') as f:
+                    f.write(index_content)
             
             # Create database if requested
             db_created = False
@@ -107,7 +109,8 @@ phpinfo();
                 site_name, 
                 str(web_root), 
                 ssl=ssl, 
-                php=php
+                php=php,
+                proxy_port=proxy_port
             )
             
             if not nginx_created:
@@ -122,6 +125,7 @@ phpinfo();
                 'php': php,
                 'mysql': mysql,
                 'ssl': ssl,
+                'proxy_port': proxy_port,
                 'database': database_name if mysql else None,
                 'created_at': datetime.now().isoformat(),
                 'enabled': True
@@ -157,7 +161,8 @@ phpinfo();
                 site_name,
                 str(new_web_root),
                 ssl=site_info.get('ssl', False),
-                php=site_info.get('php', True)
+                php=site_info.get('php', True),
+                proxy_port=site_info.get('proxy_port')
             )
             
             if not success:
@@ -166,7 +171,8 @@ phpinfo();
                     site_name,
                     str(old_web_root),
                     ssl=site_info.get('ssl', False),
-                    php=site_info.get('php', True)
+                    php=site_info.get('php', True),
+                    proxy_port=site_info.get('proxy_port')
                 )
                 return {'success': False, 'error': f"Failed to update Nginx: {error}"}
             
@@ -267,19 +273,20 @@ phpinfo();
             site_info = self.sites[site_name]
             
             # Update allowed fields
-            allowed_fields = ['php', 'mysql', 'ssl', 'database']
+            allowed_fields = ['php', 'mysql', 'ssl', 'database', 'proxy_port']
             for field, value in kwargs.items():
                 if field in allowed_fields:
                     site_info[field] = value
             
             # Recreate Nginx configuration if needed
-            if any(field in kwargs for field in ['php', 'ssl']):
+            if any(field in kwargs for field in ['php', 'ssl', 'proxy_port']):
                 self.nginx.remove_site(site_name)
                 self.nginx.add_site(
                     site_name,
                     site_info['document_root'],
                     ssl=site_info.get('ssl', False),
-                    php=site_info.get('php', True)
+                    php=site_info.get('php', True),
+                    proxy_port=site_info.get('proxy_port')
                 )
             
             self._save_sites()

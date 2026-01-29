@@ -13,12 +13,16 @@ wslaragon site create mi-web --php --mysql --ssl
 
 # Ejemplo solo HTML estático
 wslaragon site create landing --php=false --mysql=false
+
+# Ejemplo App Python/Node (Proxy puerto 8000)
+wslaragon site create mi-app --proxy 8000 --no-php --no-mysql --ssl
 ```
 
 **Opciones:**
 - `--php / --no-php`: Habilitar o deshabilitar PHP-FPM.
 - `--mysql / --no-mysql`: Crear o no una base de datos automática.
 - `--ssl / --no-ssl`: Generar certificado SSL local.
+- `--proxy [PORT]`: Configurar como Proxy Inverso para Apps (Python, Node, Go) en el puerto especificado (ej. 8000).
 
 ### 2. Listar Sitios
 Muestra todos los sitios creados y su estado actual.

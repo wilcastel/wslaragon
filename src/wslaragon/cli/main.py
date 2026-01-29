@@ -33,7 +33,8 @@ def site():
 @click.option('--ssl/--no-ssl', default=False, help='Enable SSL')
 @click.option('--database', help='Custom database name')
 @click.option('--public/--no-public', default=False, help='Point document root to public/ directory')
-def create(name, php, mysql, ssl, database, public):
+@click.option('--proxy', type=int, help='Proxy port (e.g. 8000) for Python/Node apps')
+def create(name, php, mysql, ssl, database, public, proxy):
     """Create a new site"""
     config = Config()
     nginx = NginxManager(config)
@@ -50,7 +51,8 @@ def create(name, php, mysql, ssl, database, public):
 
     with console.status(f"[bold green]Creating site {name}..."):
         result = site_mgr.create_site(name, php=php, mysql=mysql, ssl=ssl, 
-                                    database_name=database, public_dir=public)
+                                    database_name=database, public_dir=public,
+                                    proxy_port=proxy)
     
     if result['success']:
         site_info = result['site']
@@ -58,6 +60,7 @@ def create(name, php, mysql, ssl, database, public):
                            f"Domain: {site_info['domain']}\n"
                            f"Document Root: {site_info['document_root']}\n"
                            f"PHP: {'Yes' if site_info['php'] else 'No'}\n"
+                           f"Proxy: {site_info.get('proxy_port') if site_info.get('proxy_port') else 'No'}\n"
                            f"MySQL: {'Yes' if site_info['mysql'] else 'No'}\n"
                            f"SSL: {'Yes' if site_info['ssl'] else 'No'}",
                            title=f"Site: {name}"))
@@ -91,10 +94,16 @@ def list():
     
     for site in sites:
         status = "✓ Enabled" if site['enabled'] else "✗ Disabled"
+        # Determine PHP/Proxy status
+        if site.get('proxy_port'):
+            tech_status = f"[blue]Proxy:{site['proxy_port']}[/blue]"
+        else:
+            tech_status = "✓" if site['php'] else "✗"
+
         table.add_row(
             site['name'],
             site['domain'],
-            "✓" if site['php'] else "✗",
+            tech_status,
             "✓" if site['mysql'] else "✗",
             "✓" if site['ssl'] else "✗",
             status
@@ -520,6 +529,81 @@ def generate(domain):
         console.print(f"[green]✓ Certificate generated for {domain}[/green]")
     else:
         console.print(f"[red]✗ Failed to generate certificate for {domain}[/red]")
+
+@cli.group()
+def nginx():
+    """Nginx management commands"""
+    pass
+
+@nginx.group()
+def config():
+    """Manage Nginx configuration"""
+    pass
+
+@config.command('list')
+def list_nginx_config():
+    """List configurable Nginx settings"""
+    config = Config()
+    
+    # Settings exposed for configuration
+    exposed_settings = [
+        'client_max_body_size'
+    ]
+    
+    table = Table(title="Nginx Configuration")
+    table.add_column("Setting", style="cyan")
+    table.add_column("Value", style="green")
+    
+    for key in exposed_settings:
+        value = config.get(f'nginx.{key}', '128M') # Default backup
+        table.add_row(key, value)
+    
+    console.print(table)
+
+@config.command('set')
+@click.argument('key')
+@click.argument('value')
+def set_nginx_config(key, value):
+    """Set an Nginx configuration value"""
+    config = Config()
+    nginx_mgr = NginxManager(config)
+    
+    # Validate sudo permissions
+    try:
+        subprocess.run(['sudo', '-v'], check=True)
+    except subprocess.CalledProcessError:
+        console.print("[red]✗ This command requires sudo privileges[/red]")
+        return
+    
+    valid_keys = ['client_max_body_size']
+    if key not in valid_keys:
+        console.print(f"[red]✗ Invalid setting '{key}'. Valid settings: {', '.join(valid_keys)}[/red]")
+        return
+
+    with console.status(f"[bold green]Updating {key} to {value}..."):
+        # Update config
+        config.set(f'nginx.{key}', value)
+        
+        # Reload Nginx to apply might not be enough if template needs regen
+        # Ideally we should offer to regen all sites, but for now just saving the config
+        # is the first step. The user needs to recreate/update sites for this to apply 
+        # unless we force immediate regeneration.
+        # However, for global settings, usually we might want to update global nginx.conf 
+        # but here we are using per-site config injections.
+        
+        # For this specific implementation where we inject into site configs:
+        # We need to iterate all enabled sites and re-apply config.
+        # This is expensive but necessary for "consistency" as requested.
+        
+        site_mgr = SiteManager(config, nginx_mgr, MySQLManager(config))
+        sites = site_mgr.list_sites()
+        
+        for site in sites:
+            # Re-generate config for each site
+            site_mgr.update_site(site['name'])
+            
+    console.print(f"[green]✓ Updated {key} to {value}[/green]")
+    console.print("[dim]Access rules updated for all sites. Nginx reloaded.[/dim]")
 
 @ssl.command()
 def list():

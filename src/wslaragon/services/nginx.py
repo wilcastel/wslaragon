@@ -43,27 +43,44 @@ class NginxManager:
             return False
     
     def create_site_config(self, site_name: str, document_root: str, 
-                          ssl: bool = False, php: bool = True) -> str:
+                          ssl: bool = False, php: bool = True, proxy_port: int = None) -> str:
         """Generate Nginx site configuration"""
         tld = self.config.get('sites.tld')
         domain = f"{site_name}{tld}"
         
-        # PHP-FPM part
-        php_config = ""
-        if php:
-            php_config = f"""
+        # Proxy configuration (Exclusive: overrides PHP/Static logic)
+        if proxy_port:
+            common_config = f"""
+    # Proxy Configuration
+    location / {{
+        proxy_pass http://127.0.0.1:{proxy_port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        client_max_body_size {self.config.get('nginx.client_max_body_size', '128M')};
+    }}"""
+        else:
+            # PHP-FPM part
+            php_config = ""
+            if php:
+                php_config = f"""
     location ~ \\.php$ {{
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:/var/run/php/php{self.config.get('php.version')}-fpm.sock;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        include fastcgi_params;
-        client_max_body_size 100M;
+        client_max_body_size 128M;
     }}"""
 
-        # Common configuration elements
-        common_config = f"""
+            # Common configuration elements
+            common_config = f"""
     root {document_root};
     index index.php index.html index.htm;
+    client_max_body_size {self.config.get('nginx.client_max_body_size', '128M')};
 
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
@@ -127,11 +144,11 @@ server {{
         return config.strip()
     
     def add_site(self, site_name: str, document_root: str, 
-                ssl: bool = False, php: bool = True) -> Tuple[bool, Optional[str]]:
+                ssl: bool = False, php: bool = True, proxy_port: int = None) -> Tuple[bool, Optional[str]]:
         """Add a new site configuration"""
         try:
             config_content = self.create_site_config(
-                site_name, document_root, ssl, php
+                site_name, document_root, ssl, php, proxy_port
             )
             
             config_file = self.sites_available / f"{site_name}.conf"
