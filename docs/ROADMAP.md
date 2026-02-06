@@ -7,11 +7,18 @@ Este documento detalla las próximas funciones y mejoras planificadas.
 - [x] **Soporte Laravel/Public**: Opción para servir sitios desde el directorio `public/` en lugar de la raíz.
 - [x] **Reparación de Permisos**: Comando `fix-permissions` para solucionar problemas de escritura en archivos copiados desde Windows.
 - [x] **Validaciones de Seguridad**: Mejor manejo de credenciales `sudo` para evitar bloqueos en la interfaz.
+- [x] **Static HTML Boilerplate**: Comando `--html` para crear sitios HTML estáticos con estructura completa.
+- [x] **WordPress Auto-Installer**: Comando `--wordpress` para crear sitios WordPress completos.
+- [x] **Laravel Auto-Installer**: Comando `--laravel=VERSIÓN` para crear sitios Laravel con Composer.
+- [x] **Laravel con PostgreSQL**: Comando `--postgres` para Laravel con base de datos PostgreSQL.
+- [x] **Laravel con Supabase**: Comando `--supabase` para Laravel con Supabase (PostgreSQL + Supabase config).
 
 ## 🚀 Fase 1: Automatización de Frameworks
-- [ ] **WordPress Auto-Installer**: Crear sitio + Descargar WP + Configurar `wp-config.php`.
-- [ ] **Laravel Auto-Installer**: Integrar `composer create-project` directamente.
-- [ ] **Static Boilerplates**: Plantillas rápidas HTML/Tailwind.
+- [x] ~~WordPress Auto-Installer~~: ~~Crear sitio + Descargar WP + Configurar `wp-config.php`.~~
+- [x] ~~Laravel Auto-Installer~~: ~~Integrar `composer create-project` directamente.~~
+- [x] ~~Static Boilerplates~~: ~~Plantillas rápidas HTML/Tailwind.~~
+- [x] ~~Soporte PostgreSQL~~: ~~Opción `--postgres` para Laravel.~~
+- [x] ~~Soporte Supabase~~: ~~Opción `--supabase` para Laravel con Supabase.~~
 
 ## 🟢 Fase 2: Ecosistema Node.js
 - [ ] **Gestor de Aplicaciones Node**: Soporte para Express, Next.js.

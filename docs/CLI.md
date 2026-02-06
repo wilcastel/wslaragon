@@ -12,7 +12,22 @@ Crea un nuevo proyecto con configuración de Nginx, base de datos y SSL.
 wslaragon site create mi-web --php --mysql --ssl
 
 # Ejemplo solo HTML estático
-wslaragon site create landing --php=false --mysql=false
+wslaragon site create mi-web --html
+
+# Crear sitio HTML completo (index.html, styles/, js/)
+wslaragon site create landing --html
+
+# Ejemplo WordPress completo
+wslaragon site create mi-blog --wordpress --mysql
+
+# Ejemplo Laravel 12 con MySQL
+wslaragon site create mi-app --laravel=12 --mysql
+
+# Ejemplo Laravel 12 con PostgreSQL
+wslaragon site create mi-app --laravel=12 --postgres
+
+# Ejemplo Laravel 12 con Supabase (PostgreSQL + Supabase)
+wslaragon site create mi-app --laravel=12 --supabase
 
 # Ejemplo App Python/Node (Proxy puerto 8000)
 wslaragon site create mi-app --proxy 8000 --no-php --no-mysql --ssl
@@ -20,9 +35,16 @@ wslaragon site create mi-app --proxy 8000 --no-php --no-mysql --ssl
 
 **Opciones:**
 - `--php / --no-php`: Habilitar o deshabilitar PHP-FPM.
-- `--mysql / --no-mysql`: Crear o no una base de datos automática.
+- `--mysql / --no-mysql`: Crear o no una base de datos MySQL automática.
 - `--ssl / --no-ssl`: Generar certificado SSL local.
+- `--html`: Crear sitio HTML estático con estructura completa (index.html, styles/estilos.css, js/app.js).
+- `--wordpress`: Crear sitio WordPress completo con descarga automática.
+- `--laravel=VERSIÓN`: Crear sitio Laravel (ej. `--laravel=12` para Laravel 12).
+- `--postgres`: Usar PostgreSQL en lugar de MySQL para Laravel.
+- `--supabase`: Usar Supabase (PostgreSQL + configuración Supabase) para Laravel.
 - `--proxy [PORT]`: Configurar como Proxy Inverso para Apps (Python, Node, Go) en el puerto especificado (ej. 8000).
+- `--public`: Apuntar document root a directorio `public/` (útil para Laravel).
+- `--database`: Nombre personalizado para la base de datos.
 
 ### 2. Listar Sitios
 Muestra todos los sitios creados y su estado actual.

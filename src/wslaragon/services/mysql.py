@@ -131,6 +131,20 @@ class MySQLManager:
             pass
         return False
     
+    def database_exists(self, database_name: str) -> bool:
+        """Check if a database exists"""
+        try:
+            connection = self.get_connection()
+            if connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(f"SHOW DATABASES LIKE '{database_name}'")
+                    result = cursor.fetchone()
+                    connection.close()
+                    return result is not None
+        except Exception:
+            pass
+        return False
+    
     def list_users(self) -> List[Dict]:
         """List all MySQL users"""
         try:

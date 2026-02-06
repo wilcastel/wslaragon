@@ -151,7 +151,9 @@ server {{
                 site_name, document_root, ssl, php, proxy_port
             )
             
-            config_file = self.sites_available / f"{site_name}.conf"
+            tld = self.config.get('sites.tld', '.test')
+            domain = f"{site_name}{tld}"
+            config_file = self.sites_available / f"{domain}.conf"
             
             # Write configuration using sudo tee
             process = subprocess.Popen(['sudo', 'tee', str(config_file)], 
@@ -176,8 +178,10 @@ server {{
     def enable_site(self, site_name: str) -> Tuple[bool, Optional[str]]:
         """Enable a site"""
         try:
-            source = self.sites_available / f"{site_name}.conf"
-            target = self.sites_enabled / f"{site_name}.conf"
+            tld = self.config.get('sites.tld', '.test')
+            domain = f"{site_name}{tld}"
+            source = self.sites_available / f"{domain}.conf"
+            target = self.sites_enabled / f"{domain}.conf"
             
             # Create symbolic link
             subprocess.run(['sudo', 'ln', '-sf', str(source), str(target)], check=True, capture_output=True, text=True)
@@ -202,7 +206,9 @@ server {{
     def disable_site(self, site_name: str) -> bool:
         """Disable a site"""
         try:
-            config_file = self.sites_enabled / f"{site_name}.conf"
+            tld = self.config.get('sites.tld', '.test')
+            domain = f"{site_name}{tld}"
+            config_file = self.sites_enabled / f"{domain}.conf"
             subprocess.run(['sudo', 'rm', '-f', str(config_file)], check=True)
             return self.reload()
         except Exception:
@@ -211,11 +217,14 @@ server {{
     def remove_site(self, site_name: str) -> bool:
         """Remove a site completely"""
         try:
+            tld = self.config.get('sites.tld', '.test')
+            domain = f"{site_name}{tld}"
+            
             # Disable first
             self.disable_site(site_name)
             
             # Remove configuration file
-            config_file = self.sites_available / f"{site_name}.conf"
+            config_file = self.sites_available / f"{domain}.conf"
             subprocess.run(['sudo', 'rm', '-f', str(config_file)], check=True)
             
             return True

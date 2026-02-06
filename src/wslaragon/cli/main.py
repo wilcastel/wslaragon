@@ -34,7 +34,13 @@ def site():
 @click.option('--database', help='Custom database name')
 @click.option('--public/--no-public', default=False, help='Point document root to public/ directory')
 @click.option('--proxy', type=int, help='Proxy port (e.g. 8000) for Python/Node apps')
-def create(name, php, mysql, ssl, database, public, proxy):
+@click.option('--html', 'site_type', flag_value='html', help='Create static HTML site')
+@click.option('--wordpress', 'site_type', flag_value='wordpress', help='Create WordPress site')
+@click.option('--laravel', 'site_type', help='Create Laravel site (specify version, e.g., --laravel=12)')
+@click.option('--postgres', 'db_type', flag_value='postgres', help='Use PostgreSQL instead of MySQL')
+@click.option('--supabase', 'db_type', flag_value='supabase', help='Use Supabase (PostgreSQL + Supabase config)')
+@click.option('--force', 'recreate', is_flag=True, default=False, help='Force recreate site (overwrite existing files)')
+def create(name, php, mysql, ssl, database, public, proxy, site_type, db_type, recreate):
     """Create a new site"""
     config = Config()
     nginx = NginxManager(config)
@@ -52,7 +58,8 @@ def create(name, php, mysql, ssl, database, public, proxy):
     with console.status(f"[bold green]Creating site {name}..."):
         result = site_mgr.create_site(name, php=php, mysql=mysql, ssl=ssl, 
                                     database_name=database, public_dir=public,
-                                    proxy_port=proxy)
+                                    proxy_port=proxy, site_type=site_type, db_type=db_type,
+                                    recreate=recreate)
     
     if result['success']:
         site_info = result['site']
@@ -221,6 +228,58 @@ def fix_permissions(name):
         console.print(f"[dim]Owner set to current user, Group set to www-data (775)[/dim]")
     else:
         console.print(f"[red]✗ Failed to fix permissions: {result['error']}[/red]")
+
+@site.command('ssl')
+@click.argument('name')
+def site_ssl(name):
+    """Enable SSL for an existing site"""
+    config = Config()
+    nginx = NginxManager(config)
+    mysql_mgr = MySQLManager(config)
+    site_mgr = SiteManager(config, nginx, mysql_mgr)
+    
+    site_info = site_mgr.get_site(name)
+    if not site_info:
+        console.print(f"[red]✗ Site '{name}' not found[/red]")
+        return
+    
+    if site_info.get('ssl'):
+        console.print(f"[yellow]✓ Site '{name}' already has SSL enabled[/yellow]")
+        return
+    
+    try:
+        subprocess.run(['sudo', '-v'], check=True)
+    except subprocess.CalledProcessError:
+        console.print("[red]✗ This command requires sudo privileges[/red]")
+        return
+
+    with console.status(f"[bold green]Enabling SSL for {name}..."):
+        ssl_mgr = SSLManager(config)
+        ssl_result = ssl_mgr.setup_ssl_for_site(name, site_mgr.tld)
+        
+        if not ssl_result['success']:
+            console.print(f"[red]✗ Failed to generate SSL: {ssl_result['error']}[/red]")
+            return
+        
+        web_root = site_info['web_root']
+        nginx_result = nginx.add_site(
+            name, 
+            web_root, 
+            ssl=True, 
+            php=site_info.get('php', True),
+            proxy_port=site_info.get('proxy_port')
+        )
+        
+        if not nginx_result[0]:
+            console.print(f"[red]✗ Failed to update Nginx: {nginx_result[1]}[/red]")
+            return
+        
+        site_mgr.update_site(name, ssl=True)
+    
+    console.print(Panel(f"[bold green]SSL enabled successfully![/bold green]\n\n"
+                       f"Domain: https://{name}{site_mgr.tld}\n"
+                       f"URL: https://{name}.test",
+                       title=f"Site: {name}"))
 
 @cli.group()
 def service():
