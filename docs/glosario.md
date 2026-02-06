@@ -102,6 +102,20 @@ Integración con flujos de trabajo de Agentes de IA (.agent/skills).
 | :--- | :--- | :--- |
 | `agent init` | `--preset <name>` <br> `--path <dir>` | Inicializa la estructura `.agent` (skills, memory, ui, specs) con skills predefinidos. <br> **Presets:** `default`, `laravel`, `wordpress`, `python`, `javascript`, `meta`. |
 | `agent import` | `<url>` | Descarga e instala un Skill desde una URL remota (Raw Markdown). |
+| `completion` | `--install` <br> `--shell <type>` | Configura el autocompletado en tu terminal (bash/zsh). |
+
+---
+
+
+## ℹ️ Ayuda y Documentación
+
+Comandos para acceder a la documentación y mejorar la experiencia de uso.
+
+| Comando | Argumentos | Descripción |
+| :--- | :--- | :--- |
+| `glossary` | `<term>` | Muestra o busca en el glosario de comandos (ej. `wslaragon glossary node`). |
+| `--glossary` / `-g` | - | Flag global para ver todo el glosario. |
+| `completion` | `--install` <br> `--shell <type>` | Configura el autocompletado en tu terminal (bash/zsh). |
 
 ---
 

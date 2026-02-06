@@ -21,11 +21,125 @@ from .agent import agent
 
 console = Console()
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.version_option()
-def cli():
+@click.option('--glossary', '-g', is_flag=True, help='Show full command glossary')
+@click.pass_context
+def cli(ctx, glossary):
     """WSLaragon - Laragon-style development environment manager for WSL2"""
-    pass
+    if glossary:
+        from rich.markdown import Markdown
+        # Calculate path to glosario.md
+        # Structure: src/wslaragon/cli/main.py -> ../../../docs/glosario.md
+        # But we are in a dev env where root is /home/wil/baselog/wslaragon
+        root_dir = Path(__file__).resolve().parent.parent.parent.parent
+        glosario_path = root_dir / "docs" / "glosario.md"
+        
+        if not glosario_path.exists():
+            # Fallback for installed package structure vs dev structure
+            # If src layout: src/wslaragon/cli -> ../../../docs
+            # If flat: wslaragon/cli -> ../../docs
+            # Try absolute known path for this environment
+            glosario_path = Path("/home/wil/baselog/wslaragon/docs/glosario.md")
+
+        if glosario_path.exists():
+            with open(glosario_path, 'r') as f:
+                md = Markdown(f.read())
+            console.print(md)
+        else:
+            console.print(f"[red]Glossary not found at {glosario_path}[/red]")
+        ctx.exit()
+    elif ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+@cli.command()
+@click.option('--install', is_flag=True, help="Automatically install into shell config")
+@click.option('--shell', type=click.Choice(['bash', 'zsh']), default='bash', help="Target shell")
+def completion(install, shell):
+    """Enable shell autocompletion"""
+    script = 'eval "$(_WSLARAGON_COMPLETE=bash_source wslaragon)"'
+    if shell == 'zsh':
+        script = 'eval "$(_WSLARAGON_COMPLETE=zsh_source wslaragon)"'
+    
+    if install:
+        rc_file = Path.home() / f".{shell}rc"
+        # Since we might be sudo, ensure we get the real user home if SUDO_USER exists
+        # But Path.home() usually respects environment. 
+        # Actually in sudo, Path.home() is /root. 
+        # This command should likely be run as the user.
+        
+        if not rc_file.exists():
+            # Try to be smart if running inside WSL/dev env
+            console.print(f"[red]Could not find configuration file: {rc_file}. Run as your normal user.[/red]")
+            return
+            
+        # Check for duplicates
+        try:
+            content = rc_file.read_text()
+            if script in content:
+                console.print(f"[yellow]Completion already installed in {rc_file}[/yellow]")
+                return
+        except Exception:
+            pass
+            
+        try:
+            with open(rc_file, "a") as f:
+                f.write(f"\n# WSLaragon Autocompletion\n{script}\n")
+            console.print(f"[green]✓ Installed to {rc_file}.[/green]")
+            console.print(f"[yellow]Please run: source {rc_file}[/yellow]")
+        except PermissionError:
+             console.print(f"[red]Permission denied writing to {rc_file}. Try running with sudo?[/red]")
+    else:
+        console.print(f"To enable {shell} completion, add this to your {shell}rc:")
+        console.print(Panel(script, title="Completion Script", style="cyan"))
+
+@cli.command()
+@click.argument('term', required=False)
+def glossary(term):
+    """View or search the command glossary"""
+    from rich.markdown import Markdown
+    
+    # Locate glosario.md logic (reused)
+    root_dir = Path(__file__).resolve().parent.parent.parent.parent
+    glosario_path = root_dir / "docs" / "glosario.md"
+    if not glosario_path.exists():
+        glosario_path = Path("/home/wil/baselog/wslaragon/docs/glosario.md")
+
+    if not glosario_path.exists():
+         console.print(f"[red]Glossary not found.[/red]")
+         return
+
+    with open(glosario_path, 'r') as f:
+        content = f.read()
+
+    if term:
+        # Search filter by section
+        # We split by level 2 headers (## Service, ## Node, etc)
+        normalized_term = term.lower()
+        sections = content.split('\n## ')
+        
+        filtered_content = []
+        found = False
+        
+        # Header/Intro usually comes first
+        if normalized_term in sections[0].lower():
+            filtered_content.append(sections[0])
+            found = True
+            
+        for s in sections[1:]:
+            # We assume split removed the '## ' prefix, so we add it back for rendering
+            if normalized_term in s.lower():
+                filtered_content.append(f"## {s}")
+                found = True
+        
+        if found:
+            console.print(Markdown('\n'.join(filtered_content)))
+        else:
+            console.print(f"[yellow]No info found for '{term}' in glossary.[/yellow]")
+            console.print("Tip: Use 'wslaragon glossary' to see everything.")
+    else:
+        # Show full
+        console.print(Markdown(content))
 
 cli.add_command(doctor_command)
 cli.add_command(agent)

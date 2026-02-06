@@ -196,8 +196,7 @@ Detecta automáticamente `app.js`, `main.py` o `npm start` en la carpeta del sit
 wslaragon node start mi-app-node
 ```
 
-wslaragon node start mi-app-node
-```
+
 
 ### 3. Detener, Reiniciar y Eliminar
 ```bash
@@ -216,7 +215,6 @@ Si algo no funciona bien, el doctor es tu primer paso. Verifica servicios caído
 wslaragon doctor
 ```
 
-**Lo que verifica:**
 **Lo que verifica:**
 - Estado de Nginx, MySQL, PHP-FPM, Redis.
 - Si los puertos (80, 443, 3306, 6379) están escuchando.
@@ -266,3 +264,36 @@ Esto creará una nueva carpeta en `.agent/skills/` con el contenido descargado.
 ---
 
 > **Tip:** Puedes escribir `wslaragon --help` en cualquier momento para ver la ayuda integrada del comando.
+
+---
+
+## ⌨️ Autocompletado
+
+Para habilitar el autocompletado en tu terminal (Bash/Zsh):
+
+```bash
+# Instalar automáticamente
+wslaragon completion --install
+```
+
+O para ver el script manual:
+```bash
+wslaragon completion
+```
+
+---
+
+## ℹ️ Glosario Interactivo
+
+Accede a la documentación completa directamente desde la terminal.
+
+```bash
+# Ver el glosario completo
+wslaragon --glossary
+# o usar el alias corto
+wslaragon -g
+
+# Buscar/Filtrar por término
+wslaragon glossary node   # Muestra solo la sección de Node/PM2
+wslaragon glossary php    # Muestra solo la sección de PHP
+```
