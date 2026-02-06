@@ -99,6 +99,23 @@ wslaragon site public mi-blog --enable   # Apunta a public/
 wslaragon site public mi-blog --disable  # Apunta a la raíz ./
 ```
 
+### 7. Backup y Restauración
+Para migrar sitios entre instalaciones o crear copias de seguridad.
+
+```bash
+# Exportar un sitio (archivos + base de datos + configuración)
+wslaragon site export mi-web
+
+# Exportar a una ruta específica
+wslaragon site export mi-web --output /mnt/c/Backups/
+
+# Importar un sitio desde un archivo de respaldo
+wslaragon site import /mnt/c/Backups/mi-web_2024.wslaragon
+
+# Importar con un nuevo nombre
+wslaragon site import backup.wslaragon --name mi-web-copia
+```
+
 ---
 
 ## 🔧 Gestión de Servicios (`service`)
@@ -191,8 +208,9 @@ wslaragon doctor
 ```
 
 **Lo que verifica:**
+**Lo que verifica:**
 - Estado de Nginx, MySQL, PHP-FPM, Redis.
-- Si los puertos (80, 443, 3306) están escuchando.
+- Si los puertos (80, 443, 3306, 6379) están escuchando.
 - Validez de la Autoridad de Certificación (SSL CA).
 - Integridad de archivos de configuración.
 

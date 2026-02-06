@@ -43,12 +43,11 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [x] **Proxy Inverso Automático**: Redirección automática a puertos locales con protección de colisiones.
 - [x] **CLI Node**: Flags `--node` y `--python` para scaffolding rápido y auto-asignación de puertos.
 
-### Fase 4: Alto Rendimiento (Pendiente)
-Inspirado en CloudPanel:
-- [ ] **Integración con Redis**: Servicio de Redis pre-configurado y comando para activarlo por sitio.
-- [ ] **Varnish Cache**: Capa de caché HTTP opcional para sitios de alto tráfico.
+### Fase 4: Productividad y Seguridad (Completado)
+- [x] **Soporte Redis**: Integración en monitor de servicios y diagnósticos (`wslaragon doctor` y `service status`).
+- [x] **Sistema de Backups**: Exportación e importación de sitios completos (Archivos + BD + Config) para migración sencilla entre equipos (`wslaragon site export/import`).
 
-### Fase 5: Herramientas Pro
-- [ ] **Sistema de Backups**: Comandos para exportar/importar sitios completos (código + BD).
-- [ ] **Entornos de Staging**: Clonar un sitio localmente para pruebas seguras (ej. `mi-sitio-staging.test`).
+### Fase 5: Herramientas Frontend (Pendiente)
+- [ ] **Advanced Scaffolding**: Integración con Vite para crear proyectos React, Vue, Svelte, etc. de forma interactiva.
+- [ ] **Project Templates**: Plantillas personalizadas para arrancar proyectos rápidos.
 

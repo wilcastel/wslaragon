@@ -15,7 +15,9 @@
     - Implemented Proxy Port auto-assignment and collision protection.
     - Added `--node` and `--python` flags to `create site`.
     - Integrated PM2 for process management (`node start/stop/list`).
+- **Phase 4 (Productivity)**: COMPLETED.
+    - Added Redis to service monitoring and doctor checks.
+    - Implemented `site export` and `site import` for full site backups.
 
 ## Pending Tasks
-- **Phase 4: Alto Rendimiento**: Redis, Varnish.
-- **Tools**: Scaffolding avanzado (Vite, Next.js).
+- **Phase 5: Tools**: Scaffolding avanzado (Vite, Next.js).

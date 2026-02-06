@@ -7,7 +7,8 @@ class ServiceManager:
         self.services = {
             'nginx': {'service': 'nginx', 'port': 80},
             'mysql': {'service': 'mariadb', 'port': 3306},
-            'php-fpm': {'service': 'php8.3-fpm', 'port': 9000}
+            'php-fpm': {'service': 'php8.3-fpm', 'port': 9000},
+            'redis': {'service': 'redis-server', 'port': 6379}
         }
     
     def is_running(self, service_name: str) -> bool:

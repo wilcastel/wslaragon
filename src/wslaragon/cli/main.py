@@ -15,6 +15,7 @@ from ..services.sites import SiteManager
 from ..services.ssl import SSLManager
 from ..services.ssl import SSLManager
 from ..services.node.pm2 import PM2Manager
+from ..services.backup import BackupManager
 from .doctor import doctor_command
 from .agent import agent
 
@@ -247,6 +248,63 @@ def fix_permissions(name):
         console.print(f"[dim]Owner set to current user, Group set to www-data (775)[/dim]")
     else:
         console.print(f"[red]✗ Failed to fix permissions: {result['error']}[/red]")
+
+@site.command('export')
+@click.argument('name')
+@click.option('--output', help='Output directory or filename')
+def export_site(name, output):
+    """Export a site to a backup file"""
+    config = Config()
+    nginx = NginxManager(config)
+    mysql_mgr = MySQLManager(config)
+    site_mgr = SiteManager(config, nginx, mysql_mgr)
+    backup_mgr = BackupManager(config, site_mgr, mysql_mgr, nginx)
+    
+    # Ensure sudo
+    try:
+        subprocess.run(['sudo', '-v'], check=True)
+    except subprocess.CalledProcessError:
+        console.print("[red]✗ This command requires sudo privileges[/red]")
+        return
+        
+    with console.status(f"[bold green]Backing up {name}..."):
+        result = backup_mgr.export_site(name, output)
+        
+    if result['success']:
+        console.print(f"[green]✓ Site exported successfully[/green]")
+        console.print(f"[dim]File: {result['file']}[/dim]")
+    else:
+         console.print(f"[red]✗ Failed to export site: {result['error']}[/red]")
+
+@site.command('import')
+@click.argument('file')
+@click.option('--name', help='New name for the imported site')
+def import_site_cmd(file, name):
+    """Import a site from a backup file"""
+    config = Config()
+    nginx = NginxManager(config)
+    mysql_mgr = MySQLManager(config)
+    site_mgr = SiteManager(config, nginx, mysql_mgr)
+    backup_mgr = BackupManager(config, site_mgr, mysql_mgr, nginx)
+    
+    # Ensure sudo
+    try:
+        subprocess.run(['sudo', '-v'], check=True)
+    except subprocess.CalledProcessError:
+        console.print("[red]✗ This command requires sudo privileges[/red]")
+        return
+    
+    with console.status(f"[bold green]Importing {file}..."):
+        result = backup_mgr.import_site(file, name)
+        
+    if result['success']:
+        console.print(f"[green]✓ Site imported successfully as '{result['site']}'[/green]")
+        site = result['info']
+        console.print(Panel(f"Domain: {site['domain']}\n"
+                           f"Location: {site['document_root']}",
+                           title="Import Success"))
+    else:
+         console.print(f"[red]✗ Failed to import site: {result['error']}[/red]")
 
 @site.command('ssl')
 @click.argument('name')

@@ -16,6 +16,8 @@ Comando principal para la creación y administración de proyectos web.
 | `site public` | `<name>` <br> `--enable` / `--disable` | Cambia el document root entre `./` y `./public` (útil para Laravel/Symfony). |
 | `site fix-permissions` | `<name>` | Repara propietario y permisos de archivos (útil tras copiar ficheros desde Windows). |
 | `site ssl` | `<name>` | Habilita HTTPS/SSL para un sitio existente que no lo tenía. |
+| `site export` | `<name>` <br> `--output <path>` | Crea un archivo de backup completo (.wslaragon) del sitio. |
+| `site import` | `<file>` <br> `--name <name>` | Restaura un sitio desde un archivo de backup. |
 
 ## 🚀 Procesos Node (`wslaragon node`)
 
