@@ -10,14 +10,10 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [x] **Correcciones de CSP y Alpine.js**: Solución de problemas de `Content Security Policy` para permitir la correcta ejecución de Alpine.js y otros scripts en la interfaz.
 - [x] **Reparación de Permisos**: Comando `fix-permissions` para solucionar problemas de escritura.
 
-### 💻 Interfaz y Experiencia de Usuario (UI/UX)
-- [x] **Dashboard de Gestión de Servicios**: Nueva página `/feeds/manage` para monitorear el estado de workers y reiniciar servicios fallidos directamente desde la web.
-- [x] **Navegación Mejorada en Sidebar**: Carpetas clicables, acciones de "Marcar todo como leído" por carpeta y opciones de vaciado.
-- [x] **Flujo de Lectura Continuo**: Redirección automática al siguiente feed o carpeta al marcar todo como leído.
+### 💻 CLI y Experiencia de Desarrollador (DX)
+- [x] **Gestión intuitiva**: Comandos simplificados para crear/eliminar sitios y servicios.
 
-### 🤖 IA y Voice Cloning
-- [x] **Soporte para Voice Cloning**: Ajustes en Nginx para permitir subidas de audio grandes y correcciones en la integración con Python.
-- [x] **Colab Standalone Updates**: Mejoras en el notebook de Colab (timers, stats de VRAM) para procesamiento remoto.
+
 
 ### 📦 Frameworks y Bases de Datos
 - [x] **Laravel con Supabase**: Comando `--supabase` para integración rápida.
@@ -30,8 +26,8 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 ## 🚀 Próximos Pasos (En Progreso)
 
 ### Fase 1: Estabilización y Monitoreo (Actual)
-- [ ] **Refinar Dashboard de Servicios**: Añadir logs en tiempo real y estadísticas de uso de memoria en la interfaz `/feeds/manage`.
-- [ ] **WSLaragon Doctor Extendido**: Diagnóstico más profundo para problemas de SSL y conectividad de base de datos.
+- [x] **WSLaragon Service Monitor**: Comando `wslaragon services status` mejorado para ver estado real de Nginx, PHP, MariaDB y Redis.
+- [x] **WSLaragon Doctor Extendido**: Diagnóstico más profundo para problemas de SSL y conectividad de base de datos.
 - [ ] **Integración de .agent/skills**: Nuevo comando `wslaragon agent init [preset]` para inicializar estructura de skills en proyectos.
     - **Presets Comunes**: Skills base para todos los proyectos (Product Analyst, Architect, Git Manager).
     - **Presets Específicos**: Skills adaptados según tecnología (Laravel Specialist, WordPress Expert, Data Scientist para Python).

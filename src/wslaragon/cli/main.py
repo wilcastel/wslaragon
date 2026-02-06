@@ -12,6 +12,7 @@ from ..services.nginx import NginxManager
 from ..services.mysql import MySQLManager
 from ..services.sites import SiteManager
 from ..services.ssl import SSLManager
+from .doctor import doctor_command
 
 console = Console()
 
@@ -20,6 +21,8 @@ console = Console()
 def cli():
     """WSLaragon - Laragon-style development environment manager for WSL2"""
     pass
+
+cli.add_command(doctor_command)
 
 @cli.group()
 def site():
@@ -694,3 +697,6 @@ def list():
 
 def main():
     cli()
+
+if __name__ == '__main__':
+    main()
