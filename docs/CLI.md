@@ -157,6 +157,31 @@ wslaragon ssl create midominio.test
 
 ---
 
+## 🚀 Gestión de Procesos Node (PM2) (`node`)
+
+Para aplicaciones Node.js (Express, NestJS, etc.) o Python que requieren un servidor de aplicaciones persistente, `wslaragon` integra PM2.
+
+> **Nota**: Cuando creas un sitio con `--node`, se genera un archivo `app.js` básico de prueba. Debes reemplazarlo con tu propio proyecto (ej. `npm init`, `npm create vite`, clonar repo) y luego iniciar el proceso.
+
+### 1. Listar procesos
+```bash
+wslaragon node list
+```
+
+### 2. Iniciar aplicación
+Detecta automáticamente `app.js`, `main.py` o `npm start` en la carpeta del sitio.
+```bash
+wslaragon node start mi-app-node
+```
+
+### 3. Detener y Reiniciar
+```bash
+wslaragon node stop mi-app-node
+wslaragon node restart mi-app-node
+```
+
+---
+
 ## 🩺 Diagnóstico (`doctor`)
 
 Si algo no funciona bien, el doctor es tu primer paso. Verifica servicios caídos, configuraciones erróneas y certificados faltantes.

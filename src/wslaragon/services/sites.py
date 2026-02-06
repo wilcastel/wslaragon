@@ -159,6 +159,57 @@ phpinfo();
                 elif db_type_final in ('postgres', 'supabase'):
                     db_created = True
             
+            # Create default app file for Node/Python
+            if site_type == 'node':
+                app_content = f"""
+const http = require('http');
+const port = process.env.PORT || {proxy_port};
+
+const server = http.createServer((req, res) => {{
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/html');
+  res.end('<h1>Hello from Node.js!</h1><p>Served via PM2 on port ' + port + '</p>');
+}});
+
+server.listen(port, () => {{
+  console.log(`Server running at http://localhost:${{port}}/`);
+}});
+"""
+                with open(site_base_dir / "app.js", 'w') as f:
+                    f.write(app_content.strip())
+                
+                # Create package.json
+                package_json = {
+                    "name": site_name,
+                    "version": "1.0.0",
+                    "main": "app.js",
+                    "scripts": {
+                        "start": f"node app.js"
+                    }
+                }
+                with open(site_base_dir / "package.json", 'w') as f:
+                    json.dump(package_json, f, indent=2)
+
+                messages.append(f"[yellow]🚀 Node.js app prepared on port {proxy_port}. Run 'pm2 start app.js --name {site_name}' to start it.[/yellow]")
+
+            elif site_type == 'python':
+                app_content = f"""
+import http.server
+import socketserver
+import os
+
+PORT = int(os.environ.get('PORT', {proxy_port}))
+
+Handler = http.server.SimpleHTTPRequestHandler
+
+with socketserver.TCPServer(("", PORT), Handler) as httpd:
+    print("serving at port", PORT)
+    httpd.serve_forever()
+"""
+                with open(site_base_dir / "main.py", 'w') as f:
+                    f.write(app_content.strip())
+                messages.append(f"[yellow]🐍 Python script prepared on port {proxy_port}. Run 'python3 main.py' to test.[/yellow]")
+            
             if ssl:
                 ssl_mgr = SSLManager(self.config)
                 ssl_result = ssl_mgr.setup_ssl_for_site(site_name, self.tld)

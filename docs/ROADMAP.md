@@ -38,9 +38,10 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [x] **Organización Modular**: Carpetas específicas para Requerimientos (`specs/`), UI (`ui/`), QA (`qa/`) y skill **UI Designer** para implementar diseños desde imágenes.
 - [x] **Importación de Skills**: Comando `wslaragon agent import <url>` para instalar skills desde cualquier URL (Github, Gists, etc).
 
-### Fase 3: Ecosistema Node.js (Pendiente)
-- [ ] **Gestor de Aplicaciones Node**: Soporte nativo para iniciar y gestionar procesos de Node.js (PM2 o similar integrado).
-- [ ] **Proxy Inverso Automático**: Redirigir dominios `.test` a puertos locales (3000, 5173, etc).
+### Fase 3: Ecosistema Node.js (Completado)
+- [x] **Gestor de Aplicaciones Node**: Integración completa con PM2 (`wslaragon node ...`).
+- [x] **Proxy Inverso Automático**: Redirección automática a puertos locales con protección de colisiones.
+- [x] **CLI Node**: Flags `--node` y `--python` para scaffolding rápido y auto-asignación de puertos.
 
 ### Fase 4: Alto Rendimiento (Pendiente)
 Inspirado en CloudPanel:

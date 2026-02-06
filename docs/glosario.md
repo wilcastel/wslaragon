@@ -17,6 +17,17 @@ Comando principal para la creación y administración de proyectos web.
 | `site fix-permissions` | `<name>` | Repara propietario y permisos de archivos (útil tras copiar ficheros desde Windows). |
 | `site ssl` | `<name>` | Habilita HTTPS/SSL para un sitio existente que no lo tenía. |
 
+## 🚀 Procesos Node (`wslaragon node`)
+
+Gestión de aplicaciones back-end (Node, Python) con PM2.
+
+| Comando | Argumentos | Descripción |
+| :--- | :--- | :--- |
+| `node list` | - | Lista procesos activos en PM2. |
+| `node start` | `<site_name>` | Inicia la aplicación del sitio (app.js, npm start, main.py). |
+| `node stop` | `<site_name>` | Detiene el proceso del sitio. |
+| `node restart` | `<site_name>` | Reinicia el proceso del sitio. |
+
 ## 🔧 Gestión de Servicios (`wslaragon service`)
 
 Control directo sobre los demonios de sistema que potencian el entorno.

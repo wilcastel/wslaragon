@@ -11,8 +11,11 @@
 - Manually bootstrapped `.agent` structure for the repository itself.
 - Implemented `ui_designer` skill (tested successfully and cleaned up demo).
 - Implemented `wslaragon agent import <url>` command.
-- **Phase 3 (Node.js)**: Implemented Proxy Port auto-assignment and collision protection.
-- Added `--node` and `--python` flags to `site create`.
+- **Phase 3 (Node.js)**: COMPLETED.
+    - Implemented Proxy Port auto-assignment and collision protection.
+    - Added `--node` and `--python` flags to `create site`.
+    - Integrated PM2 for process management (`node start/stop/list`).
 
 ## Pending Tasks
-- **Phase 3**: Implement Node Process Manager (PM2 integration) for starting/stopping apps.
+- **Phase 4: Alto Rendimiento**: Redis, Varnish.
+- **Tools**: Scaffolding avanzado (Vite, Next.js).

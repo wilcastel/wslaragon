@@ -40,7 +40,18 @@ WSLaragon es una herramienta de gestión de entorno de desarrollo estilo Laragon
 - **CLI completa**: Interfaz de línea de comandos potente
 - **Web UI**: Panel de control web opcional
 - **API REST**: API para integración con otras herramientas
+- **API REST**: API para integración con otras herramientas
 - **Autocompletado**: Soporte para bash/zsh
+
+### 🤖 Agentes de IA
+- **Estructura estandarizada**: `.agent/` con skills, memoria y especificaciones
+- **Integración**: Comandos para inicializar e importar habilidades
+- **Productividad**: Skills listos para usar (UI Designer, Librarian)
+
+### 🚀 Ecosistema Node.js
+- **Gestión de Procesos**: Integración nativa con PM2
+- **Scaffolding**: Configuración automática de Proxy y puertos
+- **Soporte Fullstack**: Listo para Next.js, Nuxt, Python, etc.
 
 ## 📋 Requisitos
 
@@ -137,6 +148,17 @@ wslaragon mysql create-db myapp_db
 # Gestionar SSL
 wslaragon ssl setup
 wslaragon ssl generate myproject.test
+# Gestionar SSL
+wslaragon ssl setup
+wslaragon ssl generate myproject.test
+
+# Gestionar Agentes
+wslaragon agent init
+wslaragon agent import https://url-to-skill.md
+
+# Gestionar Node (PM2)
+wslaragon node start my-app
+wslaragon node list
 ```
 
 ### Web Interface
@@ -162,8 +184,14 @@ wslaragon site create laravel-app --php --mysql --ssl --database laravel_db
 # Sitio estático
 wslaragon site create portfolio --no-php --ssl
 
-# Sitio Node.js (proxy)
-wslaragon site create api --no-php --ssl --node-port 3000
+# Sitio estático
+wslaragon site create portfolio --no-php --ssl
+
+# Sitio Node.js (con PM2 y puerto automático)
+wslaragon site create api-node --node
+
+# Sitio Python (con PM2 y puerto automático)
+wslaragon site create api-python --python
 ```
 
 ### Gestión de PHP
