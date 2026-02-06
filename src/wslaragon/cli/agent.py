@@ -51,3 +51,23 @@ def init_agent(preset, path):
         console.print("\n[dim]You can now ask your AI assistant to use these skills by name.[/dim]")
     else:
         console.print(f"[red]✗ Failed to initialize: {result['error']}[/red]")
+
+@agent.command('import')
+@click.argument('url')
+def import_skill(url):
+    """Import a skill from a URL"""
+    config = Config()
+    mgr = AgentManager(config)
+    
+    with console.status(f"[bold green]Importing skill from {url}..."):
+        result = mgr.install_skill_from_url(url)
+    
+    if result['success']:
+        console.print(Panel(
+            f"[bold green]Skill Imported Successfully[/bold green]\n\n"
+            f"Name: {result['name']}\n"
+            f"Location: {result['path']}",
+            title="Success"
+        ))
+    else:
+        console.print(f"[red]✗ Failed to import skill: {result['error']}[/red]")

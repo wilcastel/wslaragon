@@ -169,21 +169,39 @@ wslaragon doctor
 
 Prepara tu proyecto para trabajar con Agentes de IA, generando una estructura estandarizada de "Skills" (Habilidades) en la carpeta `.agent/`.
 
-### Inicializar estructura
+### 1. Inicializar estructura (`agent init`)
+
+Prepara el directorio actual con una estructura de carpetas estándar (`.agent/`) que incluye:
+- `skills/`: Habilidades de los agentes.
+- `memory/`: Memoria del proyecto (Contexto, Arquitectura, Decisiones).
+- `ui/assets/`: Recursos visuales para el skill UI Designer.
+- `specs/`: Documentos de requerimientos.
+- `qa/`: Planes de prueba.
+
 ```bash
-# Preset básico (Product Analyst, Architect, Git Manager)
+# Preset básico (incluye Product Analyst, Architect, Git Manager, Librarian, UI Designer)
 wslaragon agent init
 
-# Preset para Laravel (Laravel Architect, Test Engineer)
+# Preset para Laravel (Laravel Architect, Test Engineer...)
 wslaragon agent init --preset laravel
 
-# Preset para JavaScript/Node (Frontend Architect, Node Specialist)
+# Preset para JavaScript/Node (Frontend Architect, Node Specialist...)
 wslaragon agent init --preset javascript
 
 # Preset Meta (Generador de Skills)
 wslaragon agent init --preset meta
 ```
 **Presets disponibles:** `default`, `laravel`, `wordpress`, `python`, `javascript`, `meta`.
+
+### 2. Importar Skills Externos (`agent import`)
+
+Descarga e instala una nueva habilidad desde una URL remota (ej. GitHub Gist, Raw File).
+
+```bash
+# Importar un skill desde una URL raw
+wslaragon agent import https://raw.githubusercontent.com/user/repo/main/my_skill.md
+```
+Esto creará una nueva carpeta en `.agent/skills/` con el contenido descargado.
 
 ---
 

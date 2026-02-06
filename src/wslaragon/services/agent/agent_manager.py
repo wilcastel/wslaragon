@@ -3,6 +3,8 @@ import os
 import shutil
 import yaml
 from typing import Dict, List, Optional
+import urllib.request
+import re
 
 class AgentManager:
     def __init__(self, config):
@@ -14,12 +16,12 @@ class AgentManager:
             "default": {
                 "name": "Standard Development",
                 "description": "Base roles for standard full-stack development",
-                "skills": ["product_analyst", "architect", "git_manager"]
+                "skills": ["product_analyst", "architect", "git_manager", "librarian", "ui_designer"]
             },
             "laravel": {
                 "name": "Laravel Specialist",
                 "description": "Specialized roles for Laravel development",
-                "skills": ["product_analyst", "laravel_architect", "test_engineer", "git_manager"]
+                "skills": ["product_analyst", "laravel_architect", "test_engineer", "git_manager", "ui_designer"]
             },
             "wordpress": {
                 "name": "WordPress Expert",
@@ -29,7 +31,7 @@ class AgentManager:
             "javascript": {
                 "name": "JavaScript/Node Stack",
                 "description": "Roles for React, Vue, Svelte, and Node.js backend",
-                "skills": ["frontend_architect", "node_specialist", "test_engineer"]
+                "skills": ["frontend_architect", "node_specialist", "test_engineer", "ui_designer"]
             },
             "python": {
                 "name": "Python Data/Web",
@@ -53,7 +55,12 @@ class AgentManager:
             memory_dir = agent_dir / "memory"
             
             # Create directories
-            for path in [agent_dir, skills_dir, workflows_dir, memory_dir]:
+            ui_dir = agent_dir / "ui"
+            ui_assets_dir = ui_dir / "assets"
+            specs_dir = agent_dir / "specs"
+            qa_dir = agent_dir / "qa"
+            
+            for path in [agent_dir, skills_dir, workflows_dir, memory_dir, ui_assets_dir, specs_dir, qa_dir]:
                 path.mkdir(exist_ok=True, parents=True)
                 
             # Create .gitignore for agent if not exists
@@ -70,6 +77,19 @@ class AgentManager:
             if not memory_readme.exists():
                 with open(memory_readme, 'w') as f:
                     f.write("# Project Memory\n\nActive context and long-term memory for agents.")
+            
+            # Create default memory files
+            memory_templates = {
+                "active_context.md": "# Active Context\n\n## Current Focus\n- Initial setup\n\n## Recent Accomplishments\n- Project initialized\n",
+                "architecture.md": "# Architecture\n\n## Overview\n[High level description]\n\n## Patterns\n- [Design patterns used]\n",
+                "decisions.md": "# Decision Log\n\n## Records\n- [Date] Initial Setup: Project structure created.\n"
+            }
+            
+            for filename, content in memory_templates.items():
+                mem_file = memory_dir / filename
+                if not mem_file.exists():
+                    with open(mem_file, 'w') as f:
+                        f.write(content)
             
             # Install preset skills
             available_presets = self.get_presets()
@@ -160,6 +180,68 @@ description: [Short description]
 - Encourage the use of "Context" or "Memory" if the skill requires saving state.
 """
 
+        if skill_name == "librarian":
+            return f"""---
+name: Librarian
+description: Manages project memory and documentation.
+created_by: WSLaragon
+---
+
+# Librarian Instructions
+
+## Role
+You are the Project Librarian. Your responsibility is to ensure the project's "Long Term Memory" files in `.agent/memory/` are accurate, up-to-date, and useful for other agents.
+
+## Context Files
+You manage these primary files:
+- `memory/active_context.md`: The current state of development (what we are working on *now*).
+- `memory/architecture.md`: The high-level design, patterns, and structure.
+- `memory/decisions.md`: A log of effectively "Architecture Decision Records" (ADRs).
+
+## Capabilities
+- **Update Context**: When a task is finished, summarize it in `active_context.md` and clear the "Current Focus".
+- **Document Architecture**: If you see a new pattern (e.g., a new Service class strategy), capture it in `architecture.md`.
+- **Record Decisions**: if the user or Architect makes a major decision (e.g., "Use PostgreSQL instead of MySQL"), log it in `decisions.md`.
+
+## Rules
+1. **Be Concise**: Other agents have token limits. Direct, bulleted summaries are better than prose.
+2. **No Hallucinations**: Only document what exists or what was explicitly decided.
+3. **Standard Structure**: Keep the files organized so they are machine-readable (Markdown headers).
+"""
+
+        if skill_name == "ui_designer":
+            return f"""---
+name: UI Designer
+description: Specialist in converting visual designs (images) into code.
+created_by: WSLaragon
+---
+
+# UI Designer Instructions
+
+## Role
+You are an expert UI/UX Engineer and Frontend Developer. You excel at taking visual inputs (screenshots, mockups, Figma exports) provided by the user and translating them into pixel-perfect, responsive code.
+
+## Workflow: Image to Code
+1.  **Analysis**: When the user provides an image or design reference (check `.agent/ui/assets/` if referenced):
+    *   Analyze the layout structure (Headers, Sidebars, Grids).
+    *   Identify the Color Palette (Primary, Secondary, Backgrounds).
+    *   Identify Typography characteristics (Serif/Sans, Weights).
+    *   Identify Components (Buttons, Cards, Inputs).
+
+2.  **Strategy**:
+    *   Determine the best CSS approach (Tailwind, Bootstrap, or Vanilla CSS) based on the project context.
+    *   Plan the HTML semantic structure.
+
+3.  **Implementation**:
+    *   Write the code.
+    *   Use comments to explain complex layout decisions.
+
+## Rules
+1.  **Responsiveness**: Always write code that works on Mobile and Desktop.
+2.  **Accessibility**: Ensure contrast ratios and semantic HTML.
+3.  **Fidelity**: Try to match the visual reference as closely as possible within the constraints of the framework.
+"""
+
         # Generic Template
         return f"""---
 name: {skill_name.replace('_', ' ').title()}
@@ -192,6 +274,73 @@ You are an expert acting as a {skill_name.replace('_', ' ')}.
             "frontend_architect": "Expert in modern JS frameworks (React, Vue, Svelte) and UI design.",
             "node_specialist": "Backend expert for Node.js, Express, and NestJS.",
             "python_expert": "Expert in Python best practices and ecosystem.",
-            "test_engineer": "Ensures code quality through automated testing."
+            "test_engineer": "Ensures code quality through automated testing.",
+            "librarian": "Manages project memory and keeps documentation up to date.",
+            "ui_designer": "Converts visual designs and images into code."
         }
         return descriptions.get(skill_name, "Specialized agent skill.")
+
+    def install_skill_from_url(self, url: str) -> Dict:
+        """Download and install a skill from a URL"""
+        try:
+            # Basic validation
+            if not url.startswith(('http://', 'https://')):
+                return {'success': False, 'error': 'Invalid URL format'}
+
+            # Download content
+            try:
+                with urllib.request.urlopen(url) as response:
+                    content = response.read().decode('utf-8')
+            except Exception as e:
+                return {'success': False, 'error': f"Failed to download: {str(e)}"}
+
+            # Parse Frontmatter to find name
+            # Looks for:
+            # ---
+            # name: Skill Name
+            # ...
+            name_match = re.search(r'^---\s*\n.*?name:\s*(.*?)\n', content, re.DOTALL | re.MULTILINE)
+            
+            if name_match:
+                skill_name = name_match.group(1).strip()
+                # Sanitize for folder name (spaces to underscores, lowercase)
+                folder_name = "".join(x for x in skill_name if x.isalnum() or x in (' ', '_', '-')).strip().replace(' ', '_').lower()
+            else:
+                # Fallback: prompt user or use filename from URL? 
+                # For now let's derive from URL or throw error if not standard format
+                # But to be safe, let's try to infer from last part of URL
+                filename = url.split('/')[-1].replace('.md', '').replace('.txt', '')
+                folder_name = "".join(x for x in filename if x.isalnum() or x in ('_', '-')).lower()
+                if not folder_name:
+                    folder_name = "imported_skill"
+                
+                # If content doesn't have frontmatter, we might want to wrap it? 
+                # But for now assume raw markdown import active
+                # Let's add simple frontmatter if missing
+                if not content.strip().startswith('---'):
+                    content = f"---\nname: {folder_name.replace('_', ' ').title()}\ndescription: Imported from {url}\n---\n\n{content}"
+
+            # Ensure .agent exists in current dir
+            root_path = Path(".").resolve()
+            agent_dir = root_path / ".agent"
+            skills_dir = agent_dir / "skills"
+            
+            if not agent_dir.exists():
+                return {'success': False, 'error': '.agent directory not found. Run "wslaragon agent init" first.'}
+                
+            skill_path = skills_dir / folder_name
+            skill_path.mkdir(exist_ok=True, parents=True)
+            
+            target_file = skill_path / "SKILL.md"
+            
+            with open(target_file, 'w') as f:
+                f.write(content)
+                
+            return {
+                'success': True, 
+                'name': folder_name, 
+                'path': str(target_file)
+            }
+
+        except Exception as e:
+            return {'success': False, 'error': str(e)}

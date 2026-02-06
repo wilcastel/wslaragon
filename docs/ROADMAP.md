@@ -25,7 +25,7 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 
 ## 🚀 Próximos Pasos (En Progreso)
 
-### Fase 1: Estabilización y Monitoreo (Actual)
+### Fase 1: Estabilización y Monitoreo (Completado)
 - [x] **WSLaragon Service Monitor**: Comando `wslaragon services status` mejorado para ver estado real de Nginx, PHP, MariaDB y Redis.
 - [x] **WSLaragon Doctor Extendido**: Diagnóstico más profundo para problemas de SSL y conectividad de base de datos.
 - [x] **Integración de .agent/skills**: Nuevo comando `wslaragon agent init [preset]` para inicializar estructura de skills en proyectos.
@@ -33,10 +33,10 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
     - **Presets Específicos**: Skills adaptados según tecnología (Laravel Specialist, WordPress Expert, Data Scientist para Python).
 - [x] **Meta-Skill "Skill Creator"**: Un agente experto capaz de entrevistar al usuario para diseñar y generar nuevos skills `.md` automáticamente.
 
-### Fase 2: Gestión de Memoria y Project Context (Nuevo)
-- [ ] **Project Memory**: Sistema para resumir y guardar el estado del proyecto en archivos (ej. `.agent/memory/`) para liberar tokens de contexto.
-- [ ] **Repositorio de Skills Centralizado**: Capacidad de importar skills desde un repo remoto (inspirado en skills.sh).
-- [ ] **Organización Modular**: Carpetas específicas para Requerimientos, UI, QA dentro de `.agent/`.
+### Fase 2: Gestión de Memoria y Project Context (Completado)
+- [x] **Project Memory**: Sistema para resumir y guardar el estado del proyecto en archivos (ej. `.agent/memory/`) para liberar tokens de contexto.
+- [x] **Organización Modular**: Carpetas específicas para Requerimientos (`specs/`), UI (`ui/`), QA (`qa/`) y skill **UI Designer** para implementar diseños desde imágenes.
+- [x] **Importación de Skills**: Comando `wslaragon agent import <url>` para instalar skills desde cualquier URL (Github, Gists, etc).
 
 ### Fase 3: Ecosistema Node.js (Pendiente)
 - [ ] **Gestor de Aplicaciones Node**: Soporte nativo para iniciar y gestionar procesos de Node.js (PM2 o similar integrado).

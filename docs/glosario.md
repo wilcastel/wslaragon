@@ -86,7 +86,8 @@ Integración con flujos de trabajo de Agentes de IA (.agent/skills).
 
 | Comando | Argumentos | Descripción |
 | :--- | :--- | :--- |
-| `agent init` | `--preset <name>` <br> `--path <dir>` | Inicializa la estructura `.agent` con skills predefinidos. <br> **Presets:** `default`, `laravel`, `wordpress`, `python`, `javascript`, `meta`. |
+| `agent init` | `--preset <name>` <br> `--path <dir>` | Inicializa la estructura `.agent` (skills, memory, ui, specs) con skills predefinidos. <br> **Presets:** `default`, `laravel`, `wordpress`, `python`, `javascript`, `meta`. |
+| `agent import` | `<url>` | Descarga e instala un Skill desde una URL remota (Raw Markdown). |
 
 ---
 
