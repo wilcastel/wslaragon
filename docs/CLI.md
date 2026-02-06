@@ -149,4 +149,42 @@ wslaragon ssl create midominio.test
 
 ---
 
+## 🩺 Diagnóstico (`doctor`)
+
+Si algo no funciona bien, el doctor es tu primer paso. Verifica servicios caídos, configuraciones erróneas y certificados faltantes.
+
+```bash
+wslaragon doctor
+```
+
+**Lo que verifica:**
+- Estado de Nginx, MySQL, PHP-FPM, Redis.
+- Si los puertos (80, 443, 3306) están escuchando.
+- Validez de la Autoridad de Certificación (SSL CA).
+- Integridad de archivos de configuración.
+
+---
+
+## 🤖 Agentes IA (`agent`)
+
+Prepara tu proyecto para trabajar con Agentes de IA, generando una estructura estandarizada de "Skills" (Habilidades) en la carpeta `.agent/`.
+
+### Inicializar estructura
+```bash
+# Preset básico (Product Analyst, Architect, Git Manager)
+wslaragon agent init
+
+# Preset para Laravel (Laravel Architect, Test Engineer)
+wslaragon agent init --preset laravel
+
+# Preset para JavaScript/Node (Frontend Architect, Node Specialist)
+wslaragon agent init --preset javascript
+
+# Preset Meta (Generador de Skills)
+wslaragon agent init --preset meta
+```
+**Presets disponibles:** `default`, `laravel`, `wordpress`, `python`, `javascript`, `meta`.
+
+---
+
 > **Tip:** Puedes escribir `wslaragon --help` en cualquier momento para ver la ayuda integrada del comando.

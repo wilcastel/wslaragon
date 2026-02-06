@@ -1,0 +1,4 @@
+# Ignore agent memory and logs
+memory/*.md
+!memory/README.md
+logs/

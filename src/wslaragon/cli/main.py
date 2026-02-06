@@ -13,6 +13,7 @@ from ..services.mysql import MySQLManager
 from ..services.sites import SiteManager
 from ..services.ssl import SSLManager
 from .doctor import doctor_command
+from .agent import agent
 
 console = Console()
 
@@ -23,6 +24,7 @@ def cli():
     pass
 
 cli.add_command(doctor_command)
+cli.add_command(agent)
 
 @cli.group()
 def site():

@@ -72,6 +72,22 @@ Configuración global del servidor web.
 | `nginx config list` | - | Muestra configuraciones editables de Nginx (ej. limit body size). |
 | `nginx config set` | `<key> <value>` | Cambia configuraciones globales de Nginx (ej. `wslaragon nginx config set client_max_body_size 50M`). |
 
+## 🩺 Diagnóstico (`wslaragon doctor`)
+
+Herramientas de auto-diagnóstico para el entorno.
+
+| Comando | Argumentos | Descripción |
+| :--- | :--- | :--- |
+| `doctor` | - | Ejecuta un chequeo completo de servicios, puertos, certificados SSL y configuraciones críticas. |
+
+## 🤖 Agentes IA (`wslaragon agent`)
+
+Integración con flujos de trabajo de Agentes de IA (.agent/skills).
+
+| Comando | Argumentos | Descripción |
+| :--- | :--- | :--- |
+| `agent init` | `--preset <name>` <br> `--path <dir>` | Inicializa la estructura `.agent` con skills predefinidos. <br> **Presets:** `default`, `laravel`, `wordpress`, `python`, `javascript`, `meta`. |
+
 ---
 
 > **Nota:** Para ayuda interactiva, siempre puedes ejecutar `wslaragon --help` o `wslaragon <comando> --help`.
