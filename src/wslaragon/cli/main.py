@@ -48,19 +48,24 @@ def site():
 @click.option('--laravel', 'site_type', help='Create Laravel site (specify version, e.g., --laravel=12)')
 @click.option('--node', 'site_type', flag_value='node', help='Create Node.js app (auto-port starting 3000)')
 @click.option('--python', 'site_type', flag_value='python', help='Create Python app (auto-port starting 8000)')
+@click.option('--vite', help='Create Vite app with template (react, vue, svelte, vanilla, etc.)')
 @click.option('--postgres', 'db_type', flag_value='postgres', help='Use PostgreSQL instead of MySQL')
 @click.option('--supabase', 'db_type', flag_value='supabase', help='Use Supabase (PostgreSQL + Supabase config)')
 @click.option('--force', 'recreate', is_flag=True, default=False, help='Force recreate site (overwrite existing files)')
-def create(name, php, mysql, ssl, database, public, proxy, site_type, db_type, recreate):
+def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, db_type, recreate):
     """Create a new site"""
-    # Override defaults for Node/Python if not explicitly set
+    # Override defaults for Node/Python/Vite if not explicitly set
     # Note: since click defaults are set in decorator, we need to check if they match defaults
     # A cleaner way is to handle this logic in SiteManager or here.
     
-    if site_type in ('node', 'python'):
+    if site_type in ('node', 'python') or vite:
         # If user didn't explicitly ask for PHP, disable it
         if php: # php is True by default
              php = False
+             
+        # If vite is selected, enforce node type implicitly
+        if vite and not site_type:
+            site_type = 'node'
              
     config = Config()
     nginx = NginxManager(config)
@@ -79,7 +84,7 @@ def create(name, php, mysql, ssl, database, public, proxy, site_type, db_type, r
         result = site_mgr.create_site(name, php=php, mysql=mysql, ssl=ssl, 
                                     database_name=database, public_dir=public,
                                     proxy_port=proxy, site_type=site_type, db_type=db_type,
-                                    recreate=recreate)
+                                    recreate=recreate, vite_template=vite)
     
     if result['success']:
         site_info = result['site']
@@ -757,16 +762,15 @@ def start_node(site_name):
         # Set PORT env via config environment of PM2
         # For now, let's try starting app.js directly if it exists, as it's our standard
         if (web_root / "app.js").exists():
-             result = pm2.start_process(site_name, str(web_root / "app.js"), site['proxy_port'])
+             result = pm2.start_process(site_name, str(web_root / "app.js"), site['proxy_port'], cwd=str(web_root))
         elif (web_root / "package.json").exists():
              # Fallback to npm start
-             # This is tricky with the current PM2Manager implementation which expects a script
-             # We might need to execute command manually for this edge case or update PM2Manager
-             # For now let's assume app.js or main.py as we scaffolded them.
              console.print("[yellow]Notice: package.json found but no app.js. Attempting to start 'npm start' via PM2...[/yellow]")
-             result = pm2._run_pm2(['start', 'npm', '--name', site_name, '--', 'start'])
+             # We must pass --cwd so PM2 finds package.json
+             # Also --port env var is good practice
+             result = pm2._run_pm2(['start', 'npm', '--name', site_name, '--cwd', str(web_root), '--', 'start'])
         elif (web_root / "main.py").exists():
-             result = pm2.start_process(site_name, str(web_root / "main.py"), site['proxy_port'], interpreter='python3')
+             result = pm2.start_process(site_name, str(web_root / "main.py"), site['proxy_port'], interpreter='python3', cwd=str(web_root))
         else:
              console.print("[red]✗ No entry point (app.js, main.py) found.[/red]")
              return
@@ -791,6 +795,20 @@ def stop_node(site_name):
     else:
         console.print(f"[red]✗ Failed to stop: {result.get('error')}[/red]")
 
+@node.command('delete')
+@click.argument('site_name')
+def delete_node(site_name):
+    """Delete Node process"""
+    pm2 = PM2Manager()
+    with console.status(f"[bold red]Deleting {site_name}..."):
+        result = pm2.delete_process(site_name)
+    
+    if result['success']:
+        console.print(f"[green]✓ Process '{site_name}' deleted[/green]")
+        pm2.save() # Save list to persist deletion
+    else:
+        console.print(f"[red]✗ Failed to delete process: {result.get('error')}[/red]")
+
 @node.command('restart')
 @click.argument('site_name')
 def restart_node(site_name):
@@ -803,12 +821,6 @@ def restart_node(site_name):
         console.print(f"[green]✓ Process '{site_name}' restarted[/green]")
     else:
         console.print(f"[red]✗ Failed to restart: {result.get('error')}[/red]")
-        result = ssl_mgr.generate_certificate(domain)
-    
-    if result:
-        console.print(f"[green]✓ Certificate generated for {domain}[/green]")
-    else:
-        console.print(f"[red]✗ Failed to generate certificate for {domain}[/red]")
 
 @cli.group()
 def nginx():

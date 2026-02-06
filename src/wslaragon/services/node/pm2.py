@@ -35,7 +35,7 @@ class PM2Manager:
              return result['data']
         return []
 
-    def start_process(self, site_name: str, script_path: str, port: int, interpreter: str = 'node') -> Dict:
+    def start_process(self, site_name: str, script_path: str, port: int, interpreter: str = 'node', cwd: str = None) -> Dict:
         """Start a new process with PM2"""
         # We assume the name is the site name unique ID
         
@@ -45,6 +45,9 @@ class PM2Manager:
             '--port', str(port), # Pass port as environment variable
             '--time' # Add timestamp to logs
         ]
+        
+        if cwd:
+             args.extend(['--cwd', cwd])
         
         if interpreter != 'node':
              args.extend(['--interpreter', interpreter])

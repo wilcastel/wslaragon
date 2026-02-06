@@ -36,7 +36,11 @@ wslaragon site create mi-app --proxy 8000 --no-php --no-mysql --ssl
 wslaragon site create mi-api --node
 
 # Ejemplo Python (Auto-puerto desde 8000)
+# Ejemplo Python (Auto-puerto desde 8000)
 wslaragon site create mi-script --python
+
+# Ejemplo Vite React (Auto-puerto 3000+, npm install automático)
+wslaragon site create mi-app-react --vite react
 ```
 
 **Opciones:**
@@ -50,6 +54,7 @@ wslaragon site create mi-script --python
 - `--supabase`: Usar Supabase (PostgreSQL + configuración Supabase) para Laravel.
 - `--node`: Crear sitio para Node.js (asigna puerto libre automáticamente iniciando en 3000, deshabilita PHP/MySQL).
 - `--python`: Crear sitio para Python (asigna puerto libre automáticamente iniciando en 8000, deshabilita PHP/MySQL).
+- `--vite <template>`: Crear sitio Vite usando una plantilla (react, vue, svelte, vanilla, etc). Asigna puerto Node.
 - `--proxy [PORT]`: Configurar como Proxy Inverso para Apps manuales en el puerto especificado.
 - `--public`: Apuntar document root a directorio `public/`.
 - `--database`: Nombre personalizado para la base de datos.
@@ -169,7 +174,7 @@ Administra los certificados y la Autoridad de Certificación (CA).
 wslaragon ssl list
 
 # Generar un nuevo certificado manualmente
-wslaragon ssl create midominio.test
+wslaragon ssl generate midominio.test
 ```
 
 ---
@@ -191,10 +196,14 @@ Detecta automáticamente `app.js`, `main.py` o `npm start` en la carpeta del sit
 wslaragon node start mi-app-node
 ```
 
-### 3. Detener y Reiniciar
+wslaragon node start mi-app-node
+```
+
+### 3. Detener, Reiniciar y Eliminar
 ```bash
 wslaragon node stop mi-app-node
 wslaragon node restart mi-app-node
+wslaragon node delete mi-app-node   # Elimina el proceso de la lista
 ```
 
 ---

@@ -43,21 +43,22 @@ class SiteManager:
                    mysql: bool = False, ssl: bool = False,
                    database_name: str = None, public_dir: bool = False,
                    proxy_port: int = None, site_type: str = None, 
-                   db_type: str = None, recreate: bool = False) -> Dict:
+                   db_type: str = None, recreate: bool = False,
+                   vite_template: str = None) -> Dict:
         """Create a new site"""
         try:
             if not site_name or not site_name.replace('-', '').replace('_', '').isalnum():
                 return {'success': False, 'error': 'Invalid site name'}
             
             # Auto-configure for Node/Python
-            if site_type in ('node', 'python'):
+            if site_type in ('node', 'python') or vite_template:
                 # Disable PHP/MySQL by default unless explicitly requested (which we can't easily track with click defaults here without more logic, 
                 # but let's assume if user uses --node/--python they want an app server).
                 # Note: In main.py we'll handle passing the right flags.
                 
                 if not proxy_port:
                     # Find next free port
-                    start_port = 3000 if site_type == 'node' else 8000
+                    start_port = 3000 if site_type == 'node' or vite_template else 8000
                     proxy_port = self._find_next_free_port(start_port)
             
             if site_name in self.sites and not recreate:
@@ -159,8 +160,112 @@ phpinfo();
                 elif db_type_final in ('postgres', 'supabase'):
                     db_created = True
             
-            # Create default app file for Node/Python
-            if site_type == 'node':
+            # Create scaffolding
+            if vite_template:
+                # VITE SCAFFOLDING
+                try:
+                    # Remove existing files if any (npm create vite needs empty dir usually, or . flag)
+                    # but we just created the dir.
+                    
+                    # Command: npm create vite@latest . -- --template <template>
+                    # We run this INSIDE site_base_dir
+                    cmd_create = ['npm', 'create', 'vite@latest', '.', '--', '--template', vite_template]
+                    
+                    # We need to run as user, not root, if possible, but we are in CLI which might be sudo.
+                    # Best to run as the owner of the dir. Use sudo -u <user>
+                    current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+                    
+                    # Ensure dir is owned by user before running npm
+                    subprocess.run(['chown', '-R', f'{current_user}:{current_user}', str(site_base_dir)], check=True)
+                    
+                    # Find npm path
+                    import shutil
+                    npm_path = shutil.which('npm')
+                    
+                    if not npm_path:
+                        # Try to find it via runuser if we are root
+                        if os.geteuid() == 0 and current_user:
+                             try:
+                                res = subprocess.run(['runuser', '-l', current_user, '-c', 'which npm'], capture_output=True, text=True)
+                                if res.returncode == 0:
+                                    npm_path = res.stdout.strip()
+                             except:
+                                 pass
+                    
+                    if not npm_path:
+                        # Fallback to absolute path known for NVM if common
+                        # Or just "npm" and hope
+                        npm_path = "npm"
+
+                    # Prepare command execution
+                    # If we are already the correct user, run directly without sudo to preserve env (NVM)
+                    exec_cmd_prefix = []
+                    if os.geteuid() == 0 and current_user:
+                        # We are root, drop to user
+                        exec_cmd_prefix = ['sudo', '-u', current_user]
+                    
+                    # Run create
+                    # We pass input="\nn\n" to answer:
+                    # 1. Use rolldown? -> No (default)
+                    # 2. Install dependencies? -> No (n)
+                    # This prevents the wizard from starting the dev server and blocking execution.
+                    full_cmd_create = exec_cmd_prefix + [npm_path, 'create', 'vite@latest', '.', '--', '--template', vite_template]
+                    subprocess.run(full_cmd_create, cwd=str(site_base_dir), check=True, input="\nn\n", text=True)
+                    
+                    # Install dependencies manually since we declined the wizard
+                    full_cmd_install = exec_cmd_prefix + [npm_path, 'install']
+                    subprocess.run(full_cmd_install, cwd=str(site_base_dir), check=True)
+                    
+                    # Configure Port in vite.config.js/ts
+                    # We need to append "server: { port: <port> }" to config
+                    # Parsing JS is hard, let's just append or replace.
+                    # Vite 3+ config: export default defineConfig({ ... })
+                    
+                    # Simplest way: create a .env file locally with PORT? Vite uses different env logic.
+                    # Best way: Modify package.json scripts to include --port
+                    
+                    pkg_path = site_base_dir / "package.json"
+                    with open(pkg_path, 'r') as f:
+                        pkg = json.load(f)
+                    
+                    # Modify dev script to force port and host
+                    # --host is needed for WSL/Docker/Network access usually, but for local Nginx proxy 
+                    # localhost is fine. However, explicitly setting port is good.
+                    if 'scripts' in pkg:
+                        pkg['scripts']['dev'] = f"vite --port {proxy_port} --host"
+                        pkg['scripts']['start'] = f"vite --port {proxy_port} --host"
+                    
+                    with open(pkg_path, 'w') as f:
+                        json.dump(pkg, f, indent=2)
+                        
+                    # Modify vite.config.js/ts to allow hosts (prevent 403)
+                    # We inject 'server: { allowedHosts: true },' inside defineConfig
+                    for cfg_file in ['vite.config.js', 'vite.config.ts']:
+                        cfg_path = site_base_dir / cfg_file
+                        if cfg_path.exists():
+                            with open(cfg_path, 'r') as f:
+                                content = f.read()
+                            
+                            if 'defineConfig({' in content and 'allowedHosts' not in content:
+                                # Simple injection
+                                new_content = content.replace('defineConfig({', 'defineConfig({\n  server: {\n    allowedHosts: true\n  },')
+                                with open(cfg_path, 'w') as f:
+                                    f.write(new_content)
+                            break
+
+                    messages.append(f"[green]⚡ Vite ({vite_template}) project created successfully![/green]")
+                    messages.append(f"[yellow]🚀 Node process prepared. Run 'wslaragon node start {site_name}' to serve 'npm run dev'.[/yellow]")
+                    
+                    # For PM2, we need to instruct it to run 'npm run dev'
+                    # The node start command we built handles 'npm start' or 'app.js'
+                    # Vite projects usually use 'npm run dev'.
+                    # We should probably update 'node start' to look for 'dev' script if 'start' is missing or if it's vite.
+                    
+                except subprocess.CalledProcessError as e:
+                     return {'success': False, 'error': f"Vite scaffolding failed: {str(e)}"}
+            
+            # Create default app file for Node/Python (Only if NOT vite)
+            elif site_type == 'node':
                 app_content = f"""
 const http = require('http');
 const port = process.env.PORT || {proxy_port};

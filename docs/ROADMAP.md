@@ -47,7 +47,7 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [x] **Soporte Redis**: Integración en monitor de servicios y diagnósticos (`wslaragon doctor` y `service status`).
 - [x] **Sistema de Backups**: Exportación e importación de sitios completos (Archivos + BD + Config) para migración sencilla entre equipos (`wslaragon site export/import`).
 
-### Fase 5: Herramientas Frontend (Pendiente)
-- [ ] **Advanced Scaffolding**: Integración con Vite para crear proyectos React, Vue, Svelte, etc. de forma interactiva.
+### Fase 5: Herramientas Frontend (En Progreso)
+- [x] **Advanced Scaffolding**: Integración con Vite para crear proyectos React, Vue, Svelte, etc. (`--vite <template>`) con configuración automática de puertos y SSL.
 - [ ] **Project Templates**: Plantillas personalizadas para arrancar proyectos rápidos.
 
