@@ -42,11 +42,22 @@ def site():
 @click.option('--html', 'site_type', flag_value='html', help='Create static HTML site')
 @click.option('--wordpress', 'site_type', flag_value='wordpress', help='Create WordPress site')
 @click.option('--laravel', 'site_type', help='Create Laravel site (specify version, e.g., --laravel=12)')
+@click.option('--node', 'site_type', flag_value='node', help='Create Node.js app (auto-port starting 3000)')
+@click.option('--python', 'site_type', flag_value='python', help='Create Python app (auto-port starting 8000)')
 @click.option('--postgres', 'db_type', flag_value='postgres', help='Use PostgreSQL instead of MySQL')
 @click.option('--supabase', 'db_type', flag_value='supabase', help='Use Supabase (PostgreSQL + Supabase config)')
 @click.option('--force', 'recreate', is_flag=True, default=False, help='Force recreate site (overwrite existing files)')
 def create(name, php, mysql, ssl, database, public, proxy, site_type, db_type, recreate):
     """Create a new site"""
+    # Override defaults for Node/Python if not explicitly set
+    # Note: since click defaults are set in decorator, we need to check if they match defaults
+    # A cleaner way is to handle this logic in SiteManager or here.
+    
+    if site_type in ('node', 'python'):
+        # If user didn't explicitly ask for PHP, disable it
+        if php: # php is True by default
+             php = False
+             
     config = Config()
     nginx = NginxManager(config)
     mysql_mgr = MySQLManager(config)

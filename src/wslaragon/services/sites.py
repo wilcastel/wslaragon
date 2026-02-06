@@ -49,6 +49,17 @@ class SiteManager:
             if not site_name or not site_name.replace('-', '').replace('_', '').isalnum():
                 return {'success': False, 'error': 'Invalid site name'}
             
+            # Auto-configure for Node/Python
+            if site_type in ('node', 'python'):
+                # Disable PHP/MySQL by default unless explicitly requested (which we can't easily track with click defaults here without more logic, 
+                # but let's assume if user uses --node/--python they want an app server).
+                # Note: In main.py we'll handle passing the right flags.
+                
+                if not proxy_port:
+                    # Find next free port
+                    start_port = 3000 if site_type == 'node' else 8000
+                    proxy_port = self._find_next_free_port(start_port)
+            
             if site_name in self.sites and not recreate:
                 return {'success': False, 'error': 'Site already exists'}
             
@@ -56,6 +67,13 @@ class SiteManager:
             site_exists = site_base_dir.exists()
             messages = []
             
+            # Check for proxy port collisions
+            if proxy_port:
+                for existing_site in self.sites.values():
+                    # Check if port matches and it's not the same site (in case of recreate)
+                    if existing_site.get('proxy_port') == proxy_port and existing_site['name'] != site_name:
+                         return {'success': False, 'error': f"Port {proxy_port} is already used by site '{existing_site['name']}'"}
+
             if site_exists:
                 if recreate:
                     subprocess.run(['sudo', 'rm', '-rf', str(site_base_dir)], check=True)
@@ -415,6 +433,31 @@ phpinfo();
         except Exception as e:
             return {'success': False, 'error': str(e)}
     
+    def _find_next_free_port(self, start_port: int) -> int:
+        """Find the next available port starting from start_port"""
+        import socket
+        
+        port = start_port
+        while True:
+            # Check internal registry
+            collision = False
+            for site in self.sites.values():
+                if site.get('proxy_port') == port:
+                    collision = True
+                    break
+            
+            if collision:
+                port += 1
+                continue
+                
+            # Check system socket
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                if s.connect_ex(('localhost', port)) == 0:
+                    # Port is open (in use)
+                    port += 1
+                else:
+                    return port
+
     def _create_html_site(self, web_root: Path, site_name: str):
         """Create a static HTML site with styles and js folders"""
         import os

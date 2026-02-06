@@ -8,7 +8,7 @@ Comando principal para la creación y administración de proyectos web.
 
 | Comando | Argumentos / Opciones | Descripción |
 | :--- | :--- | :--- |
-| `site create` | `<name>` <br> `--php` / `--no-php` <br> `--mysql` / `--no-mysql` <br> `--ssl` / `--no-ssl` <br> `--database <name>` <br> `--public` <br> `--proxy <port>` <br> `--html` <br> `--wordpress` <br> `--laravel=<ver>` <br> `--postgres` <br> `--supabase` <br> `--force` | Crea un nuevo sitio con la configuración especificada. <br> **Ejemplos:** <br> `wslaragon site create mi-blog --wordpress` <br> `wslaragon site create app-node --proxy 3000` |
+| `site create` | `<name>` <br> `--php` / `--no-php` <br> `--mysql` / `--no-mysql` <br> `--ssl` / `--no-ssl` <br> `--database <name>` <br> `--public` <br> `--proxy <port>` <br> `--node` / `--python` <br> `--html` <br> `--wordpress` <br> `--laravel=<ver>` <br> `--postgres` <br> `--supabase` <br> `--force` | Crea un nuevo sitio con la configuración especificada. <br> **Ejemplos:** <br> `wslaragon site create mi-blog --wordpress` <br> `wslaragon site create app-node --node` (Auto-port) |
 | `site list` | - | Lista todos los sitios creados y su estado actual (Activo/Inactivo, SSL, PHP, etc.). |
 | `site delete` | `<name>` <br> `--remove-files` <br> `--remove-database` | Elimina la configuración de un sitio. Opcionalmente borra archivos y base de datos. |
 | `site enable` | `<name>` | Habilita un sitio previamente deshabilitado en Nginx. |

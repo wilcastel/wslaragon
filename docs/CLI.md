@@ -31,6 +31,12 @@ wslaragon site create mi-app --laravel=12 --supabase
 
 # Ejemplo App Python/Node (Proxy puerto 8000)
 wslaragon site create mi-app --proxy 8000 --no-php --no-mysql --ssl
+
+# Ejemplo Node.js (Auto-puerto desde 3000)
+wslaragon site create mi-api --node
+
+# Ejemplo Python (Auto-puerto desde 8000)
+wslaragon site create mi-script --python
 ```
 
 **Opciones:**
@@ -42,8 +48,10 @@ wslaragon site create mi-app --proxy 8000 --no-php --no-mysql --ssl
 - `--laravel=VERSIÓN`: Crear sitio Laravel (ej. `--laravel=12` para Laravel 12).
 - `--postgres`: Usar PostgreSQL en lugar de MySQL para Laravel.
 - `--supabase`: Usar Supabase (PostgreSQL + configuración Supabase) para Laravel.
-- `--proxy [PORT]`: Configurar como Proxy Inverso para Apps (Python, Node, Go) en el puerto especificado (ej. 8000).
-- `--public`: Apuntar document root a directorio `public/` (útil para Laravel).
+- `--node`: Crear sitio para Node.js (asigna puerto libre automáticamente iniciando en 3000, deshabilita PHP/MySQL).
+- `--python`: Crear sitio para Python (asigna puerto libre automáticamente iniciando en 8000, deshabilita PHP/MySQL).
+- `--proxy [PORT]`: Configurar como Proxy Inverso para Apps manuales en el puerto especificado.
+- `--public`: Apuntar document root a directorio `public/`.
 - `--database`: Nombre personalizado para la base de datos.
 
 ### 2. Listar Sitios
