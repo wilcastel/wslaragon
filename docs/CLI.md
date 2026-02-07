@@ -46,7 +46,7 @@ wslaragon site create mi-app-react --vite react
 **Opciones:**
 - `--php / --no-php`: Habilitar o deshabilitar PHP-FPM.
 - `--mysql / --no-mysql`: Crear o no una base de datos MySQL automática.
-- `--ssl / --no-ssl`: Generar certificado SSL local.
+- `--ssl / --no-ssl`: Generar certificado SSL local (Habilitado por defecto).
 - `--html`: Crear sitio HTML estático con estructura completa (index.html, styles/estilos.css, js/app.js).
 - `--wordpress`: Crear sitio WordPress completo con descarga automática.
 - `--laravel=VERSIÓN`: Crear sitio Laravel (ej. `--laravel=12` para Laravel 12).
@@ -175,6 +175,9 @@ wslaragon ssl list
 
 # Generar un nuevo certificado manualmente
 wslaragon ssl generate midominio.test
+
+# Eliminar un certificado y limpiar hosts de Windows
+wslaragon ssl delete midominio.test
 ```
 
 ---

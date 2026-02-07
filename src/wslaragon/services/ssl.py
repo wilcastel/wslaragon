@@ -113,6 +113,18 @@ class SSLManager:
             return cert_file.exists() and key_file.exists()
         except Exception:
             return False
+
+    def generate_cert(self, domain: str) -> Dict:
+        """Wrapper for generate_certificate that returns a DictResult for the CLI"""
+        try:
+            if self.generate_certificate(domain):
+                # Also attempt to add to windows hosts for convenience
+                self.add_to_windows_hosts(domain)
+                return {'success': True}
+            else:
+                return {'success': False, 'error': 'Failed to generate certificate (check if mkcert is installed)'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
     
     def add_to_windows_hosts(self, domain: str, ip: str = "127.0.0.1") -> bool:
         """Add domain to Windows hosts file using PowerShell (handles elevation)"""
@@ -148,20 +160,27 @@ Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy 
             return False
     
     def remove_from_windows_hosts(self, domain: str) -> bool:
-        """Remove domain from Windows hosts file"""
+        """Remove domain from Windows hosts file using PowerShell (handles elevation)"""
         try:
-            with open(self.windows_hosts, 'r') as f:
-                lines = f.readlines()
+            # Use PowerShell to remove entries with elevated privileges mechanism
+            # We wrap the removal logic in a script block that we execute as Admin
+            ps_script = f"""
+$hostFile = 'C:\\Windows\\System32\\drivers\\etc\\hosts'
+$domain = '{domain}'
+# The inner command that actually modifies the file
+$innerCmd = "(Get-Content $hostFile) | Where-Object {{ $_ -notmatch '127.0.0.1\\s+$domain' -and $_ -notmatch '::1\\s+$domain' }} | Set-Content $hostFile"
+
+# Execute with elevation
+Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $innerCmd
+"""
+            # Base64 encode the script
+            import base64
+            encoded_script = base64.b64encode(ps_script.encode('utf-16-le')).decode('ascii')
             
-            # Filter out the domain
-            filtered_lines = []
-            for line in lines:
-                if domain not in line:
-                    filtered_lines.append(line)
-            
-            # Write back
-            with open(self.windows_hosts, 'w') as f:
-                f.writelines(filtered_lines)
+            subprocess.run([
+                'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', 
+                '-EncodedCommand', encoded_script
+            ], check=True)
             
             return True
         except Exception:
@@ -225,6 +244,9 @@ Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy 
             if key_file.exists():
                 key_file.unlink()
                 removed = True
+            
+            # Also try to remove from hosts file
+            self.remove_from_windows_hosts(domain)
             
             return removed
         except Exception:

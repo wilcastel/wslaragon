@@ -40,7 +40,7 @@ class SiteManager:
             json.dump(self.sites, f, indent=2)
     
     def create_site(self, site_name: str, php: bool = True, 
-                   mysql: bool = False, ssl: bool = False,
+                   mysql: bool = False, ssl: bool = True,
                    database_name: str = None, public_dir: bool = False,
                    proxy_port: int = None, site_type: str = None, 
                    db_type: str = None, recreate: bool = False,
@@ -86,7 +86,8 @@ class SiteManager:
             
             is_laravel = site_type is not None and (site_type == 'laravel' or site_type.isdigit())
             is_wordpress = site_type == 'wordpress'
-            use_public = public_dir or is_laravel or is_wordpress
+            # WordPress installs in root by default, unlike Laravel
+            use_public = public_dir or is_laravel
             
             web_root = site_base_dir / "public" if use_public else site_base_dir
             
@@ -102,22 +103,22 @@ class SiteManager:
                 elif site_type == 'wordpress':
                     self._create_wordpress_site(web_root, site_name)
                 elif is_laravel:
-                    laravel_version = 12
                     if site_type and site_type != 'laravel':
                         try:
                             laravel_version = int(site_type)
                         except ValueError:
-                            pass
-                    index_file = web_root / "index.php"
-                    index_content = f"""<?php
-echo "<h1>Welcome to {site_name}{self.tld}!</h1>";
-echo "<p>Laravel project ready.</p>";
-echo "<p>Run 'composer create-project laravel/laravel .' to install.</p>";
-phpinfo();
-?>"""
-                    with open(index_file, 'w') as f:
-                        f.write(index_content)
-                    messages.append(f"[yellow]📝 Laravel structure ready. Run 'composer create-project laravel/laravel:^{laravel_version}.0 .' to install.[/yellow]")
+                            laravel_version = 12
+                    
+                    self._create_laravel_site(
+                        web_root, 
+                        site_name, 
+                        version=laravel_version,
+                        db_type=db_type,
+                        database_name=database_name
+                    )
+                    messages.append(f"[green]🚀 Laravel {laravel_version} installed successfully![/green]")
+                    if db_type in ('postgres', 'supabase'):
+                        messages.append(f"[yellow]🗄️ Configured for PostgreSQL/Supabase[/yellow]")
                 else:
                     index_file = web_root / "index.php"
                     if php:
@@ -428,13 +429,16 @@ with socketserver.TCPServer(("", PORT), Handler) as httpd:
             
             # Remove database if requested
             if remove_database and site_info.get('database'):
-                self.mysql.drop_database(site_info['database'])
+                # Only attempt to delete MySQL databases
+                # Postgres/Supabase are external (Docker) and we don't manage their lifecycle yet
+                if site_info.get('db_type') == 'mysql' or not site_info.get('db_type'):
+                    self.mysql.drop_database(site_info['database'])
             
             # Remove files if requested
             if remove_files:
                 site_doc_root = Path(site_info['document_root'])
                 if site_doc_root.exists():
-                    subprocess.run(['sudo', 'rm', '-rf', str(site_doc_root)], check=True)
+                    subprocess.run(['sudo', 'rm', '-rf', str(site_doc_root)], check=True, timeout=60)
             
             # Remove from sites registry
             del self.sites[site_name]
@@ -581,6 +585,32 @@ with socketserver.TCPServer(("", PORT), Handler) as httpd:
             # This ensures even new files created inherit the group 'www-data'
             cmd_guid = ['sudo', 'find', doc_root, '-type', 'd', '-exec', 'chmod', 'g+s', '{}', '+']
             subprocess.run(cmd_guid, check=True, capture_output=True)
+            
+            # WordPress specific fix: FS_METHOD direct
+            # This prevents WP from asking for FTP credentials
+            wp_config = Path(doc_root) / 'wp-config.php'
+            if wp_config.exists():
+                try:
+                    with open(wp_config, 'r') as f:
+                        content = f.read()
+                    
+                    if "FS_METHOD" not in content:
+                        # Insert before ABSPATH definition or append to file
+                        if "if ( ! defined( 'ABSPATH' ) )" in content:
+                            new_content = content.replace(
+                                "if ( ! defined( 'ABSPATH' ) )",
+                                "define( 'FS_METHOD', 'direct' );\n\nif ( ! defined( 'ABSPATH' ) )"
+                            )
+                        else:
+                            new_content = content + "\ndefine( 'FS_METHOD', 'direct' );\n"
+                        
+                        with open(wp_config, 'w') as f:
+                            f.write(new_content)
+                            
+                        # Re-apply ownership to wp-config.php just in case
+                        subprocess.run(['sudo', 'chown', f'{current_user}:www-data', str(wp_config)], check=True)
+                except Exception:
+                    pass # Non-critical failure, continue
             
             return {'success': True}
             
@@ -838,6 +868,7 @@ document.addEventListener('DOMContentLoaded', function() {{
  define( 'WP_DEBUG_LOG', true );
  define( 'WP_DEBUG_DISPLAY', false );
  define( 'WP_MEMORY_LIMIT', '256M' );
+ define( 'FS_METHOD', 'direct' );
 
  if ( ! defined( 'ABSPATH' ) ) {{
      define( 'ABSPATH', __DIR__ . '/' );

@@ -153,7 +153,7 @@ def site():
 @click.argument('name')
 @click.option('--php/--no-php', default=True, help='Enable PHP')
 @click.option('--mysql/--no-mysql', default=False, help='Create MySQL database')
-@click.option('--ssl/--no-ssl', default=False, help='Enable SSL')
+@click.option('--ssl/--no-ssl', default=True, help='Enable SSL (default: True)')
 @click.option('--database', help='Custom database name')
 @click.option('--public/--no-public', default=False, help='Point document root to public/ directory')
 @click.option('--proxy', type=int, help='Proxy port (e.g. 8000) for Python/Node apps')
@@ -268,6 +268,13 @@ def delete(name, remove_files, remove_database):
     mysql_mgr = MySQLManager(config)
     site_mgr = SiteManager(config, nginx, mysql_mgr)
     
+    # Validate sudo permissions
+    try:
+        subprocess.run(['sudo', '-v'], check=True)
+    except subprocess.CalledProcessError:
+        console.print("[red]✗ This command requires sudo privileges[/red]")
+        return
+     
     if not site_mgr.get_site(name):
         console.print(f"[red]✗ Site '{name}' not found[/red]")
         return
@@ -784,6 +791,22 @@ def generate(domain):
         console.print(f"[green]✓ Certificate generated for {domain}[/green]")
     else:
         console.print(f"[red]✗ Failed to generate certificate: {result['error']}[/red]")
+
+@ssl.command()
+@click.argument('domain')
+def delete(domain):
+    """Delete SSL certificate for domain"""
+    config = Config()
+    ssl_mgr = SSLManager(config)
+    
+    if click.confirm(f"Are you sure you want to delete SSL certificate for '{domain}'?"):
+        with console.status(f"[bold red]Deleting certificate for {domain}..."):
+            result = ssl_mgr.revoke_certificate(domain)
+        
+        if result:
+            console.print(f"[green]✓ Certificate deleted for {domain}[/green]")
+        else:
+            console.print(f"[red]✗ Failed to delete certificate for {domain}[/red]")
 
 @cli.group()
 def node():
