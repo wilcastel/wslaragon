@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
+import base64
+import secrets
 
 from ..services.ssl import SSLManager
 
@@ -91,7 +93,7 @@ class SiteManager:
             
             web_root = site_base_dir / "public" if use_public else site_base_dir
             
-            if use_public and not web_root.exists():
+            if use_public and not is_laravel and not web_root.exists():
                 web_root.mkdir(exist_ok=True, parents=True)
                 messages.append(f"[green]📁 Created public folder: {web_root}[/green]")
             elif not use_public and not web_root.exists():
@@ -110,7 +112,7 @@ class SiteManager:
                             laravel_version = 12
                     
                     self._create_laravel_site(
-                        web_root, 
+                        site_base_dir, 
                         site_name, 
                         version=laravel_version,
                         db_type=db_type,
@@ -177,7 +179,7 @@ phpinfo();
                     current_user = os.getenv('SUDO_USER') or os.getenv('USER')
                     
                     # Ensure dir is owned by user before running npm
-                    subprocess.run(['chown', '-R', f'{current_user}:{current_user}', str(site_base_dir)], check=True)
+                    subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{current_user}', str(site_base_dir)], check=True)
                     
                     # Find npm path
                     import shutil
@@ -903,7 +905,15 @@ document.addEventListener('DOMContentLoaded', function() {{
         
         supabase_api_url = f"http://localhost:{self.config.get('supabase.api_port', 8081)}"
         
-        composer_project_cmd = [
+        # Prepare command execution
+        # If we are already the correct user, run directly without sudo to preserve env
+        current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+        exec_cmd_prefix = []
+        if os.geteuid() == 0 and current_user:
+            # We are root, drop to user
+            exec_cmd_prefix = ['sudo', '-u', current_user]
+
+        composer_project_cmd = exec_cmd_prefix + [
             'composer', 'create-project',
             f'laravel/laravel:^{version}.0',
             str(site_base_dir),
@@ -917,19 +927,23 @@ document.addEventListener('DOMContentLoaded', function() {{
             if 'out of memory' in result.stderr.lower():
                 env = os.environ.copy()
                 env['COMPOSER_MEMORY_LIMIT'] = '-1'
-                subprocess.run(['composer', 'create-project',
+                composer_retry_cmd = exec_cmd_prefix + [
+                    'composer', 'create-project',
                     f'laravel/laravel:^{version}.0',
                     str(site_base_dir),
                     '--no-interaction',
                     '--no-progress'
-                ], env=env, check=True)
+                ]
+                subprocess.run(composer_retry_cmd, env=env, check=True)
             else:
                 raise Exception(f"Laravel installation failed: {result.stderr}")
+        
+        app_key = f"base64:{base64.b64encode(secrets.token_bytes(32)).decode()}"
         
         if db_type in ('postgres', 'supabase'):
             env_content = f"""APP_NAME="{site_name}"
 APP_ENV=local
-APP_KEY=base64:$(php -r "echo base64_encode(random_bytes(32));")
+APP_KEY={app_key}
 APP_DEBUG=true
 APP_URL=http://{site_name}.test
 
@@ -996,7 +1010,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
             db_password = self.config.get('mysql.password')
             env_content = f"""APP_NAME="{site_name}"
 APP_ENV=local
-APP_KEY=base64:$(php -r "echo base64_encode(random_bytes(32));")
+APP_KEY={app_key}
 APP_DEBUG=true
 APP_URL=http://{site_name}.test
 
@@ -1056,8 +1070,8 @@ VITE_PUSHER_CLUSTER="${{PUSHER_APP_CLUSTER}}"
             f.write(env_content)
         
         current_user = os.getenv('SUDO_USER') or os.getenv('USER')
-        subprocess.run(['chown', '-R', f'{current_user}:www-data', str(site_base_dir)], check=True)
-        subprocess.run(['chmod', '-R', '775', str(site_base_dir / 'storage')], check=True)
-        subprocess.run(['chmod', '-R', '775', str(site_base_dir / 'bootstrap/cache')], check=True)
+        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:www-data', str(site_base_dir)], check=True)
+        subprocess.run(['sudo', 'chmod', '-R', '775', str(site_base_dir / 'storage')], check=True)
+        subprocess.run(['sudo', 'chmod', '-R', '775', str(site_base_dir / 'bootstrap/cache')], check=True)
         
         return {'web_root': str(site_base_dir / 'public')}
