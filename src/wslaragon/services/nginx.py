@@ -89,8 +89,9 @@ class NginxManager:
     add_header Referrer-Policy "no-referrer-when-downgrade" always;
     add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline' 'unsafe-eval'" always;
 
-    # Handle static files
-    location ~* \\.(jpg|jpeg|png|gif|ico|css|js)$ {{
+    # Handle static files — try_files evita 404 en rutas PHP con extensión .js/.css (ej: /livewire/livewire.js)
+    location ~* \\.(jpg|jpeg|png|gif|ico|css|js|svg|woff2)$ {{
+        try_files $uri /index.php?$query_string;
         expires 1y;
         add_header Cache-Control "public, immutable";
     }}
