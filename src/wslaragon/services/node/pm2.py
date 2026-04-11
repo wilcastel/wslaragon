@@ -1,86 +1,163 @@
+"""PM2 process manager for WSLaragon.
+
+Manages Node.js and Python application processes via PM2.
+"""
+import logging
+import os
 import subprocess
 import json
-from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
 
 class PM2Manager:
-    """Manages Node.js processes via PM2"""
+    """Manages Node.js processes via PM2
+    
+    Provides methods to start, stop, restart, delete, and list
+    PM2-managed processes.
+    """
     
     def __init__(self, config=None):
         self.config = config
 
-    def _run_pm2(self, args: List[str]) -> Dict:
-        """Run a PM2 command and return result"""
+    def _run_pm2(self, args: List[str], env: Dict[str, str] = None) -> Dict:
+        """Run a PM2 command and return result
+        
+        Args:
+            args: List of PM2 command arguments (without 'pm2' prefix)
+            env: Optional environment variables to pass to the subprocess
+            
+        Returns:
+            Dict with 'success', 'data', and 'error' keys
+        """
         try:
             cmd = ['pm2'] + args + ['--json']
+            run_env = os.environ.copy()
+            if env:
+                run_env.update(env)
+            
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                text=True
+                text=True,
+                env=run_env
             )
+            
             try:
-                # PM2 returns valid JSON on stdout usually
-                if result.stdout.strip():
-                     return {'success': result.returncode == 0, 'data': json.loads(result.stdout), 'error': result.stderr}
-                return {'success': result.returncode == 0, 'data': None, 'error': result.stderr}
+                # PM2 sometimes returns empty stdout on error
+                stdout_stripped = result.stdout.strip()
+                if stdout_stripped:
+                    data = json.loads(stdout_stripped)
+                    return {
+                        'success': result.returncode == 0,
+                        'data': data,
+                        'error': result.stderr if result.returncode != 0 else None
+                    }
+                return {
+                    'success': result.returncode == 0,
+                    'data': None,
+                    'error': result.stderr
+                }
             except json.JSONDecodeError:
-                return {'success': False, 'data': None, 'error': f"Invalid JSON: {result.stdout}"}
+                # PM2 sometimes returns non-JSON output for certain commands
+                return {
+                    'success': result.returncode == 0,
+                    'data': None,
+                    'error': f"PM2 output: {result.stdout[:200]}"
+                }
         except FileNotFoundError:
-             return {'success': False, 'error': "PM2 not found. Install it with 'npm install -g pm2'"}
+            logger.error("PM2 not found. Install with 'npm install -g pm2'")
+            return {'success': False, 'error': "PM2 not found. Install it with 'npm install -g pm2'"}
+        except Exception as e:
+            logger.error(f"Error running PM2 command: {e}")
+            return {'success': False, 'error': str(e)}
 
     def list_processes(self) -> List[Dict]:
-        """List all PM2 processes"""
-        result = self._run_pm2(['jlist']) # jlist is faster/cleaner json
+        """List all PM2 processes
+        
+        Returns:
+            List of process dictionaries from PM2
+        """
+        result = self._run_pm2(['jlist'])
         if result['success'] and result['data']:
-             return result['data']
+            return result['data']
         return []
 
-    def start_process(self, site_name: str, script_path: str, port: int, interpreter: str = 'node', cwd: str = None) -> Dict:
-        """Start a new process with PM2"""
-        # We assume the name is the site name unique ID
+    def start_process(self, site_name: str, script_path: str, port: int,
+                      interpreter: str = None, cwd: str = None) -> Dict:
+        """Start a new process with PM2
         
-        args = [
-            'start', script_path,
-            '--name', site_name,
-            '--port', str(port), # Pass port as environment variable
-            '--time' # Add timestamp to logs
-        ]
+        Args:
+            site_name: Unique name for the process
+            script_path: Path to the script to run
+            port: Port number (set as PORT env variable)
+            interpreter: Optional interpreter (e.g., 'python3')
+            cwd: Working directory for the process
+            
+        Returns:
+            Dict with 'success' and error info
+        """
+        # Build environment with PORT variable
+        env = {'PORT': str(port)}
+        
+        # Build PM2 arguments
+        args = ['start', script_path, '--name', site_name]
+        
+        # Set environment variables via PM2 --env flag
+        # PM2 respects PORT env var for most frameworks
+        args.extend(['--env', f'PORT={port}'])
         
         if cwd:
-             args.extend(['--cwd', cwd])
+            args.extend(['--cwd', cwd])
         
-        if interpreter != 'node':
-             args.extend(['--interpreter', interpreter])
-             
-        # Environment variables injection
-        # Note: PM2 doesn't take --port as a flag for the app usually, 
-        # but we can set PORT env var which most apps respect
+        if interpreter and interpreter != 'node':
+            args.extend(['--interpreter', interpreter])
         
-        # We need to construct the command differently to pass env vars:
-        # pm2 start app.js --name "myapp" -- --port 3000 (arguments passed to script)
-        # OR env var PORT=3000 pm2 start ... 
-        
-        # Best approach: Use ecosystem config logic or environment update
-        # But simpler for CLI:
-        # pm2 start "npm run start" --name "my-site" --update-env
-        
-        # Let's try to run specifically setting the environment variable
-        cmd = ['pm2', 'start', script_path, '--name', site_name]
-        
-        # If it's an npm script (e.g. "npm run start"), script_path should be "npm" and args "run start"
-        # But for simplicity let's assume we are running the entry file directly OR using npm
-        
-        return self._run_pm2(args)
-        
+        logger.info(f"Starting PM2 process '{site_name}' on port {port}")
+        return self._run_pm2(args, env=env)
+
     def stop_process(self, site_name: str) -> Dict:
+        """Stop a PM2 process
+        
+        Args:
+            site_name: Name of the process to stop
+            
+        Returns:
+            Dict with 'success' and error info
+        """
+        logger.info(f"Stopping PM2 process '{site_name}'")
         return self._run_pm2(['stop', site_name])
 
     def restart_process(self, site_name: str) -> Dict:
+        """Restart a PM2 process
+        
+        Args:
+            site_name: Name of the process to restart
+            
+        Returns:
+            Dict with 'success' and error info
+        """
+        logger.info(f"Restarting PM2 process '{site_name}'")
         return self._run_pm2(['restart', site_name])
 
     def delete_process(self, site_name: str) -> Dict:
+        """Delete a PM2 process
+        
+        Args:
+            site_name: Name of the process to delete
+            
+        Returns:
+            Dict with 'success' and error info
+        """
+        logger.info(f"Deleting PM2 process '{site_name}'")
         return self._run_pm2(['delete', site_name])
 
     def save(self) -> Dict:
-        """Freeze current process list for respawn"""
+        """Save current process list for respawn on restart
+        
+        Returns:
+            Dict with 'success' and error info
+        """
+        logger.info("Saving PM2 process list")
         return self._run_pm2(['save'])
