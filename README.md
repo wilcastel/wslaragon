@@ -40,7 +40,6 @@ WSLaragon es una herramienta de gestión de entorno de desarrollo estilo Laragon
 - **CLI completa**: Interfaz de línea de comandos potente
 - **Web UI**: Panel de control web opcional
 - **API REST**: API para integración con otras herramientas
-- **API REST**: API para integración con otras herramientas
 - **Autocompletado**: Soporte para bash/zsh
 
 ### 🤖 Agentes de IA
@@ -148,9 +147,6 @@ wslaragon mysql create-db myapp_db
 # Gestionar SSL
 wslaragon ssl setup
 wslaragon ssl generate myproject.test
-# Gestionar SSL
-wslaragon ssl setup
-wslaragon ssl generate myproject.test
 
 # Gestionar Agentes
 wslaragon agent init
@@ -180,9 +176,6 @@ wslaragon site create blog --php
 
 # Sitio Laravel con MySQL y SSL
 wslaragon site create laravel-app --php --mysql --ssl --database laravel_db
-
-# Sitio estático
-wslaragon site create portfolio --no-php --ssl
 
 # Sitio estático
 wslaragon site create portfolio --no-php --ssl
@@ -247,9 +240,9 @@ La configuración principal se encuentra en `~/.wslaragon/config.yaml`:
 
 ```yaml
 php:
-  version: "8.1"
-  ini_file: "/etc/php/8.1/apache2/php.ini"
-  extensions_dir: "/usr/lib/php/20210902"
+  version: "8.3"
+  ini_file: "/etc/php/8.3/fpm/php.ini"
+  extensions_dir: "/usr/lib/php/20230831"
 
 nginx:
   config_dir: "/etc/nginx"
@@ -327,7 +320,7 @@ mkcert -CAROOT
 sudo nginx -t
 
 # Ver logs
-sudo journalctl -u php8.1-fpm -f
+sudo journalctl -u php8.3-fpm -f
 ```
 
 ### Logs Importantes
@@ -337,7 +330,7 @@ sudo journalctl -u php8.1-fpm -f
 sudo tail -f /var/log/nginx/error.log
 
 # PHP-FPM
-sudo journalctl -u php8.1-fpm -f
+sudo journalctl -u php8.3-fpm -f
 
 # MySQL
 sudo journalctl -u mysql -f
@@ -360,12 +353,33 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -e ".[dev]"
 
-# Tests
-pytest tests/
+# O usar Makefile para tareas comunes
+make install-dev   # Instalar dependencias
+make test          # Ejecutar tests
+make lint          # Ejecutar linters
+make format        # Formatear código
+make check         # Verificar todo (lint + types + test)
+```
 
-# Linting
-flake8 src/
-black src/
+### Pre-commit Hooks
+
+```bash
+# Instalar pre-commit para checks automáticos
+pip install pre-commit
+pre-commit install
+```
+
+### Tests
+
+```bash
+# Todos los tests
+pytest
+
+# Tests unitarios
+make test-unit
+
+# Tests con coverage
+make test-cov
 ```
 
 ### Estructura del Código
@@ -376,17 +390,26 @@ src/wslaragon/
 │   ├── config.py       # Gestión de configuración
 │   └── services.py     # Gestión de servicios systemd
 ├── services/           # Gestión de servicios específicos
-│   ├── php.py         # Gestión de PHP
-│   ├── nginx.py       # Gestión de Nginx
-│   ├── mysql.py       # Gestión de MySQL
-│   ├── sites.py       # Gestión de sitios
-│   └── ssl.py        # Gestión de SSL
-├── cli/               # Interfaz CLI
-│   └── main.py       # Comandos Click
-├── web/               # Interfaz web
-│   ├── app.py         # Aplicación Flask
-│   └── templates/     # Templates HTML
-└── __init__.py       # Paquete principal
+│   ├── php.py          # Gestión de PHP
+│   ├── nginx.py        # Gestión de Nginx
+│   ├── mysql.py        # Gestión de MySQL
+│   ├── sites.py        # Gestión de sitios
+│   ├── ssl.py          # Gestión de SSL
+│   ├── backup.py       # Backup/restore de sitios
+│   └── node/           # Gestión de Node.js/PM2
+│       └── pm2.py
+├── cli/                # Interfaz CLI (Click)
+│   ├── main.py         # Entry point + comandos globales
+│   ├── site_commands.py
+│   ├── service_commands.py
+│   ├── php_commands.py
+│   ├── mysql_commands.py
+│   ├── ssl_commands.py
+│   ├── node_commands.py
+│   ├── nginx_commands.py
+│   ├── doctor.py
+│   └── agent.py
+└── __init__.py
 ```
 
 ## 🤝 Contribuir

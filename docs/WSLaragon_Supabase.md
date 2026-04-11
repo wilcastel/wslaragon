@@ -70,14 +70,14 @@ python3 ~/.wslaragon/create_project_simple.py miapp laravel
 - **Host**: localhost
 - **Puerto**: 5433
 - **Usuario**: postgres
-- **Password**: WSL_Supabase_2026_Secure_Passw0rd!
+- **Password**: *(set via environment variable `SUPABASE_POSTGRES_PASSWORD`)*
 - **Base de datos**: supabase
 
 ### MariaDB (existente)
 - **Host**: localhost
 - **Puerto**: 3306
 - **Usuario**: root
-- **Password**: ncdsDln68*/
+- **Password**: *(configured in `~/.wslaragon/config.yaml`)*
 
 ## 🔥 Uso en Proyectos
 
@@ -89,7 +89,7 @@ DB_HOST=localhost
 DB_PORT=5433
 DB_DATABASE=miapp_db
 DB_USERNAME=postgres
-DB_PASSWORD=ncdsDln68*/
+DB_PASSWORD=${DB_PASSWORD}
 
 SUPABASE_URL=http://localhost:8081
 SUPABASE_ANON_KEY=...
@@ -98,14 +98,14 @@ SUPABASE_SERVICE_ROLE_KEY=...
 
 ### Node.js con Supabase
 ```env
-DATABASE_URL=postgresql://postgres:password@localhost:5433/miapp_db
+DATABASE_URL=postgresql://postgres:${SUPABASE_POSTGRES_PASSWORD}@localhost:5433/miapp_db
 SUPABASE_URL=http://localhost:8081
 SUPABASE_ANON_KEY=...
 ```
 
 ### Python con Supabase
 ```env
-DATABASE_URL=postgresql://postgres:password@localhost:5433/miapp_db
+DATABASE_URL=postgresql://postgres:${SUPABASE_POSTGRES_PASSWORD}@localhost:5433/miapp_db
 SUPABASE_URL=http://localhost:8081
 SUPABASE_KEY=...
 ```

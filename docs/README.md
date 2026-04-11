@@ -23,6 +23,8 @@ WSLaragon es un ecosistema potente diseñado para transformar Windows + WSL2 en 
 4.  [**Arquitectura**](STRUCTURE.md): Entiende cómo se organiza el proyecto y dónde están tus archivos.
 5.  [**Solución de Problemas**](TROUBLESHOOTING.md): Diagnóstico y soluciones para errores comunes (502, queue workers, MySQL).
 6.  [**Roadmap**](ROADMAP.md): Próximas funciones planificadas (Node.js, Redis, Varnish).
+7.  [**Contribuir**](CONTRIBUTING.md): Guía para desarrolladores que quieren contribuir.
+8.  [**Desarrollo**](DEVELOPMENT.md): Documentación interna para desarrolladores.
 
 ## 🚀 Inicio Rápido (60 segundos)
 
