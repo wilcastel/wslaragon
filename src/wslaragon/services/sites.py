@@ -1,13 +1,16 @@
 import json
+import logging
 import subprocess
 import os
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
-import base64
-import secrets
 
 from ..services.ssl import SSLManager
+from .site_creators import get_site_creator
+
+logger = logging.getLogger(__name__)
+
 
 class SiteManager:
     def __init__(self, config, nginx_manager, mysql_manager):
@@ -54,10 +57,6 @@ class SiteManager:
             
             # Auto-configure for Node/Python
             if site_type in ('node', 'python') or vite_template:
-                # Disable PHP/MySQL by default unless explicitly requested (which we can't easily track with click defaults here without more logic, 
-                # but let's assume if user uses --node/--python they want an app server).
-                # Note: In main.py we'll handle passing the right flags.
-                
                 if not proxy_port:
                     # Find next free port
                     start_port = 3000 if site_type == 'node' or vite_template else 8000
@@ -80,9 +79,9 @@ class SiteManager:
             if site_exists:
                 if recreate:
                     subprocess.run(['sudo', 'rm', '-rf', str(site_base_dir)], check=True)
-                    messages.append(f"[yellow]📁 Deleted existing folder for recreate[/yellow]")
+                    messages.append(f"[yellow]Deleted existing folder for recreate[/yellow]")
                 else:
-                    messages.append(f"[yellow]📁 Using existing folder: {site_base_dir}[/yellow]")
+                    messages.append(f"[yellow]Using existing folder: {site_base_dir}[/yellow]")
             
             site_base_dir.mkdir(exist_ok=True, parents=True)
             
@@ -95,54 +94,30 @@ class SiteManager:
             
             if use_public and not is_laravel and not web_root.exists():
                 web_root.mkdir(exist_ok=True, parents=True)
-                messages.append(f"[green]📁 Created public folder: {web_root}[/green]")
+                messages.append(f"[green]Created public folder: {web_root}[/green]")
             elif not use_public and not web_root.exists():
                 web_root.mkdir(exist_ok=True, parents=True)
-            
+
+            # Use Strategy pattern for site creation
             if not proxy_port and (not site_exists or recreate):
-                if site_type == 'html':
-                    self._create_html_site(web_root, site_name)
-                elif site_type == 'wordpress':
-                    self._create_wordpress_site(web_root, site_name)
-                elif is_laravel:
+                laravel_version = None
+                if is_laravel:
                     if site_type and site_type != 'laravel':
                         try:
                             laravel_version = int(site_type)
                         except ValueError:
                             laravel_version = 12
-                    
-                    self._create_laravel_site(
-                        site_base_dir, 
-                        site_name, 
-                        version=laravel_version,
-                        db_type=db_type,
-                        database_name=database_name
-                    )
-                    messages.append(f"[green]🚀 Laravel {laravel_version} installed successfully![/green]")
-                    if db_type in ('postgres', 'supabase'):
-                        messages.append(f"[yellow]🗄️ Configured for PostgreSQL/Supabase[/yellow]")
-                else:
-                    index_file = web_root / "index.php"
-                    if php:
-                        index_content = f"""<?php
-echo "<h1>Welcome to {site_name}{self.tld}!</h1>";
-echo "<p>PHP Version: " . phpversion() . "</p>";
-echo "<p>Server Time: " . date('Y-m-d H:i:s') . "</p>";
-phpinfo();
-?>"""
                     else:
-                        index_content = f"""<!DOCTYPE html>
-<html>
-<head>
-    <title>Welcome to {site_name}{self.tld}!</title>
-</head>
-<body>
-    <h1>Welcome to {site_name}{self.tld}!</h1>
-    <p>Static site is working!</p>
-</body>
-</html>"""
-                    with open(index_file, 'w') as f:
-                        f.write(index_content)
+                        laravel_version = 12
+                
+                creator = get_site_creator(
+                    site_type, vite_template, php, self.config,
+                    site_name, web_root, site_base_dir, self.tld, proxy_port,
+                    version=laravel_version, db_type=db_type, database_name=database_name
+                )
+                if creator:
+                    creator_messages = creator.create()
+                    messages.extend(creator_messages)
             
             db_created = False
             db_type_final = db_type or ('mysql' if mysql else None)
@@ -153,170 +128,28 @@ phpinfo();
                 
                 if db_type_final == 'mysql':
                     if self.mysql.database_exists(database_name):
-                        messages.append(f"[yellow]🗄️ Using existing database: {database_name}[/yellow]")
+                        messages.append(f"[yellow]Using existing database: {database_name}[/yellow]")
                         db_created = False
                     else:
                         db_created, db_error = self.mysql.create_database(database_name)
                         if not db_created:
                             return {'success': False, 'error': f'Failed to create database: {db_error}'}
-                        messages.append(f"[green]✅ Created new database: {database_name}[/green]")
+                        messages.append(f"[green]Created new database: {database_name}[/green]")
                 elif db_type_final in ('postgres', 'supabase'):
                     db_created = True
             
-            # Create scaffolding
+            # Create scaffolding for Vite/Node/Python (these have proxy_port)
             if vite_template:
-                # VITE SCAFFOLDING
-                try:
-                    # Remove existing files if any (npm create vite needs empty dir usually, or . flag)
-                    # but we just created the dir.
-                    
-                    # Command: npm create vite@latest . -- --template <template>
-                    # We run this INSIDE site_base_dir
-                    cmd_create = ['npm', 'create', 'vite@latest', '.', '--', '--template', vite_template]
-                    
-                    # We need to run as user, not root, if possible, but we are in CLI which might be sudo.
-                    # Best to run as the owner of the dir. Use sudo -u <user>
-                    current_user = os.getenv('SUDO_USER') or os.getenv('USER')
-                    
-                    # Ensure dir is owned by user before running npm
-                    subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{current_user}', str(site_base_dir)], check=True)
-                    
-                    # Find npm path
-                    import shutil
-                    npm_path = shutil.which('npm')
-                    
-                    if not npm_path:
-                        # Try to find it via runuser if we are root
-                        if os.geteuid() == 0 and current_user:
-                             try:
-                                res = subprocess.run(['runuser', '-l', current_user, '-c', 'which npm'], capture_output=True, text=True)
-                                if res.returncode == 0:
-                                    npm_path = res.stdout.strip()
-                             except:
-                                 pass
-                    
-                    if not npm_path:
-                        # Fallback to absolute path known for NVM if common
-                        # Or just "npm" and hope
-                        npm_path = "npm"
-
-                    # Prepare command execution
-                    # If we are already the correct user, run directly without sudo to preserve env (NVM)
-                    exec_cmd_prefix = []
-                    if os.geteuid() == 0 and current_user:
-                        # We are root, drop to user
-                        exec_cmd_prefix = ['sudo', '-u', current_user]
-                    
-                    # Run create
-                    # We pass input="\nn\n" to answer:
-                    # 1. Use rolldown? -> No (default)
-                    # 2. Install dependencies? -> No (n)
-                    # This prevents the wizard from starting the dev server and blocking execution.
-                    full_cmd_create = exec_cmd_prefix + [npm_path, 'create', 'vite@latest', '.', '--', '--template', vite_template]
-                    subprocess.run(full_cmd_create, cwd=str(site_base_dir), check=True, input="\nn\n", text=True)
-                    
-                    # Install dependencies manually since we declined the wizard
-                    full_cmd_install = exec_cmd_prefix + [npm_path, 'install']
-                    subprocess.run(full_cmd_install, cwd=str(site_base_dir), check=True)
-                    
-                    # Configure Port in vite.config.js/ts
-                    # We need to append "server: { port: <port> }" to config
-                    # Parsing JS is hard, let's just append or replace.
-                    # Vite 3+ config: export default defineConfig({ ... })
-                    
-                    # Simplest way: create a .env file locally with PORT? Vite uses different env logic.
-                    # Best way: Modify package.json scripts to include --port
-                    
-                    pkg_path = site_base_dir / "package.json"
-                    with open(pkg_path, 'r') as f:
-                        pkg = json.load(f)
-                    
-                    # Modify dev script to force port and host
-                    # --host is needed for WSL/Docker/Network access usually, but for local Nginx proxy 
-                    # localhost is fine. However, explicitly setting port is good.
-                    if 'scripts' in pkg:
-                        pkg['scripts']['dev'] = f"vite --port {proxy_port} --host"
-                        pkg['scripts']['start'] = f"vite --port {proxy_port} --host"
-                    
-                    with open(pkg_path, 'w') as f:
-                        json.dump(pkg, f, indent=2)
-                        
-                    # Modify vite.config.js/ts to allow hosts (prevent 403)
-                    # We inject 'server: { allowedHosts: true },' inside defineConfig
-                    for cfg_file in ['vite.config.js', 'vite.config.ts']:
-                        cfg_path = site_base_dir / cfg_file
-                        if cfg_path.exists():
-                            with open(cfg_path, 'r') as f:
-                                content = f.read()
-                            
-                            if 'defineConfig({' in content and 'allowedHosts' not in content:
-                                # Simple injection
-                                new_content = content.replace('defineConfig({', 'defineConfig({\n  server: {\n    allowedHosts: true\n  },')
-                                with open(cfg_path, 'w') as f:
-                                    f.write(new_content)
-                            break
-
-                    messages.append(f"[green]⚡ Vite ({vite_template}) project created successfully![/green]")
-                    messages.append(f"[yellow]🚀 Node process prepared. Run 'wslaragon node start {site_name}' to serve 'npm run dev'.[/yellow]")
-                    
-                    # For PM2, we need to instruct it to run 'npm run dev'
-                    # The node start command we built handles 'npm start' or 'app.js'
-                    # Vite projects usually use 'npm run dev'.
-                    # We should probably update 'node start' to look for 'dev' script if 'start' is missing or if it's vite.
-                    
-                except subprocess.CalledProcessError as e:
-                     return {'success': False, 'error': f"Vite scaffolding failed: {str(e)}"}
+                # Vite scaffolding is handled by ViteSiteCreator above
+                pass
             
-            # Create default app file for Node/Python (Only if NOT vite)
+            # Create default app file for Node/Python
             elif site_type == 'node':
-                app_content = f"""
-const http = require('http');
-const port = process.env.PORT || {proxy_port};
-
-const server = http.createServer((req, res) => {{
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/html');
-  res.end('<h1>Hello from Node.js!</h1><p>Served via PM2 on port ' + port + '</p>');
-}});
-
-server.listen(port, () => {{
-  console.log(`Server running at http://localhost:${{port}}/`);
-}});
-"""
-                with open(site_base_dir / "app.js", 'w') as f:
-                    f.write(app_content.strip())
-                
-                # Create package.json
-                package_json = {
-                    "name": site_name,
-                    "version": "1.0.0",
-                    "main": "app.js",
-                    "scripts": {
-                        "start": f"node app.js"
-                    }
-                }
-                with open(site_base_dir / "package.json", 'w') as f:
-                    json.dump(package_json, f, indent=2)
-
-                messages.append(f"[yellow]🚀 Node.js app prepared on port {proxy_port}. Run 'pm2 start app.js --name {site_name}' to start it.[/yellow]")
-
+                # Handled by NodeSiteCreator above
+                pass
             elif site_type == 'python':
-                app_content = f"""
-import http.server
-import socketserver
-import os
-
-PORT = int(os.environ.get('PORT', {proxy_port}))
-
-Handler = http.server.SimpleHTTPRequestHandler
-
-with socketserver.TCPServer(("", PORT), Handler) as httpd:
-    print("serving at port", PORT)
-    httpd.serve_forever()
-"""
-                with open(site_base_dir / "main.py", 'w') as f:
-                    f.write(app_content.strip())
-                messages.append(f"[yellow]🐍 Python script prepared on port {proxy_port}. Run 'python3 main.py' to test.[/yellow]")
+                # Handled by PythonSiteCreator above
+                pass
             
             if ssl:
                 ssl_mgr = SSLManager(self.config)
@@ -367,6 +200,7 @@ with socketserver.TCPServer(("", PORT), Handler) as httpd:
             return {'success': True, 'site': site_info, 'messages': messages}
             
         except Exception as e:
+            logger.error(f"Failed to create site {site_name}: {e}")
             return {'success': False, 'error': str(e)}
 
     def update_site_root(self, site_name: str, public_dir: bool = True) -> Dict:
@@ -413,8 +247,9 @@ with socketserver.TCPServer(("", PORT), Handler) as httpd:
             return {'success': True}
             
         except Exception as e:
+            logger.error(f"Failed to update site root for {site_name}: {e}")
             return {'success': False, 'error': str(e)}
-            
+        
 
     
     def delete_site(self, site_name: str, remove_files: bool = False, 
@@ -449,6 +284,7 @@ with socketserver.TCPServer(("", PORT), Handler) as httpd:
             return {'success': True}
             
         except Exception as e:
+            logger.error(f"Failed to delete site {site_name}: {e}")
             return {'success': False, 'error': str(e)}
     
     def enable_site(self, site_name: str) -> Dict:
@@ -468,6 +304,7 @@ with socketserver.TCPServer(("", PORT), Handler) as httpd:
             return {'success': True}
             
         except Exception as e:
+            logger.error(f"Failed to enable site {site_name}: {e}")
             return {'success': False, 'error': str(e)}
     
     def disable_site(self, site_name: str) -> Dict:
@@ -487,6 +324,7 @@ with socketserver.TCPServer(("", PORT), Handler) as httpd:
             return {'success': True}
             
         except Exception as e:
+            logger.error(f"Failed to disable site {site_name}: {e}")
             return {'success': False, 'error': str(e)}
     
     def list_sites(self) -> List[Dict]:
@@ -526,6 +364,7 @@ with socketserver.TCPServer(("", PORT), Handler) as httpd:
             return {'success': True, 'site': site_info}
             
         except Exception as e:
+            logger.error(f"Failed to update site {site_name}: {e}")
             return {'success': False, 'error': str(e)}
     
     def get_site_logs(self, site_name: str) -> Dict[str, str]:
@@ -551,6 +390,7 @@ with socketserver.TCPServer(("", PORT), Handler) as httpd:
             return logs
             
         except Exception as e:
+            logger.error(f"Failed to get logs for {site_name}: {e}")
             return {'error': str(e)}
     
     def get_site_url(self, site_name: str) -> Optional[str]:
@@ -617,8 +457,10 @@ with socketserver.TCPServer(("", PORT), Handler) as httpd:
             return {'success': True}
             
         except subprocess.CalledProcessError as e:
+            logger.error(f"Command failed while fixing permissions for {site_name}: {e}")
             return {'success': False, 'error': f"Command failed: {str(e)}"}
         except Exception as e:
+            logger.error(f"Failed to fix permissions for {site_name}: {e}")
             return {'success': False, 'error': str(e)}
     
     def _find_next_free_port(self, start_port: int) -> int:
@@ -645,433 +487,3 @@ with socketserver.TCPServer(("", PORT), Handler) as httpd:
                     port += 1
                 else:
                     return port
-
-    def _create_html_site(self, web_root: Path, site_name: str):
-        """Create a static HTML site with styles and js folders"""
-        import os
-        
-        index_content = f"""<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{site_name}</title>
-    <link rel="stylesheet" href="styles/estilos.css">
-</head>
-<body>
-    <header>
-        <h1>{site_name}</h1>
-        <nav>
-            <ul>
-                <li><a href="#">Inicio</a></li>
-                <li><a href="#">Acerca</a></li>
-                <li><a href="#">Contacto</a></li>
-            </ul>
-        </nav>
-    </header>
-    <main>
-        <section class="hero">
-            <h2>Bienvenido a tu nuevo sitio web</h2>
-            <p>Este es un proyecto HTML estático listo para desarrollar.</p>
-        </section>
-        <section class="features">
-            <article>
-                <h3>Rápido</h3>
-                <p>Sitio web estático de alto rendimiento.</p>
-            </article>
-            <article>
-                <h3>Moderno</h3>
-                <p>Con estructura CSS y JavaScript lista.</p>
-            </article>
-            <article>
-                <h3>Fácil</h3>
-                <p>Simple de personalizar y expandir.</p>
-            </article>
-        </section>
-    </main>
-    <footer>
-        <p>&copy; 2024 {site_name}. Todos los derechos reservados.</p>
-    </footer>
-    <script src="js/app.js"></script>
-</body>
-</html>"""
-        
-        styles_dir = web_root / "styles"
-        styles_dir.mkdir(exist_ok=True)
-        
-        estilos_content = f"""/* Reset y estilos base */
-* {{
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}}
-
-body {{
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    line-height: 1.6;
-    color: #333;
-    background-color: #f4f4f4;
-}}
-
-header {{
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 2rem;
-    text-align: center;
-}}
-
-header h1 {{
-    margin-bottom: 1rem;
-}}
-
-nav ul {{
-    list-style: none;
-    display: flex;
-    justify-content: center;
-    gap: 2rem;
-}}
-
-nav a {{
-    color: white;
-    text-decoration: none;
-    font-weight: 500;
-    transition: opacity 0.3s;
-}}
-
-nav a:hover {{
-    opacity: 0.8;
-}}
-
-main {{
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 2rem;
-}}
-
-.hero {{
-    background: white;
-    padding: 3rem;
-    border-radius: 10px;
-    text-align: center;
-    margin-bottom: 2rem;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}}
-
-.hero h2 {{
-    color: #667eea;
-    margin-bottom: 1rem;
-}}
-
-.features {{
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 1.5rem;
-}}
-
-.features article {{
-    background: white;
-    padding: 2rem;
-    border-radius: 10px;
-    text-align: center;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    transition: transform 0.3s;
-}}
-
-.features article:hover {{
-    transform: translateY(-5px);
-}}
-
-.features h3 {{
-    color: #667eea;
-    margin-bottom: 0.5rem;
-}}
-
-footer {{
-    background: #333;
-    color: white;
-    text-align: center;
-    padding: 1.5rem;
-    margin-top: 2rem;
-}}
-"""
-        
-        js_dir = web_root / "js"
-        js_dir.mkdir(exist_ok=True)
-        
-        app_js_content = f"""// App JavaScript - {site_name}
-// Scripts del sitio
-
-document.addEventListener('DOMContentLoaded', function() {{
-    console.log('DOM cargado - {site_name}');
-    
-    // Smooth scroll para enlaces
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {{
-        anchor.addEventListener('click', function(e) {{
-            e.preventDefault();
-            const target = document.querySelector(this.getAttribute('href'));
-            if (target) {{
-                target.scrollIntoView({{ behavior: 'smooth' }});
-            }}
-        }});
-    }});
-    
-    console.log('Scripts inicializados correctamente');
-}});
-"""
-        
-        with open(web_root / "index.html", 'w', encoding='utf-8') as f:
-            f.write(index_content)
-        with open(styles_dir / "estilos.css", 'w', encoding='utf-8') as f:
-            f.write(estilos_content)
-        with open(js_dir / "app.js", 'w', encoding='utf-8') as f:
-            f.write(app_js_content)
-    
-    def _create_wordpress_site(self, web_root: Path, site_name: str):
-        """Create a WordPress site"""
-        import shutil
-        
-        db_password = self.config.get('mysql.password')
-        current_user = os.getenv('SUDO_USER') or os.getenv('USER')
-        
-        if web_root.exists():
-            subprocess.run(['sudo', 'rm', '-rf', str(web_root)], check=True)
-        
-        web_root.mkdir(parents=True)
-        
-        wp_tar_path = f'/tmp/wordpress-{site_name}.tar.gz'
-        subprocess.run(['wget', '-q', '-O', wp_tar_path, 
-            'https://wordpress.org/latest.tar.gz'], check=True)
-        subprocess.run(['sudo', 'tar', '-xzf', wp_tar_path, '-C', 
-            str(web_root.parent)], check=True)
-        
-        wordpress_dir = web_root.parent / 'wordpress'
-        if wordpress_dir.exists():
-            subprocess.run(['sudo', 'cp', '-r', f'{wordpress_dir}/.', str(web_root)], check=True)
-            subprocess.run(['sudo', 'rm', '-rf', str(wordpress_dir)], check=True)
-        subprocess.run(['sudo', 'rm', '-f', wp_tar_path], check=True)
-        
-        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:www-data', str(web_root)], check=True)
-        subprocess.run(['sudo', 'chmod', '-R', '755', str(web_root)], check=True)
-        
-        wp_content = f"""<?php
- /**
-  * The base configuration for WordPress
-  */
- define( 'DB_NAME', '{site_name}_db' );
- define( 'DB_USER', 'root' );
- define( 'DB_PASSWORD', '{db_password}' );
- define( 'DB_HOST', 'localhost' );
- define( 'DB_CHARSET', 'utf8mb4' );
- define( 'DB_COLLATE', 'utf8mb4_unicode_ci' );
-
- $table_prefix = 'wp_';
-
- define( 'WP_DEBUG', true );
- define( 'WP_DEBUG_LOG', true );
- define( 'WP_DEBUG_DISPLAY', false );
- define( 'WP_MEMORY_LIMIT', '256M' );
- define( 'FS_METHOD', 'direct' );
-
- if ( ! defined( 'ABSPATH' ) ) {{
-     define( 'ABSPATH', __DIR__ . '/' );
- }}
-
- require_once ABSPATH . 'wp-settings.php';
- """
-        
-        index_php_content = """<?php
- /**
-  * Front to the WordPress application.
-  */
- define( 'WP_USE_THEMES', true );
- require __DIR__ . '/wp-blog-header.php';
- """
-        
-        with open(web_root / "wp-config.php", 'w') as f:
-            f.write(wp_content)
-        with open(web_root / "index.php", 'w') as f:
-            f.write(index_php_content)
-    
-    def _create_laravel_site(self, site_base_dir: Path, site_name: str, version: int = 12,
-                              db_type: str = None, database_name: str = None):
-        """Create a Laravel site with PostgreSQL or Supabase support"""
-        import shutil
-        
-        if not database_name:
-            database_name = f"{site_name}_db"
-        
-        postgres_port = self.config.get('supabase.postgres_port', 5433)
-        postgres_password = self.config.get('supabase.postgres_password', 'postgres')
-        
-        supabase_api_url = f"http://localhost:{self.config.get('supabase.api_port', 8081)}"
-        
-        # Prepare command execution
-        # If we are already the correct user, run directly without sudo to preserve env
-        current_user = os.getenv('SUDO_USER') or os.getenv('USER')
-        exec_cmd_prefix = []
-        if os.geteuid() == 0 and current_user:
-            # We are root, drop to user
-            exec_cmd_prefix = ['sudo', '-u', current_user]
-
-        composer_project_cmd = exec_cmd_prefix + [
-            'composer', 'create-project',
-            f'laravel/laravel:^{version}.0',
-            str(site_base_dir),
-            '--no-interaction',
-            '--no-progress'
-        ]
-        
-        result = subprocess.run(composer_project_cmd, capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            if 'out of memory' in result.stderr.lower():
-                env = os.environ.copy()
-                env['COMPOSER_MEMORY_LIMIT'] = '-1'
-                composer_retry_cmd = exec_cmd_prefix + [
-                    'composer', 'create-project',
-                    f'laravel/laravel:^{version}.0',
-                    str(site_base_dir),
-                    '--no-interaction',
-                    '--no-progress'
-                ]
-                subprocess.run(composer_retry_cmd, env=env, check=True)
-            else:
-                raise Exception(f"Laravel installation failed: {result.stderr}")
-        
-        app_key = f"base64:{base64.b64encode(secrets.token_bytes(32)).decode()}"
-        
-        if db_type in ('postgres', 'supabase'):
-            env_content = f"""APP_NAME="{site_name}"
-APP_ENV=local
-APP_KEY={app_key}
-APP_DEBUG=true
-APP_URL=http://{site_name}.test
-
-LOG_CHANNEL=stack
-LOG_LEVEL=debug
-
-DB_CONNECTION=pgsql
-DB_HOST=127.0.0.1
-DB_PORT={postgres_port}
-DB_DATABASE={database_name}
-DB_USERNAME=postgres
-DB_PASSWORD={postgres_password}
-
-BROADCAST_DRIVER=log
-CACHE_DRIVER=file
-FILESYSTEM_DISK=local
-QUEUE_CONNECTION=sync
-SESSION_DRIVER=file
-SESSION_LIFETIME=120
-
-REDIS_HOST=127.0.0.1
-REDIS_PASSWORD=null
-REDIS_PORT=6379
-
-MAIL_MAILER=log
-MAIL_HOST=mailpit
-MAIL_PORT=1025
-MAIL_USERNAME=null
-MAIL_PASSWORD=null
-MAIL_ENCRYPTION=null
-MAIL_FROM_ADDRESS="hello@example.com"
-MAIL_FROM_NAME="{site_name}"
-
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-AWS_DEFAULT_REGION=us-east-1
-AWS_BUCKET=
-AWS_USE_PATH_STYLE_ENDPOINT=false
-
-PUSHER_APP_ID=
-PUSHER_APP_KEY=
-PUSHER_APP_SECRET=
-PUSHER_HOST=
-PUSHER_PORT=443
-PUSHER_SCHEME=https
-PUSHER_APP_CLUSTER=mt1
-
-VITE_APP_NAME="{site_name}"
-VITE_PUSHER_APP_KEY="${{PUSHER_APP_KEY}}"
-VITE_PUSHER_HOST="${{PUSHER_HOST}}"
-VITE_PUSHER_PORT="${{PUSHER_PORT}}"
-VITE_PUSHER_SCHEME="${{PUSHER_SCHEME}}"
-VITE_PUSHER_CLUSTER="${{PUSHER_APP_CLUSTER}}"
-"""
-            
-            if db_type == 'supabase':
-                env_content += f"""
-
-SUPABASE_URL={supabase_api_url}
-SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-"""
-        else:
-            db_password = self.config.get('mysql.password')
-            env_content = f"""APP_NAME="{site_name}"
-APP_ENV=local
-APP_KEY={app_key}
-APP_DEBUG=true
-APP_URL=http://{site_name}.test
-
-LOG_CHANNEL=stack
-LOG_LEVEL=debug
-
-DB_CONNECTION=mysql
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_DATABASE={database_name}
-DB_USERNAME=root
-DB_PASSWORD={db_password}
-
-BROADCAST_DRIVER=log
-CACHE_DRIVER=file
-FILESYSTEM_DISK=local
-QUEUE_CONNECTION=sync
-SESSION_DRIVER=file
-SESSION_LIFETIME=120
-
-REDIS_HOST=127.0.0.1
-REDIS_PASSWORD=null
-REDIS_PORT=6379
-
-MAIL_MAILER=log
-MAIL_HOST=mailpit
-MAIL_PORT=1025
-MAIL_USERNAME=null
-MAIL_PASSWORD=null
-MAIL_ENCRYPTION=null
-MAIL_FROM_ADDRESS="hello@example.com"
-MAIL_FROM_NAME="{site_name}"
-
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-AWS_DEFAULT_REGION=us-east-1
-AWS_BUCKET=
-AWS_USE_PATH_STYLE_ENDPOINT=false
-
-PUSHER_APP_ID=
-PUSHER_APP_KEY=
-PUSHER_APP_SECRET=
-PUSHER_HOST=
-PUSHER_PORT=443
-PUSHER_SCHEME=https
-PUSHER_APP_CLUSTER=mt1
-
-VITE_APP_NAME="{site_name}"
-VITE_PUSHER_APP_KEY="${{PUSHER_APP_KEY}}"
-VITE_PUSHER_HOST="${{PUSHER_HOST}}"
-VITE_PUSHER_PORT="${{PUSHER_PORT}}"
-VITE_PUSHER_SCHEME="${{PUSHER_SCHEME}}"
-VITE_PUSHER_CLUSTER="${{PUSHER_APP_CLUSTER}}"
-"""
-        
-        with open(site_base_dir / '.env', 'w') as f:
-            f.write(env_content)
-        
-        current_user = os.getenv('SUDO_USER') or os.getenv('USER')
-        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:www-data', str(site_base_dir)], check=True)
-        subprocess.run(['sudo', 'chmod', '-R', '775', str(site_base_dir / 'storage')], check=True)
-        subprocess.run(['sudo', 'chmod', '-R', '775', str(site_base_dir / 'bootstrap/cache')], check=True)
-        
-        return {'web_root': str(site_base_dir / 'public')}
