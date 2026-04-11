@@ -1,7 +1,10 @@
+import logging
 import subprocess
 import os
 from pathlib import Path
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 class SSLManager:
     def __init__(self, config):
@@ -25,7 +28,8 @@ class SSLManager:
                 capture_output=True, text=True
             )
             return result.returncode == 0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"is_mkcert_installed failed: {e}")
             return False
     
     def install_mkcert(self) -> bool:
@@ -44,7 +48,8 @@ class SSLManager:
             subprocess.run(['mkcert', '-install'], check=True)
             
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"install_mkcert failed: {e}")
             return False
     
     def create_ca(self) -> bool:
@@ -71,7 +76,8 @@ class SSLManager:
                 return True
             
             return False
-        except Exception:
+        except Exception as e:
+            logger.debug(f"create_ca failed: {e}")
             return False
     
     def _get_caroot_path(self) -> Optional[str]:
@@ -83,7 +89,8 @@ class SSLManager:
             )
             if result.returncode == 0:
                 return result.stdout.strip()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"_get_caroot_path failed: {e}")
             pass
         return None
     
@@ -111,7 +118,8 @@ class SSLManager:
                     subprocess.run(['mv', str(file_path), str(target)], check=True)
             
             return cert_file.exists() and key_file.exists()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"generate_certificate failed: {e}")
             return False
 
     def generate_cert(self, domain: str) -> Dict:
@@ -143,7 +151,7 @@ $hostFile = 'C:\\Windows\\System32\\drivers\\etc\\hosts'
 $domain = '{domain}'
 $entry = "`r`n127.0.0.1`t$domain`r`n::1`t$domain"
 # Cleanup any previous malformed entries or old entries for this domain
-$script = "(Get-Content $hostFile) | Where-Object {{ \$_ -notmatch '`n127' -and \$_ -notmatch '127.0.0.1\\s+$domain' -and \$_ -notmatch '::1\\s+$domain' }} | Set-Content $hostFile; Add-Content $hostFile -Value '$entry'"
+$script = "(Get-Content $hostFile) | Where-Object {{ $_ -notmatch '`n127' -and $_ -notmatch '127.0.0.1\\s+$domain' -and $_ -notmatch '::1\\s+$domain' }} | Set-Content $hostFile; Add-Content $hostFile -Value '$entry'"
 Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command $script"
 """
             # Base64 encode the script
@@ -156,7 +164,8 @@ Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy 
             ], check=True)
             
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"add_to_windows_hosts failed: {e}")
             return False
     
     def remove_from_windows_hosts(self, domain: str) -> bool:
@@ -183,7 +192,8 @@ Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile", "-ExecutionPoli
             ], check=True)
             
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"remove_from_windows_hosts failed: {e}")
             return False
     
     def get_certificate_info(self, domain: str) -> Optional[Dict]:
@@ -211,7 +221,8 @@ Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile", "-ExecutionPoli
                         info['valid_until'] = line.strip()
                 
                 return info
-        except Exception:
+        except Exception as e:
+            logger.debug(f"get_certificate_info failed: {e}")
             pass
         return None
     
@@ -249,7 +260,8 @@ Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile", "-ExecutionPoli
             self.remove_from_windows_hosts(domain)
             
             return removed
-        except Exception:
+        except Exception as e:
+            logger.debug(f"revoke_certificate failed: {e}")
             return False
     
     def setup_ssl_for_site(self, site_name: str, tld: str) -> Dict:

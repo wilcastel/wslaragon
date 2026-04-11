@@ -1,6 +1,9 @@
 import subprocess
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 class NginxManager:
     def __init__(self, config):
@@ -17,7 +20,8 @@ class NginxManager:
                 capture_output=True, text=True
             )
             return result.returncode == 0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"test_config failed: {e}")
             return False
     
     def reload(self) -> bool:
@@ -28,7 +32,8 @@ class NginxManager:
                 capture_output=True, text=True
             )
             return result.returncode == 0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"reload failed: {e}")
             return False
     
     def restart(self) -> bool:
@@ -39,7 +44,8 @@ class NginxManager:
                 capture_output=True, text=True
             )
             return result.returncode == 0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"restart failed: {e}")
             return False
     
     def create_site_config(self, site_name: str, document_root: str, 
@@ -212,7 +218,8 @@ server {{
             config_file = self.sites_enabled / f"{domain}.conf"
             subprocess.run(['sudo', 'rm', '-f', str(config_file)], check=True)
             return self.reload()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"disable_site failed: {e}")
             return False
     
     def remove_site(self, site_name: str) -> bool:
@@ -229,7 +236,8 @@ server {{
             subprocess.run(['sudo', 'rm', '-f', str(config_file)], check=True)
             
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"remove_site failed: {e}")
             return False
     
     def list_sites(self) -> Dict[str, Dict]:
@@ -254,6 +262,7 @@ server {{
             if config_file.exists():
                 with open(config_file, 'r') as f:
                     return f.read()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"get_site_config failed: {e}")
             pass
         return None

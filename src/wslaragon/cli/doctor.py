@@ -1,3 +1,4 @@
+import logging
 import click
 import subprocess
 import os
@@ -11,6 +12,7 @@ from typing import Tuple
 from ..core.config import Config
 from ..services.php import PHPManager
 
+logger = logging.getLogger(__name__)
 console = Console()
 
 def check_port(port: int, host: str = 'localhost') -> bool:
@@ -19,7 +21,8 @@ def check_port(port: int, host: str = 'localhost') -> bool:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(1)
             return s.connect_ex((host, port)) == 0
-    except:
+    except (OSError, ConnectionError) as e:
+        logger.debug(f"check_port failed for {host}:{port}: {e}")
         return False
 
 def get_service_status(service_name: str) -> Tuple[str, str]:
@@ -47,6 +50,7 @@ def get_service_status(service_name: str) -> Tuple[str, str]:
     except FileNotFoundError:
         return 'missing', 'Not installed'
     except Exception as e:
+        logger.debug(f"Service status check failed for {service_name}: {e}")
         return 'error', str(e)
 
 @click.command('doctor')

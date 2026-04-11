@@ -1,6 +1,8 @@
 import subprocess
-import psutil
+import logging
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 class ServiceManager:
     def __init__(self):
@@ -24,7 +26,8 @@ class ServiceManager:
                 capture_output=True, text=True
             )
             return result.stdout.strip() == 'active'
-        except Exception:
+        except Exception as e:
+            logger.debug(f"is_running failed: {e}")
             return False
     
     def start(self, service_name: str) -> bool:
@@ -39,7 +42,8 @@ class ServiceManager:
                 capture_output=True, text=True
             )
             return result.returncode == 0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"start failed: {e}")
             return False
     
     def stop(self, service_name: str) -> bool:
@@ -54,7 +58,8 @@ class ServiceManager:
                 capture_output=True, text=True
             )
             return result.returncode == 0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"stop failed: {e}")
             return False
     
     def restart(self, service_name: str) -> bool:
@@ -69,7 +74,8 @@ class ServiceManager:
                 capture_output=True, text=True
             )
             return result.returncode == 0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"restart failed: {e}")
             return False
     
     def enable(self, service_name: str) -> bool:
@@ -84,7 +90,8 @@ class ServiceManager:
                 capture_output=True, text=True
             )
             return result.returncode == 0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"enable failed: {e}")
             return False
     
     def status(self) -> Dict[str, Dict]:

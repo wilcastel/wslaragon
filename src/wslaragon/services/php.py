@@ -1,7 +1,10 @@
 import subprocess
+import logging
 import re
 from pathlib import Path
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 class PHPManager:
     def __init__(self, config):
@@ -21,7 +24,8 @@ class PHPManager:
                 if match:
                     versions.add(match.group(1))
             return sorted(list(versions))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"get_installed_versions failed: {e}")
             return []
     
     def get_current_version(self) -> Optional[str]:
@@ -33,7 +37,8 @@ class PHPManager:
             )
             match = re.search(r'PHP (\d+\.\d+\.\d+)', result.stdout)
             return match.group(1) if match else None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"get_current_version failed: {e}")
             return None
     
     def switch_version(self, version: str) -> bool:
@@ -56,7 +61,8 @@ class PHPManager:
                 subprocess.run(['sudo', 'systemctl', 'start', fpm_service], check=True)
             
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"switch_version failed: {e}")
             return False
     
     def read_ini(self) -> Dict[str, str]:
@@ -69,7 +75,8 @@ class PHPManager:
                     if line and not line.startswith(';') and '=' in line:
                         key, value = line.split('=', 1)
                         config[key.strip()] = value.strip()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"read_ini failed: {e}")
             pass
         return config
     
@@ -112,7 +119,8 @@ class PHPManager:
             process.communicate(input=''.join(updated_lines))
             
             return process.returncode == 0
-        except Exception:
+        except Exception as e:
+            logger.debug(f"write_ini failed: {e}")
             return False
 
     def update_config(self, key: str, value: str) -> bool:
@@ -133,7 +141,8 @@ class PHPManager:
                 subprocess.run('sudo systemctl restart php*-fpm', shell=True, check=True)
                 return True
             return False
-        except Exception:
+        except Exception as e:
+            logger.debug(f"update_config failed: {e}")
             return False
     
     def get_extensions(self) -> List[str]:
@@ -144,7 +153,8 @@ class PHPManager:
                 capture_output=True, text=True
             )
             return [line.strip() for line in result.stdout.split('\n') if line.strip()]
-        except Exception:
+        except Exception as e:
+            logger.debug(f"get_extensions failed: {e}")
             return []
     
     def enable_extension(self, extension: str) -> bool:
@@ -161,7 +171,8 @@ class PHPManager:
             ], check=True)
             
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"enable_extension failed: {e}")
             return False
     
     def disable_extension(self, extension: str) -> bool:
@@ -178,7 +189,8 @@ class PHPManager:
             ], check=True)
             
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"disable_extension failed: {e}")
             return False
     
     def get_ini_directives(self) -> Dict[str, str]:
@@ -204,5 +216,6 @@ class PHPManager:
                     break
             
             return config
-        except Exception:
+        except Exception as e:
+            logger.debug(f"get_ini_directives failed: {e}")
             return {}
