@@ -3,35 +3,17 @@
 # WSLaragon Installation Script
 # This script installs WSLaragon and its dependencies on Ubuntu/Debian
 
+# Source shared variables
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/vars.sh"
+
 set -e
 
 echo "🚀 WSLaragon Installation Script"
 echo "================================"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Function to print colored output
-print_status() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Check if running as root
-if [[ $EUID -eq 0 ]]; then
-   print_error "This script should not be run as root. Run as a regular user."
-   exit 1
-fi
+# Check if running as root (should NOT be root)
+check_not_root
 
 # Update system packages
 print_status "Updating system packages..."
@@ -48,19 +30,19 @@ sudo apt install -y \
     python3-venv \
     nginx \
     mariadb-server \
-    php8.3 \
-    php8.3-fpm \
-    php8.3-mysql \
-    php8.3-curl \
-    php8.3-gd \
-    php8.3-mbstring \
-    php8.3-xml \
-    php8.3-zip \
-    php8.3-bcmath \
-    php8.3-intl \
-    php8.3-soap \
-    php8.3-xsl \
-    php8.3-opcache \
+    "php${PHP_VERSION}" \
+    "php${PHP_VERSION}-fpm" \
+    "php${PHP_VERSION}-mysql" \
+    "php${PHP_VERSION}-curl" \
+    "php${PHP_VERSION}-gd" \
+    "php${PHP_VERSION}-mbstring" \
+    "php${PHP_VERSION}-xml" \
+    "php${PHP_VERSION}-zip" \
+    "php${PHP_VERSION}-bcmath" \
+    "php${PHP_VERSION}-intl" \
+    "php${PHP_VERSION}-soap" \
+    "php${PHP_VERSION}-xsl" \
+    "php${PHP_VERSION}-opcache" \
     supervisor
 
 # Install mkcert for SSL
@@ -75,19 +57,18 @@ mkcert -install
 
 # Install Python dependencies
 print_status "Installing Python dependencies..."
-cd /opt
-sudo mkdir -p wslaragon
-sudo chown $USER:$USER wslaragon
-cd wslaragon
+sudo mkdir -p "$INSTALL_DIR"
+sudo chown "$USER:$USER" "$INSTALL_DIR"
+cd "$INSTALL_DIR"
 
 # Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
 # Clone or copy WSLaragon files
-if [ -d "$HOME/wslaragon" ]; then
-    print_status "Copying WSLaragon files from $HOME/wslaragon..."
-    cp -r $HOME/wslaragon/* .
+if [ -d "$PROJECT_DIR" ]; then
+    print_status "Copying WSLaragon files from $PROJECT_DIR..."
+    cp -r "$PROJECT_DIR"/* .
 else
     print_status "Cloning WSLaragon from repository..."
     git clone https://github.com/your-username/wslaragon.git .
@@ -99,8 +80,8 @@ pip install -e .
 
 # Create directories
 print_status "Creating WSLaragon directories..."
-mkdir -p ~/.wslaragon/{sites,ssl,logs}
-mkdir -p "$HOME/web"
+mkdir -p "$CONFIG_DIR"/{sites,ssl,logs}
+mkdir -p "$WEB_ROOT"
 
 # Setup Nginx configuration
 print_status "Configuring Nginx..."
@@ -114,13 +95,13 @@ fi
 
 # Setup PHP-FPM
 print_status "Configuring PHP-FPM..."
-sudo systemctl enable php8.3-fpm
-sudo systemctl start php8.3-fpm
+sudo systemctl enable "php${PHP_VERSION}-fpm"
+sudo systemctl start "php${PHP_VERSION}-fpm"
 
 # Setup MariaDB
 print_status "Configuring MariaDB..."
-sudo systemctl enable mariadb
-sudo systemctl start mariadb
+sudo systemctl enable "$MARIADB_SERVICE"
+sudo systemctl start "$MARIADB_SERVICE"
 
 # Secure MySQL installation
 print_warning "Please secure your MySQL installation:"
@@ -128,15 +109,15 @@ echo "Run: sudo mysql_secure_installation"
 
 # Create systemd service for WSLaragon web interface
 print_status "Creating systemd service..."
-sudo cp /opt/wslaragon/scripts/wslaragon-web.service /etc/systemd/system/
+sudo cp "$INSTALL_DIR/scripts/wslaragon-web.service" /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable wslaragon-web
+sudo systemctl enable "$WSLARAGON_WEB_SERVICE"
 
 # Setup permissions
 print_status "Setting up permissions..."
-sudo chown -R $USER:$USER /opt/wslaragon
-sudo chown -R $USER:$USER ~/.wslaragon
-sudo usermod -a -G www-data $USER
+sudo chown -R "$USER:$USER" "$INSTALL_DIR"
+sudo chown -R "$USER:$USER" "$CONFIG_DIR"
+sudo usermod -a -G www-data "$USER"
 
 # Add user to sudoers for passwordless operations (optional)
 print_warning "Adding user to sudoers for WSLaragon operations..."
@@ -153,15 +134,15 @@ fi
 
 # Start services
 print_status "Starting services..."
-sudo systemctl start nginx
-sudo systemctl start wslaragon-web
+sudo systemctl start "$NGINX_SERVICE"
+sudo systemctl start "$WSLARAGON_WEB_SERVICE"
 
 # Display installation summary
 echo ""
 echo "✅ WSLaragon installation completed!"
 echo "=================================="
 echo ""
-echo "Web Interface: http://localhost:8080"
+echo "Web Interface: http://localhost:${WEBSERVICE_PORT}"
 echo "CLI Command: wslaragon --help"
 echo ""
 echo "What's next:"
@@ -170,9 +151,9 @@ echo "2. Restart shell to enable completion"
 echo "3. Create your first site: wslaragon site create myproject"
 echo ""
 echo "Configuration files:"
-echo "- WSLaragon config: ~/.wslaragon/config.yaml"
+echo "- WSLaragon config: $CONFIG_DIR/config.yaml"
 echo "- Nginx sites: /etc/nginx/sites-available/"
-echo "- PHP config: /etc/php/8.1/fpm/php.ini"
+echo "- PHP config: $PHP_INI"
 echo "- MySQL config: /etc/mysql/my.cnf"
 echo ""
 echo "For more information, see the documentation."
@@ -185,6 +166,5 @@ wslaragon --version
 nginx -t
 php -v
 mysql --version
-
 echo ""
 print_status "Installation verification completed. Enjoy using WSLaragon! 🎉"

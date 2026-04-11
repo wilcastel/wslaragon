@@ -3,23 +3,14 @@
 # WSLaragon Development Setup Script
 # Adjusts the project for your specific environment
 
+# Source shared variables
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/vars.sh"
+
 set -e
 
 echo "🔧 WSLaragon Environment Setup"
 echo "============================="
-
-# Colors
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-print_status() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
 
 # Check if we're in WSL
 if ! grep -q Microsoft /proc/version 2>/dev/null; then
@@ -31,8 +22,7 @@ print_status "Checking your current setup..."
 
 echo "Checking PHP..."
 if command -v php &> /dev/null; then
-    PHP_VERSION=$(php -v | head -n1 | cut -d' ' -f2 | cut -d'-' -f1)
-    echo "✓ PHP found: $PHP_VERSION"
+    PHP_INSTALLED_VERSION=$(php -v | head -n1 | cut -d' ' -f2 | cut -d'-' -f1)    echo "✓ PHP found: $PHP_INSTALLED_VERSION"
 else
     echo "✗ PHP not found"
 fi
@@ -63,18 +53,17 @@ fi
 
 # Create required directories
 print_status "Creating project directories..."
-mkdir -p ~/.wslaragon/{sites,ssl,logs}
-mkdir -p "$HOME/web"
+mkdir -p "$CONFIG_DIR"/{sites,ssl,logs}
+mkdir -p "$WEB_ROOT"
 
 # Create initial config if doesn't exist
-CONFIG_FILE="$HOME/.wslaragon/config.yaml"
+CONFIG_FILE="$CONFIG_DIR/config.yaml"
 if [ ! -f "$CONFIG_FILE" ]; then
     print_status "Creating initial configuration..."
     cat > "$CONFIG_FILE" << EOF
 php:
-  version: "8.3"
-  ini_file: "/etc/php/8.3/fpm/php.ini"
-  extensions_dir: "/usr/lib/php/20230831"
+  version: "$PHP_VERSION"  ini_file: "$PHP_INI"
+  extensions_dir: "$PHP_EXTENSIONS_DIR"
 
 nginx:
   config_dir: "/etc/nginx"
@@ -86,15 +75,15 @@ mysql:
   config_file: "/etc/mysql/mariadb.conf.d/50-server.cnf"
 
 ssl:
-  ca_file: "$HOME/.wslaragon/ssl/rootCA.pem"
-  ca_key: "$HOME/.wslaragon/ssl/rootCA-key.pem"
+  ca_file: "$SSL_DIR/rootCA.pem"
+  ca_key: "$SSL_DIR/rootCA-key.pem"
 
 sites:
   tld: ".test"
-  document_root: "$HOME/web"
+  document_root: "$WEB_ROOT"
 
 windows:
-  hosts_file: "/mnt/c/Windows/System32/drivers/etc/hosts"
+  hosts_file: "$WINDOWS_HOSTS_FILE"
 EOF
     echo "✓ Configuration created at $CONFIG_FILE"
 else
@@ -104,14 +93,14 @@ fi
 # Setup SSL if mkcert is installed
 if command -v mkcert &> /dev/null; then
     print_status "Setting up SSL certificates..."
-    if [ ! -f "$HOME/.wslaragon/ssl/rootCA.pem" ]; then
+    if [ ! -f "$SSL_DIR/rootCA.pem" ]; then
         mkcert -install
         CAROOT=$(mkcert -CAROOT)
         if [ -f "$CAROOT/rootCA.pem" ]; then
-            cp "$CAROOT/rootCA.pem" "$HOME/.wslaragon/ssl/"
+            cp "$CAROOT/rootCA.pem" "$SSL_DIR/"
         fi
         if [ -f "$CAROOT/rootCA-key.pem" ]; then
-            cp "$CAROOT/rootCA-key.pem" "$HOME/.wslaragon/ssl/"
+            cp "$CAROOT/rootCA-key.pem" "$SSL_DIR/"
         fi
         echo "✓ SSL certificates copied"
     else
@@ -121,7 +110,7 @@ fi
 
 # Install WSLaragon Python package
 print_status "Installing WSLaragon..."
-cd /opt/wslaragon 2>/dev/null || cd ~/wslaragon
+cd "$INSTALL_DIR" 2>/dev/null || cd "$PROJECT_DIR"
 if [ -d "venv" ]; then
     source venv/bin/activate
     pip install -e .
@@ -136,17 +125,17 @@ fi
 
 # Create systemd service for web interface
 print_status "Setting up web interface service..."
-if [ -f "/opt/wslaragon/scripts/wslaragon-web.service" ]; then
-    sudo cp /opt/wslaragon/scripts/wslaragon-web.service /etc/systemd/system/
+if [ -f "$INSTALL_DIR/scripts/wslaragon-web.service" ]; then
+    sudo cp "$INSTALL_DIR/scripts/wslaragon-web.service" /etc/systemd/system/
     sudo systemctl daemon-reload
-    sudo systemctl enable wslaragon-web
+    sudo systemctl enable "$WSLARAGON_WEB_SERVICE"
     echo "✓ Web interface service configured"
 fi
 
 # Setup permissions
 print_status "Setting up permissions..."
-sudo chown -R $USER:$USER "$HOME/web"
-sudo usermod -a -G www-data $USER
+sudo chown -R "$USER:$USER" "$WEB_ROOT"
+sudo usermod -a -G www-data "$USER"
 
 # Setup sudoers for passwordless operations
 print_status "Configuring sudoers..."
@@ -170,10 +159,10 @@ echo ""
 echo "Next steps:"
 echo "1. Start services: wslaragon service start nginx"
 echo "2. Create first site: wslaragon site create myproject --php --mysql"
-echo "3. Access web interface: http://localhost:8080"
+echo "3. Access web interface: http://localhost:${WEBSERVICE_PORT}"
 echo "4. Browse to your site: http://myproject.test"
 echo ""
-echo "Your projects will be stored in: $HOME/web/"
+echo "Your projects will be stored in: $WEB_ROOT/"
 echo "Configuration file: $CONFIG_FILE"
 echo ""
 echo "🚀 Happy coding with WSLaragon!"
