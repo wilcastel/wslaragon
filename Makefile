@@ -1,7 +1,7 @@
 # WSLaragon Makefile
 # Common development tasks
 
-.PHONY: help install install-dev test lint format clean run-tests check
+.PHONY: help install install-dev test test-unit test-integration test-cov lint format clean run-tests check
 
 # Colors
 GREEN := $(shell tput setaf 2 2>/dev/null || echo "")
@@ -44,16 +44,20 @@ install-dev:
 	pip install -e ".[dev]"
 
 test:
-	@echo "$(GREEN)Running tests...$(RESET)"
-	pytest -v
+	@echo "$(GREEN)Running all tests...$(RESET)"
+	pytest tests/ --tb=short -q --run-slow
 
 test-unit:
 	@echo "$(GREEN)Running unit tests...$(RESET)"
-	pytest -v tests/unit/
+	pytest tests/unit/ -v --tb=short
+
+test-integration:
+	@echo "$(GREEN)Running integration tests...$(RESET)"
+	pytest tests/integration/ -v --run-slow --tb=short
 
 test-cov:
 	@echo "$(GREEN)Running tests with coverage...$(RESET)"
-	pytest --cov=src --cov-report=html --cov-report=term-missing
+	pytest --cov=src --cov-report=html --cov-report=term-missing --cov-fail-under=90
 
 lint:
 	@echo "$(GREEN)Running linters...$(RESET)"
