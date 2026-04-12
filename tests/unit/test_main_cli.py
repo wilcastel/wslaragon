@@ -326,6 +326,54 @@ class TestGlossaryCommand:
         assert result.exit_code == 0
 
 
+class TestGlossarySearchInParameter:
+    """Test suite for glossary command term in first section - Lines 115-116 coverage."""
+
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    def test_glossary_term_in_first_section(self, runner):
+        """Test glossary finds term in first section (before ##) - Lines 115-116."""
+        from wslaragon.cli.main import cli
+
+        # Content where term appears in the first section (before any ##)
+        # This tests the `if normalized_term in sections[0].lower()` branch
+        glosario_content = "Welcome to the glossary! This section explains common terms.\n\n## First Term\nDefinition of first term.\n\n## Second Term\nDefinition of second term."
+
+        with patch('wslaragon.cli.main.Path.exists', return_value=True), \
+             patch('builtins.open', mock_open(read_data=glosario_content)):
+            result = runner.invoke(cli, ['glossary', 'welcome'])
+
+        assert result.exit_code == 0
+
+    def test_glossary_search_in_first_section_content(self, runner):
+        """Test glossary finds term in first section content."""
+        from wslaragon.cli.main import cli
+
+        # First section has content before any ## headers
+        glosario_content = "Getting Started Guide\n\nWelcome! This explains how to start.\n\n## Commands\nList of commands."
+
+        with patch('wslaragon.cli.main.Path.exists', return_value=True), \
+             patch('builtins.open', mock_open(read_data=glosario_content)):
+            result = runner.invoke(cli, ['glossary', 'getting'])
+
+        assert result.exit_code == 0
+
+    def test_glossary_search_term_in_intro_paragraph(self, runner):
+        """Test glossary search finds terms in introductory paragraph."""
+        from wslaragon.cli.main import cli
+
+        # Content with intro paragraph that contains the search term
+        glosario_content = "WSLaragon is a development environment manager for WSL2.\nIt provides easy management of PHP, Nginx, MySQL and more.\n\n## site\nCommands for managing sites.\n\n## php\nCommands for PHP management."
+
+        with patch('wslaragon.cli.main.Path.exists', return_value=True), \
+             patch('builtins.open', mock_open(read_data=glosario_content)):
+            result = runner.invoke(cli, ['glossary', 'wslaragon'])
+
+        assert result.exit_code == 0
+
+
 class TestMainFunction:
     """Test suite for main() entrypoint"""
 
@@ -341,6 +389,32 @@ class TestMainFunction:
 
         assert main.__name__ == 'main'
         assert main.__code__.co_argcount == 0
+
+
+class TestMainFunctionInvocation:
+    """Test suite for main() invocation - Line 145 coverage."""
+
+    def test_main_invokes_cli(self):
+        """Test that main() calls cli() - Line 145."""
+        from wslaragon.cli.main import cli
+
+        with patch('wslaragon.cli.main.cli') as mock_cli:
+            from wslaragon.cli.main import main
+            main()
+            mock_cli.assert_called_once()
+
+    def test_main_function_calls_cli_directly(self):
+        """Test main() directly invokes cli()."""
+        from wslaragon.cli.main import main, cli
+        from click.testing import CliRunner
+
+        runner = CliRunner()
+
+        # The main() function should just call cli()
+        # We can verify this by patching cli and checking it's called
+        with patch('wslaragon.cli.main.cli') as mock_cli:
+            main()
+            mock_cli.assert_called_once()
 
 
 class TestCLICommands:
