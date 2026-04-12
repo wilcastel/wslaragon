@@ -177,6 +177,47 @@ class TestSSLManagerCreateCA:
         
         assert result is False
 
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_create_ca_returns_false_on_exception(self, mock_run, ssl_manager, tmp_path):
+        """Test create_ca returns False on exception"""
+        ssl_manager.is_mkcert_installed = MagicMock(return_value=True)
+        ssl_manager._get_caroot_path = MagicMock(return_value=str(tmp_path))
+        mock_run.side_effect = Exception("Command failed")
+        
+        (tmp_path / "rootCA.pem").write_text("cert")
+        
+        ssl_manager.ssl_dir = tmp_path
+        ssl_manager.ca_file = tmp_path / "rootCA.pem"
+        ssl_manager.ca_key = tmp_path / "rootCA-key.pem"
+
+        result = ssl_manager.create_ca()
+        
+        assert result is False
+
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_create_ca_copies_ca_files(self, mock_run, ssl_manager, tmp_path):
+        """Test create_ca copies CA files successfully"""
+        ssl_manager.is_mkcert_installed = MagicMock(return_value=True)
+        
+        caroot_dir = tmp_path / "caroot"
+        caroot_dir.mkdir()
+        (caroot_dir / "rootCA.pem").write_text("ca-cert")
+        (caroot_dir / "rootCA-key.pem").write_text("ca-key")
+        
+        ssl_dir = tmp_path/ "ssl"
+        ssl_dir.mkdir()
+        
+        ssl_manager._get_caroot_path = MagicMock(return_value=str(caroot_dir))
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        ssl_manager.ssl_dir = ssl_dir
+        ssl_manager.ca_file = ssl_dir / "rootCA.pem"
+        ssl_manager.ca_key = ssl_dir / "rootCA-key.pem"
+
+        result = ssl_manager.create_ca()
+        
+        assert result is True
+
 
 class TestSSLManagerGetCarootPath:
     """Test suite for _get_caroot_path method"""
@@ -204,6 +245,15 @@ class TestSSLManagerGetCarootPath:
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_run.return_value = mock_result
+
+        result = ssl_manager._get_caroot_path()
+        
+        assert result is None
+
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_get_caroot_path_returns_none_on_exception(self, mock_run, ssl_manager):
+        """Test _get_caroot_path returns None on exception"""
+        mock_run.side_effect = Exception("Command failed")
 
         result = ssl_manager._get_caroot_path()
         
@@ -264,6 +314,40 @@ class TestSSLManagerGenerateCertificate:
         result = ssl_manager.generate_certificate("example.test", ["www.example.test"])
         
         assert isinstance(result, bool)
+
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_generate_certificate_returns_false_on_exception(self, mock_run, ssl_manager):
+        """Test generate_certificate returns False on exception"""
+        ssl_manager.is_mkcert_installed = MagicMock(return_value=True)
+        mock_run.side_effect = Exception("Command failed")
+
+        result = ssl_manager.generate_certificate("example.test")
+        
+        assert result is False
+
+    @patch('wslaragon.services.ssl.subprocess.run')
+    @patch('wslaragon.services.ssl.Path')
+    def test_generate_certificate_moves_files(self, mock_path_class, mock_run, ssl_manager, tmp_path):
+        """Test generate_certificate moves generated files to ssl_dir"""
+        ssl_manager.is_mkcert_installed = MagicMock(return_value=True)
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        ssl_dir = tmp_path / "ssl"
+        ssl_manager.ssl_dir = ssl_dir
+        
+        (ssl_dir / "example.test.pem").write_text("cert")
+        (ssl_dir / "example.test-key.pem").write_text("key")
+
+        mock_file = MagicMock()
+        mock_file.is_file.return_value = True
+        mock_file.name = "example.test.pem"
+        mock_file_instance = MagicMock()
+        mock_file_instance.glob.return_value = iter([mock_file])
+        mock_path_class.return_value = mock_file_instance
+
+        result = ssl_manager.generate_certificate("example.test")
+        
+        assert result is True
 
 
 class TestSSLManagerGenerateCert:
@@ -364,6 +448,45 @@ class TestSSLManagerAddToWindowsHosts:
         mock_run.side_effect = Exception("PowerShell failed")
 
         result = ssl_manager.add_to_windows_hosts("example.test")
+        
+        assert result is False
+
+
+class TestSSLManagerRemoveFromWindowsHosts:
+    """Test suite for remove_from_windows_hosts method"""
+
+    @pytest.fixture
+    def ssl_manager(self, mock_config, tmp_path):
+        from wslaragon.services.ssl import SSLManager
+        config = mock_config
+        ssl_dir = tmp_path / "ssl"
+        ssl_dir.mkdir(parents=True)
+        config.get.side_effect = lambda key, default=None: {
+            "ssl.dir": str(ssl_dir),
+            "ssl.ca_file": str(ssl_dir / "rootCA.pem"),
+            "ssl.ca_key": str(ssl_dir / "rootCA-key.pem"),
+            "windows.hosts_file": str(tmp_path / "hosts"),
+        }.get(key, default)
+        return SSLManager(config)
+
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_remove_from_windows_hosts_success(self, mock_run, ssl_manager):
+        """Test remove_from_windows_hosts succeeds"""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = ssl_manager.remove_from_windows_hosts("example.test")
+        
+        assert result is True
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert 'powershell.exe' in call_args
+
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_remove_from_windows_hosts_returns_false_on_exception(self, mock_run,ssl_manager):
+        """Test remove_from_windows_hosts returns False on exception"""
+        mock_run.side_effect = Exception("PowerShell failed")
+
+        result = ssl_manager.remove_from_windows_hosts("example.test")
         
         assert result is False
 
@@ -486,6 +609,22 @@ class TestSSLManagerRevokeCertificate:
         
         ssl_manager.remove_from_windows_hosts.assert_called_once_with("example.test")
 
+    def test_revoke_certificate_returns_false_on_exception(self, ssl_manager, tmp_path):
+        """Test revoke_certificate returns False on exception"""
+        ssl_dir = tmp_path / "ssl"
+        ssl_manager.ssl_dir = ssl_dir
+        
+        cert_file = ssl_dir / "example.test.pem"
+        key_file = ssl_dir / "example.test-key.pem"
+        cert_file.write_text("cert")
+        key_file.write_text("key")
+        
+        ssl_manager.remove_from_windows_hosts = MagicMock(side_effect=Exception("Error"))
+
+        result = ssl_manager.revoke_certificate("example.test")
+        
+        assert result is False
+
 
 class TestSSLManagerGetCertificateInfo:
     """Test suite for get_certificate_info method"""
@@ -554,6 +693,48 @@ class TestSSLManagerGetCertificateInfo:
         result = ssl_manager.get_certificate_info("example.test")
         
         assert result is None
+
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_get_certificate_info_returns_none_on_exception(self, mock_run, ssl_manager, tmp_path):
+        """Test get_certificate_info returns None on exception"""
+        ssl_dir = tmp_path / "ssl"
+        ssl_manager.ssl_dir = ssl_dir
+        
+        cert_file = ssl_dir / "example.test.pem"
+        cert_file.write_text("cert")
+        
+        mock_run.side_effect = Exception("OpenSSL failed")
+
+        result = ssl_manager.get_certificate_info("example.test")
+        
+        assert result is None
+
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_get_certificate_info_parses_all_fields(self, mock_run, ssl_manager, tmp_path):
+        """Test get_certificate_info parses all certificate fields"""
+        ssl_dir = tmp_path / "ssl"
+        ssl_manager.ssl_dir = ssl_dir
+        
+        cert_file = ssl_dir / "example.test.pem"
+        cert_file.write_text("cert")
+        
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = """Certificate:
+    Subject: CN=example.test
+    Issuer: CN=mkcert development CA
+    Not Before: Jan  1 00:00:00 2024 GMT
+    Not After : Dec  31 23:59:59 2024 GMT
+"""
+        mock_run.return_value = mock_result
+
+        result = ssl_manager.get_certificate_info("example.test")
+        
+        assert result is not None
+        assert result['subject'] == 'Subject: CN=example.test'
+        assert result['issuer'] == 'Issuer: CN=mkcert development CA'
+        assert 'valid_from' in result
+        assert 'valid_until' in result
 
 
 class TestSSLManagerSetupSSLForSite:

@@ -237,6 +237,15 @@ class TestMySQLManagerStop:
         
         assert result is False
 
+    @patch('wslaragon.services.mysql.subprocess.run')
+    def test_stop_returns_false_on_exception(self, mock_run, mysql_manager):
+        """Test stop returns False on exception"""
+        mock_run.side_effect = Exception("Error")
+
+        result = mysql_manager.stop()
+        
+        assert result is False
+
 
 class TestMySQLManagerRestart:
     """Test suite for restart method"""
@@ -263,6 +272,15 @@ class TestMySQLManagerRestart:
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_run.return_value = mock_result
+
+        result = mysql_manager.restart()
+        
+        assert result is False
+
+    @patch('wslaragon.services.mysql.subprocess.run')
+    def test_restart_returns_false_on_exception(self, mock_run, mysql_manager):
+        """Test restart returns False on exception"""
+        mock_run.side_effect = Exception("Error")
 
         result = mysql_manager.restart()
         
@@ -396,6 +414,19 @@ class TestMySQLManagerGetVersion:
         
         assert result is None
 
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_get_version_returns_none_on_exception(self, mock_connect, mysql_manager):
+        """Test get_version returns None on general exception"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = Exception("Query error")
+
+        result = mysql_manager.get_version()
+        
+        assert result is None
+
 
 class TestMySQLManagerListDatabases:
     """Test suite for list_databases method"""
@@ -430,6 +461,19 @@ class TestMySQLManagerListDatabases:
     def test_list_databases_returns_empty_on_error(self, mock_connect, mysql_manager):
         """Test list_databases returns empty list on error"""
         mock_connect.return_value = None
+
+        result = mysql_manager.list_databases()
+        
+        assert result == []
+
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_list_databases_returns_empty_on_exception(self, mock_connect, mysql_manager):
+        """Test list_databases returns empty list on general exception"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = Exception("Query error")
 
         result = mysql_manager.list_databases()
         
@@ -530,6 +574,20 @@ class TestMySQLManagerCreateDatabase:
         assert result is False
         assert error is not None
 
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_create_database_handles_general_exception(self, mock_connect, mysql_manager):
+        """Test create_database handles general exceptions"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = Exception("Unexpected error")
+
+        result, error = mysql_manager.create_database("mydb")
+        
+        assert result is False
+        assert error is not None
+
 
 class TestMySQLManagerDropDatabase:
     """Test suite for drop_database method"""
@@ -562,6 +620,19 @@ class TestMySQLManagerDropDatabase:
     def test_drop_database_returns_false_on_error(self, mock_connect, mysql_manager):
         """Test drop_database returns False on error"""
         mock_connect.return_value = None
+
+        result = mysql_manager.drop_database("mydb")
+        
+        assert result is False
+
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_drop_database_returns_false_on_exception(self, mock_connect, mysql_manager):
+        """Test drop_database returns False on general exception"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = Exception("Query error")
 
         result = mysql_manager.drop_database("mydb")
         
@@ -608,6 +679,19 @@ class TestMySQLManagerDatabaseExists:
         
         assert result is False
 
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_database_exists_returns_false_on_exception(self, mock_connect, mysql_manager):
+        """Test database_exists returns False on exception"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = Exception("Query error")
+
+        result = mysql_manager.database_exists("mydb")
+        
+        assert result is False
+
 
 class TestMySQLManagerListUsers:
     """Test suite for list_users method"""
@@ -638,6 +722,19 @@ class TestMySQLManagerListUsers:
     def test_list_users_returns_empty_on_error(self, mock_connect, mysql_manager):
         """Test list_users returns empty list on error"""
         mock_connect.return_value = None
+
+        result = mysql_manager.list_users()
+        
+        assert result == []
+
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_list_users_returns_empty_on_exception(self, mock_connect, mysql_manager):
+        """Test list_users returns empty list on general exception"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = Exception("Query error")
 
         result = mysql_manager.list_users()
         
@@ -689,6 +786,39 @@ class TestMySQLManagerCreateUser:
         
         assert result is True
 
+    def test_create_user_rejects_empty_host(self, mysql_manager):
+        """Test create_user rejects empty host"""
+        result = mysql_manager.create_user("testuser", "password123", host="")
+        
+        assert result is False
+
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_create_user_returns_false_on_pymysql_error(self, mock_connect, mysql_manager):
+        """Test create_user returns False on pymysql error"""
+        import pymysql
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = pymysql.Error("DB error")
+
+        result = mysql_manager.create_user("testuser", "password123")
+        
+        assert result is False
+
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_create_user_returns_false_on_exception(self, mock_connect, mysql_manager):
+        """Test create_user returns False on general exception"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = Exception("Unexpected error")
+
+        result = mysql_manager.create_user("testuser", "password123")
+        
+        assert result is False
+
 
 class TestMySQLManagerDropUser:
     """Test suite for drop_user method"""
@@ -715,6 +845,28 @@ class TestMySQLManagerDropUser:
         result = mysql_manager.drop_user("testuser")
         
         assert result is True
+
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_drop_user_returns_false_on_no_connection(self, mock_connect, mysql_manager):
+        """Test drop_user returns False when no connection"""
+        mock_connect.return_value = None
+
+        result = mysql_manager.drop_user("testuser")
+        
+        assert result is False
+
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_drop_user_returns_false_on_exception(self, mock_connect, mysql_manager):
+        """Test drop_user returns False on general exception"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = Exception("Query error")
+
+        result = mysql_manager.drop_user("testuser")
+        
+        assert result is False
 
 
 class TestMySQLManagerGrantPrivileges:
@@ -768,6 +920,28 @@ class TestMySQLManagerGrantPrivileges:
         
         assert result is True
 
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_grant_privileges_returns_false_on_no_connection(self, mock_connect, mysql_manager):
+        """Test grant_privileges returns False when no connection"""
+        mock_connect.return_value = None
+
+        result = mysql_manager.grant_privileges("mydb", "user")
+        
+        assert result is False
+
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_grant_privileges_returns_false_on_exception(self, mock_connect, mysql_manager):
+        """Test grant_privileges returns False on general exception"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = Exception("Query error")
+
+        result = mysql_manager.grant_privileges("mydb", "user")
+        
+        assert result is False
+
 
 class TestMySQLManagerGetDatabaseSize:
     """Test suite for get_database_size method"""
@@ -818,6 +992,19 @@ class TestMySQLManagerGetDatabaseSize:
         
         assert result is None
 
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_get_database_size_returns_none_on_exception(self, mock_connect, mysql_manager):
+        """Test get_database_size returns None on general exception"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = Exception("Query error")
+
+        result = mysql_manager.get_database_size("mydb")
+        
+        assert result is None
+
 
 class TestMySQLManagerGetDatabaseTables:
     """Test suite for get_database_tables method"""
@@ -853,6 +1040,19 @@ class TestMySQLManagerGetDatabaseTables:
     def test_get_database_tables_returns_empty_on_error(self, mock_connect, mysql_manager):
         """Test get_database_tables returns empty list on error"""
         mock_connect.return_value = None
+
+        result = mysql_manager.get_database_tables("mydb")
+        
+        assert result == []
+
+    @patch('wslaragon.services.mysql.pymysql.connect')
+    def test_get_database_tables_returns_empty_on_exception(self, mock_connect, mysql_manager):
+        """Test get_database_tables returns empty list on general exception"""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.execute.side_effect = Exception("Query error")
 
         result = mysql_manager.get_database_tables("mydb")
         
@@ -908,6 +1108,15 @@ class TestMySQLManagerBackupDatabase:
         mock_result.returncode = 1
         mock_result.stderr = "Error"
         mock_run.return_value = mock_result
+
+        result = mysql_manager.backup_database("mydb", "/tmp/backup.sql")
+        
+        assert result is False
+
+    @patch('wslaragon.services.mysql.subprocess.run')
+    def test_backup_database_returns_false_on_exception(self, mock_run, mysql_manager):
+        """Test backup_database returns False on general exception"""
+        mock_run.side_effect = Exception("Unexpected error")
 
         result = mysql_manager.backup_database("mydb", "/tmp/backup.sql")
         
@@ -979,6 +1188,18 @@ class TestMySQLManagerRestoreDatabase:
         mock_result.returncode = 1
         mock_result.stderr = "Error"
         mock_run.return_value = mock_result
+
+        result = mysql_manager.restore_database("mydb", str(backup_file))
+        
+        assert result is False
+
+    @patch('wslaragon.services.mysql.subprocess.run')
+    def test_restore_database_returns_false_on_exception(self, mock_run, mysql_manager, tmp_path):
+        """Test restore_database returns False on general exception"""
+        backup_file = tmp_path / "backup.sql"
+        backup_file.write_text("-- backup content")
+        
+        mock_run.side_effect = Exception("Unexpected error")
 
         result = mysql_manager.restore_database("mydb", str(backup_file))
         

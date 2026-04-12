@@ -72,8 +72,9 @@ class TestSiteCreateCommand:
     def test_site_create_fails_without_sudo(self, runner, mock_deps):
         """Test that site create fails without sudo"""
         from wslaragon.cli.site_commands import site
+        import subprocess
 
-        mock_deps['run'].side_effect = Exception("sudo failed")
+        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
 
         result = runner.invoke(site, ['create', 'testsite'])
 
@@ -510,11 +511,23 @@ class TestSiteDeleteCommand:
 
         assert result.exit_code == 0
 
+    def test_site_delete_failure_path(self, runner, mock_deps):
+        """Test site delete when deletion fails"""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].get_site.return_value = {'name': 'testsite'}
+        mock_deps['site_mgr'].delete_site.return_value = {'success': False, 'error': 'Database error'}
+
+        result = runner.invoke(site, ['delete', 'testsite'], input='y\n')
+
+        assert 'failed' in result.output.lower() or 'error' in result.output.lower()
+
     def test_site_delete_requires_sudo(self, runner, mock_deps):
         """Test site delete checks sudo permissions"""
         from wslaragon.cli.site_commands import site
+        import subprocess
 
-        mock_deps['run'].side_effect = Exception("sudo failed")
+        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
 
         result = runner.invoke(site, ['delete', 'testsite'])
 
@@ -639,11 +652,22 @@ class TestSitePublicCommand:
 
         assert result.exit_code == 0
 
+    def test_site_public_failure(self, runner, mock_deps):
+        """Test site public command failure"""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].update_site_root.return_value = {'success': False, 'error': 'Site not found'}
+
+        result = runner.invoke(site, ['public', 'testsite'])
+
+        assert 'failed' in result.output.lower() or 'error' in result.output.lower()
+
     def test_site_public_requires_sudo(self, runner, mock_deps):
         """Test site public requires sudo"""
         from wslaragon.cli.site_commands import site
+        import subprocess
 
-        mock_deps['run'].side_effect = Exception("sudo failed")
+        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
 
         result = runner.invoke(site, ['public', 'testsite'])
 
@@ -703,8 +727,9 @@ class TestSiteFixPermissionsCommand:
     def test_fix_permissions_requires_sudo(self, runner, mock_deps):
         """Test fix-permissions requires sudo"""
         from wslaragon.cli.site_commands import site
+        import subprocess
 
-        mock_deps['run'].side_effect = Exception("sudo failed")
+        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
 
         result = runner.invoke(site, ['fix-permissions', 'testsite'])
 
@@ -789,8 +814,9 @@ class TestSiteExportCommand:
     def test_export_requires_sudo(self, runner, mock_deps):
         """Test site export requires sudo"""
         from wslaragon.cli.site_commands import site
+        import subprocess
 
-        mock_deps['run'].side_effect = Exception("sudo failed")
+        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
 
         result = runner.invoke(site, ['export', 'testsite'])
 
@@ -883,8 +909,9 @@ class TestSiteImportCommand:
     def test_import_requires_sudo(self, runner, mock_deps):
         """Test site import requires sudo"""
         from wslaragon.cli.site_commands import site
+        import subprocess
 
-        mock_deps['run'].side_effect = Exception("sudo failed")
+        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
 
         result = runner.invoke(site, ['import', '/tmp/backup.wslaragon'])
 
@@ -974,12 +1001,23 @@ class TestSiteSSLCommand:
     def test_ssl_requires_sudo(self, runner, mock_deps):
         """Test site ssl requires sudo"""
         from wslaragon.cli.site_commands import site
+        import subprocess
 
-        mock_deps['run'].side_effect = Exception("sudo failed")
+        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
 
         result = runner.invoke(site, ['ssl', 'testsite'])
 
         assert 'sudo' in result.output.lower() or result.exit_code != 0
+
+    def test_ssl_failure(self, runner, mock_deps):
+        """Test site ssl when SSL setup fails"""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['ssl'].setup_ssl_for_site.return_value = {'success': False, 'error': 'SSL error'}
+
+        result = runner.invoke(site, ['ssl', 'testsite'])
+
+        assert 'failed' in result.output.lower() or 'error' in result.output.lower()
 
     def test_ssl_nginx_failure(self, runner, mock_deps):
         """Test site ssl when nginx fails"""
@@ -989,7 +1027,6 @@ class TestSiteSSLCommand:
 
         result = runner.invoke(site, ['ssl', 'testsite'])
 
-        # Should handle gracefully
         assert result.exit_code == 0 or 'failed' in result.output.lower()
 
 

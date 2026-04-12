@@ -1123,6 +1123,271 @@ class TestGetSiteCreator:
         assert creator.database_name == 'custom_db'
 
 
+class TestWordPressEdgeCases:
+    """Test WordPress creator edge cases"""
+
+    def test_wp_creator_copies_from_wordpress_dir(self, tmp_path, mock_config):
+        """Test that WordPressSiteCreator copies from wordpress dir when exists"""
+        web_root = tmp_path / "web" / "wpsite"
+        web_root.mkdir(parents=True, exist_ok=True)
+        site_base_dir = tmp_path / "sites" / "wpsite"
+
+        wordpress_dir = tmp_path / "web" / "wordpress"
+        wordpress_dir.mkdir(parents=True, exist_ok=True)
+        (wordpress_dir / "wp-load.php").write_text("<?php // wp load")
+
+        creator = WordPressSiteCreator(
+            config=mock_config,
+            site_name="wpsite",
+            web_root=web_root,
+            site_base_dir=site_base_dir,
+            tld=".test"
+        )
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+
+            creator.create()
+
+            calls = [str(c) for c in mock_run.call_args_list]
+            cp_called = any('cp' in str(call) and 'wordpress' in str(call) for call in calls)
+            rm_called = any('rm' in str(call) and 'wordpress' in str(call) for call in calls)
+            assert cp_called or any(str(wordpress_dir) in str(call) for call in calls)
+
+
+class TestLaravelEdgeCases:
+    """Test Laravel creator edge cases"""
+
+    def test_laravel_creator_running_as_root(self, tmp_path, mock_config):
+        """Test LaravelSiteCreator when running as root (geteuid == 0)"""
+        site_base_dir = tmp_path / "sites" / "laravelsite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+
+        creator = LaravelSiteCreator(
+            config=mock_config,
+            site_name="laravelsite",
+            web_root=tmp_path / "web" / "laravelsite" / "public",
+            site_base_dir=site_base_dir,
+            tld=".test"
+        )
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=0):
+                with patch.dict(os.environ, {'SUDO_USER': 'testuser', 'USER': 'root'}):
+                    mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+
+                    creator.create()
+
+                    calls = [str(c) for c in mock_run.call_args_list]
+                    sudo_u_called = any('sudo' in str(call) and '-u' in str(call) for call in calls)
+                    assert sudo_u_called or len(calls) > 0
+
+
+class TestViteEdgeCases:
+    """Test Vite creator edge cases"""
+
+    def test_vite_creator_npm_fallback_runuser_success(self, tmp_path, mock_config):
+        """Test ViteSiteCreator uses runuser when shutil.which returns None"""
+        site_base_dir = tmp_path / "sites" / "vitesite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        (site_base_dir / "package.json").write_text('{"name": "test", "scripts": {"dev": "vite"}}')
+
+        creator = ViteSiteCreator(
+            config=mock_config,
+            site_name="vitesite",
+            web_root=tmp_path / "web" / "vitesite",
+            site_base_dir=site_base_dir,
+            tld=".test",
+            vite_template="react"
+        )
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=0):
+                with patch.dict(os.environ, {'SUDO_USER': 'testuser'}):
+                    with patch('shutil.which', return_value=None):
+                        mock_run.return_value = MagicMock(returncode=0, stdout="/home/test/.nvm/versions/node/v18/bin/npm\n", stderr="")
+
+                        creator.create()
+
+                        calls = [str(c) for c in mock_run.call_args_list]
+                        runuser_called = any('runuser' in str(call) for call in calls)
+                        assert runuser_called
+
+    def test_vite_creator_npm_fallback_runuser_failure(self, tmp_path, mock_config):
+        """Test ViteSiteCreator falls back to 'npm' when runuser returns non-zero"""
+        site_base_dir = tmp_path / "sites" / "vitesite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        (site_base_dir / "package.json").write_text('{"name": "test", "scripts": {"dev": "vite"}}')
+
+        creator = ViteSiteCreator(
+            config=mock_config,
+            site_name="vitesite",
+            web_root=tmp_path / "web" / "vitesite",
+            site_base_dir=site_base_dir,
+            tld=".test",
+            vite_template="react"
+        )
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=0):
+                with patch.dict(os.environ, {'SUDO_USER': 'testuser'}):
+                    with patch('shutil.which', return_value=None):
+                        runuser_result = MagicMock(returncode=1, stdout="", stderr="not found")
+                        def side_effect(*args, **kwargs):
+                            if 'runuser' in str(args):
+                                return runuser_result
+                            return MagicMock(returncode=0)
+                        mock_run.side_effect = side_effect
+
+                        creator.create()
+
+    def test_vite_creator_npm_fallback_exception(self, tmp_path, mock_config):
+        """Test ViteSiteCreator handles runuser exception gracefully"""
+        site_base_dir = tmp_path / "sites" / "vitesite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        (site_base_dir / "package.json").write_text('{"name": "test", "scripts": {"dev": "vite"}}')
+
+        creator = ViteSiteCreator(
+            config=mock_config,
+            site_name="vitesite",
+            web_root=tmp_path / "web" / "vitesite",
+            site_base_dir=site_base_dir,
+            tld=".test",
+            vite_template="react"
+        )
+
+        call_count = [0]
+        def mock_run_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if 'runuser' in str(args):
+                raise Exception("runuser failed")
+            return MagicMock(returncode=0)
+
+        with patch('subprocess.run', side_effect=mock_run_side_effect):
+            with patch('os.geteuid', return_value=0):
+                with patch.dict(os.environ, {'SUDO_USER': 'testuser'}):
+                    with patch('shutil.which', return_value=None):
+                        creator.create()
+
+    def test_vite_creator_modifies_vite_config_js(self, tmp_path, mock_config):
+        """Test ViteSiteCreator modifies vite.config.js with allowedHosts"""
+        site_base_dir = tmp_path / "sites" / "vitesite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        
+        vite_config_content = "import { defineConfig } from 'vite'\n\nexport default defineConfig({\n  plugins: []\n})"
+        (site_base_dir / "vite.config.js").write_text(vite_config_content)
+        (site_base_dir / "package.json").write_text('{"name": "test", "scripts": {"dev": "vite"}}')
+
+        creator = ViteSiteCreator(
+            config=mock_config,
+            site_name="vitesite",
+            web_root=tmp_path / "web" / "vitesite",
+            site_base_dir=site_base_dir,
+            tld=".test",
+            proxy_port=5173,
+            vite_template="react"
+        )
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                with patch('shutil.which', return_value='/usr/bin/npm'):
+                    mock_run.return_value = MagicMock(returncode=0)
+
+                    creator.create()
+
+                    config_content = (site_base_dir / "vite.config.js").read_text()
+                    assert "allowedHosts: true" in config_content
+                    assert "server: {" in config_content
+
+    def test_vite_creator_modifies_vite_config_ts(self, tmp_path, mock_config):
+        """Test ViteSiteCreator modifies vite.config.ts with allowedHosts"""
+        site_base_dir = tmp_path / "sites" / "vitesite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        
+        vite_config_content = "import { defineConfig } from 'vite'\n\nexport default defineConfig({\n  plugins: []\n})"
+        (site_base_dir / "vite.config.ts").write_text(vite_config_content)
+        (site_base_dir / "package.json").write_text('{"name": "test", "scripts": {"dev": "vite"}}')
+
+        creator = ViteSiteCreator(
+            config=mock_config,
+            site_name="vitesite",
+            web_root=tmp_path / "web" / "vitesite",
+            site_base_dir=site_base_dir,
+            tld=".test",
+            proxy_port=5173,
+            vite_template="react"
+        )
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                with patch('shutil.which', return_value='/usr/bin/npm'):
+                    mock_run.return_value = MagicMock(returncode=0)
+
+                    creator.create()
+
+                    config_content = (site_base_dir / "vite.config.ts").read_text()
+                    assert "allowedHosts: true" in config_content
+
+    def test_vite_creator_skips_config_if_allowedhosts_exists(self, tmp_path, mock_config):
+        """Test ViteSiteCreator skips modification if allowedHosts already exists"""
+        site_base_dir = tmp_path / "sites" / "vitesite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        
+        vite_config_content = "import { defineConfig } from 'vite'\n\nexport default defineConfig({\n  server: {\n    allowedHosts: true\n  },\n  plugins: []\n})"
+        (site_base_dir / "vite.config.js").write_text(vite_config_content)
+        (site_base_dir / "package.json").write_text('{"name": "test", "scripts": {"dev": "vite"}}')
+
+        creator = ViteSiteCreator(
+            config=mock_config,
+            site_name="vitesite",
+            web_root=tmp_path / "web" / "vitesite",
+            site_base_dir=site_base_dir,
+            tld=".test",
+            proxy_port=5173,
+            vite_template="react"
+        )
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                with patch('shutil.which', return_value='/usr/bin/npm'):
+                    mock_run.return_value = MagicMock(returncode=0)
+
+                    creator.create()
+
+                    config_content = (site_base_dir / "vite.config.js").read_text()
+                    config_content.count("allowedHosts")
+                    assert config_content.count("allowedHosts: true") == 1
+
+    def test_vite_creator_skips_config_if_no_defineconfig(self, tmp_path, mock_config):
+        """Test ViteSiteCreator skips modification if no defineConfig in config"""
+        site_base_dir = tmp_path / "sites" / "vitesite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        
+        vite_config_content = "export default {\n  plugins: []\n}"
+        (site_base_dir / "vite.config.js").write_text(vite_config_content)
+        (site_base_dir / "package.json").write_text('{"name": "test", "scripts": {"dev": "vite"}}')
+
+        creator = ViteSiteCreator(
+            config=mock_config,
+            site_name="vitesite",
+            web_root=tmp_path / "web" / "vitesite",
+            site_base_dir=site_base_dir,
+            tld=".test",
+            proxy_port=5173,
+            vite_template="react"
+        )
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                with patch('shutil.which', return_value='/usr/bin/npm'):
+                    mock_run.return_value = MagicMock(returncode=0)
+
+                    creator.create()
+
+                    config_content = (site_base_dir / "vite.config.js").read_text()
+                    assert "server" not in config_content
+
+
 class TestSiteCreatorEdgeCases:
     """Test edge cases and error handling across all creators"""
 

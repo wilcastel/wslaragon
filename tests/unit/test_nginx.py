@@ -109,6 +109,15 @@ class TestNginxManagerReload:
         
         assert result is False
 
+    @patch('wslaragon.services.nginx.subprocess.run')
+    def test_reload_returns_false_on_exception(self, mock_run, nginx_manager):
+        """Test reload returns False on exception"""
+        mock_run.side_effect = Exception("Command failed")
+
+        result = nginx_manager.reload()
+        
+        assert result is False
+
 
 class TestNginxManagerRestart:
     """Test suite for restart method"""
@@ -139,6 +148,15 @@ class TestNginxManagerRestart:
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_run.return_value = mock_result
+
+        result = nginx_manager.restart()
+        
+        assert result is False
+
+    @patch('wslaragon.services.nginx.subprocess.run')
+    def test_restart_returns_false_on_exception(self, mock_run, nginx_manager):
+        """Test restart returns False on exception"""
+        mock_run.side_effect = Exception("Command failed")
 
         result = nginx_manager.restart()
         
@@ -271,6 +289,31 @@ class TestNginxManagerAddSite:
         
         nginx_manager.enable_site.assert_called_once_with("myapp")
 
+    @patch('wslaragon.services.nginx.subprocess.Popen')
+    def test_add_site_returns_false_when_enable_fails(self, mock_popen, nginx_manager):
+        """Test add_site returns False when enable_site fails"""
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = (b"", b"")
+        mock_popen.return_value = mock_process
+        
+        nginx_manager.enable_site = MagicMock(return_value=(False, "Enable failed"))
+
+        result, error = nginx_manager.add_site("myapp", "/var/www/myapp")
+        
+        assert result is False
+        assert error == "Enable failed"
+
+    @patch('wslaragon.services.nginx.subprocess.Popen')
+    def test_add_site_returns_false_on_exception(self, mock_popen, nginx_manager):
+        """Test add_site returns False on exception"""
+        mock_popen.side_effect = Exception("Unexpected error")
+
+        result, error = nginx_manager.add_site("myapp", "/var/www/myapp")
+        
+        assert result is False
+        assert "Unexpected error" in error
+
 
 class TestNginxManagerEnableSite:
     """Test suite for enable_site method"""
@@ -323,6 +366,27 @@ class TestNginxManagerEnableSite:
         
         assert result is False
         assert "reload" in error.lower()
+
+    @patch('wslaragon.services.nginx.subprocess.run')
+    def test_enable_site_returns_false_on_called_process_error(self, mock_run, nginx_manager):
+        """Test enable_site returns False on CalledProcessError"""
+        import subprocess
+        mock_run.side_effect = subprocess.CalledProcessError(1, 'ln', stderr='Permission denied')
+
+        result, error = nginx_manager.enable_site("myapp")
+        
+        assert result is False
+        assert "Process error" in error
+
+    @patch('wslaragon.services.nginx.subprocess.run')
+    def test_enable_site_returns_false_on_exception(self, mock_run, nginx_manager):
+        """Test enable_site returns False on general exception"""
+        mock_run.side_effect = Exception("Unexpected error")
+
+        result, error = nginx_manager.enable_site("myapp")
+        
+        assert result is False
+        assert "Unexpected error" in error
 
 
 class TestNginxManagerDisableSite:
@@ -377,6 +441,16 @@ class TestNginxManagerRemoveSite:
         
         assert result is True
         nginx_manager.disable_site.assert_called_once_with("myapp")
+
+    @patch('wslaragon.services.nginx.subprocess.run')
+    def test_remove_site_returns_false_on_exception(self, mock_run, nginx_manager):
+        """Test remove_site returns False on exception"""
+        nginx_manager.disable_site = MagicMock(return_value=True)
+        mock_run.side_effect = Exception("Remove failed")
+
+        result = nginx_manager.remove_site("myapp")
+        
+        assert result is False
 
 
 class TestNginxManagerListSites:
@@ -477,7 +551,7 @@ class TestNginxManagerGetSiteConfig:
         sites_available.mkdir(parents=True)
         
         nginx_manager.sites_available = sites_available
-        config_file = sites_available / "myapp.test.conf"
+        config_file = sites_available / "myapp.conf"
         config_file.write_text("content")
         config_file.chmod(0o000)
         
