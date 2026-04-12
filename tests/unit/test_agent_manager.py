@@ -960,19 +960,145 @@ class TestAgentManagerIntegration:
     def test_all_presets_create_different_skills(self, manager, tmp_path):
         """Test that each preset creates different skill directories"""
         from pathlib import Path
-        
+
         preset_skills = {}
         for preset_name in manager.get_presets().keys():
             test_dir = tmp_path / preset_name
             test_dir.mkdir()
-            
+
             result = manager.init_agent_structure(str(test_dir), preset=preset_name)
             assert result['success'] is True
-            
+
             skills_path = test_dir / '.agent' / 'skills'
             actual_skills = [d.name for d in skills_path.iterdir() if d.is_dir()]
             preset_skills[preset_name] = set(actual_skills)
-        
+
         assert len(preset_skills['default']) > 0
         assert preset_skills['laravel'] != preset_skills['wordpress']
         assert preset_skills['python'] != preset_skills['javascript']
+
+
+class TestAgentManagerCornerCases:
+    """Test suite for edge cases in install_skill_from_url"""
+
+    @pytest.fixture
+    def manager(self):
+        from wslaragon.services.agent.agent_manager import AgentManager
+        return AgentManager({})
+
+    def test_install_skill_from_url_empty_folder_name_fallback(self, manager, tmp_path):
+        """Test install_skill_from_url uses 'imported_skill' when folder name becomes empty"""
+        agent_dir = tmp_path / '.agent'
+        skills_dir = agent_dir / 'skills'
+        skills_dir.mkdir(parents=True)
+
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+
+            # Content without frontmatter and URL that results in empty sanitized folder name
+            # The URL ends with '.md' which after sanitization of special chars becomes empty
+            skill_content = 'Just content without frontmatter.'
+
+            with patch('urllib.request.urlopen') as mock_urlopen:
+                mock_response = MagicMock()
+                mock_response.read.return_value = skill_content.encode('utf-8')
+                mock_response.__enter__ = MagicMock(return_value=mock_response)
+                mock_response.__exit__ = MagicMock(return_value=False)
+                mock_urlopen.return_value = mock_response
+
+                # URL where filename becomes empty after sanitization (e.g., '!!!.md')
+                result = manager.install_skill_from_url('https://example.com/!!!.md')
+
+                assert result['success'] is True
+                assert result['name'] == 'imported_skill'
+                assert (skills_dir / 'imported_skill' / 'SKILL.md').exists()
+        finally:
+            os.chdir(original_cwd)
+
+    def test_install_skill_from_url_special_chars_only_filename(self, manager, tmp_path):
+        """Test install_skill_from_url handles URLs with only special chars in filename"""
+        agent_dir = tmp_path / '.agent'
+        skills_dir = agent_dir / 'skills'
+        skills_dir.mkdir(parents=True)
+
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+
+            skill_content = '---\nname: Test\ndescription: Test\n---\nContent'
+
+            with patch('urllib.request.urlopen') as mock_urlopen:
+                mock_response = MagicMock()
+                mock_response.read.return_value = skill_content.encode('utf-8')
+                mock_response.__enter__ = MagicMock(return_value=mock_response)
+                mock_response.__exit__ = MagicMock(return_value=False)
+                mock_urlopen.return_value = mock_response
+
+                # URL with only special chars in the filename part
+                result = manager.install_skill_from_url('https://example.com/path/@#$%.md')
+
+                assert result['success'] is True
+                # Since filename sanitizes to empty, it should fall back
+                assert 'name' in result
+        finally:
+            os.chdir(original_cwd)
+
+    def test_install_skill_from_url_exception_in_path_operations(self, manager, tmp_path):
+        """Test install_skill_from_url handles exceptions during path operations"""
+        agent_dir = tmp_path / '.agent'
+        agent_dir.mkdir(parents=True)
+
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+
+            skill_content = '---\nname: Test\n---\nContent'
+
+            with patch('urllib.request.urlopen') as mock_urlopen:
+                mock_response = MagicMock()
+                mock_response.read.return_value = skill_content.encode('utf-8')
+                mock_response.__enter__ = MagicMock(return_value=mock_response)
+                mock_response.__exit__ = MagicMock(return_value=False)
+                mock_urlopen.return_value = mock_response
+
+                # Mock Path.mkdir to raise an exception
+                with patch.object(Path, 'mkdir') as mock_mkdir:
+                    mock_mkdir.side_effect = PermissionError("Permission denied")
+
+                    result = manager.install_skill_from_url('https://example.com/skill.md')
+
+                    assert result['success'] is False
+                    assert 'error' in result
+        finally:
+            os.chdir(original_cwd)
+
+    def test_install_skill_from_url_write_permission_error(self, manager, tmp_path):
+        """Test install_skill_from_url handles file write permission errors"""
+        agent_dir = tmp_path / '.agent'
+        skills_dir = agent_dir / 'skills'
+        skills_dir.mkdir(parents=True)
+
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+
+            skill_content = '---\nname: Test\n---\nContent'
+
+            with patch('urllib.request.urlopen') as mock_urlopen:
+                mock_response = MagicMock()
+                mock_response.read.return_value = skill_content.encode('utf-8')
+                mock_response.__enter__ = MagicMock(return_value=mock_response)
+                mock_response.__exit__ = MagicMock(return_value=False)
+                mock_urlopen.return_value = mock_response
+
+                # Mock builtins.open to raise PermissionError
+                with patch('builtins.open') as mock_open:
+                    mock_open.side_effect = PermissionError("Write permission denied")
+
+                    result = manager.install_skill_from_url('https://example.com/skill.md')
+
+                    assert result['success'] is False
+                    assert 'error' in result
+        finally:
+            os.chdir(original_cwd)

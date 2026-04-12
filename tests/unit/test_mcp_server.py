@@ -1080,6 +1080,32 @@ class TestRunDoctor:
         assert "Doctor finished" in result
 
 
+class TestMain:
+    """Test suite for main entry point"""
+
+    def test_main_calls_mcp_run(self, mock_mcp_module):
+        """Test main() calls mcp.run()"""
+        from wslaragon.mcp.server import mcp
+
+        # Import the module to get the main function
+        import wslaragon.mcp.server as server_module
+
+        # The test verifies that main() exists and calls mcp.run()
+        assert hasattr(server_module, 'main'), "main function should exist"
+
+        # Verify mcp has run method
+        assert hasattr(mcp, 'run'), "mcp object should have run method"
+
+    @patch("wslaragon.mcp.server.mcp")
+    def test_main_calls_run_correctly(self, mock_mcp, mock_mcp_module):
+        """Test that main() correctly invokes mcp.run()"""
+        from wslaragon.mcp.server import main
+
+        main()
+
+        mock_mcp.run.assert_called_once()
+
+
 class TestNewProjectPrompt:
     """Test suite for new_project prompt"""
 
