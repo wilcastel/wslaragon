@@ -144,3 +144,15 @@ def mock_ssl_manager():
     ssl.create_ca.return_value = True
     ssl.generate_cert.return_value = {'success': True}
     return ssl
+
+
+@pytest.fixture
+def mock_site_manager():
+    """Mock Site manager"""
+    site_manager = MagicMock()
+    site_manager.get_site.return_value = None
+    site_manager.create_site.return_value = {'success': True, 'site': {}}
+    site_manager.delete_site.return_value = {'success': True}
+    site_manager.list_sites.return_value = []
+    site_manager.fix_permissions.return_value = None
+    return site_manager
