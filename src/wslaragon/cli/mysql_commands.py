@@ -47,12 +47,14 @@ def create_db(name):
     mysql_mgr = MySQLManager(config)
     
     with console.status(f"[bold green]Creating database {name}..."):
-        result = mysql_mgr.create_database(name)
+        result, error = mysql_mgr.create_database(name)
     
     if result:
         console.print(f"[green]✓ Database '{name}' created[/green]")
     else:
         console.print(f"[red]✗ Failed to create database '{name}'[/red]")
+        if error:
+            console.print(f"[red]  Error: {error}[/red]")
 
 
 @mysql.command()

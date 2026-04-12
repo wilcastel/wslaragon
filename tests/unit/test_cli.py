@@ -241,7 +241,8 @@ class TestMySQLCommands:
         """Test MySQL create database command"""
         from wslaragon.cli.main import cli
 
-        mock_mysql_deps['mysql_mgr'].create_database.return_value = True
+        # create_database returns (success, error) tuple
+        mock_mysql_deps['mysql_mgr'].create_database.return_value = (True, None)
 
         result = runner.invoke(cli, ['mysql', 'create-db', 'newdb'])
 
