@@ -543,9 +543,8 @@ class TestNodeCommandGroup:
 
         result = runner.invoke(node, [])
 
-        # Click groups return exit_code 2 when no subcommand is provided
-        # This is expected behavior - it shows help and exits with error
-        assert result.exit_code == 2
+        # Click 8+ groups show help and return exit_code 0 when no subcommand is provided
+        assert result.exit_code == 0
         assert "Usage:" in result.output or "Commands:" in result.output
 
     @patch('wslaragon.cli.node_commands.PM2Manager')

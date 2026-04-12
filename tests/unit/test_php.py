@@ -123,12 +123,12 @@ class TestPHPManagerSwitchVersion:
     def test_switch_version_success(self, mock_run, php_manager):
         """Test switch_version succeeds"""
         mock_result = MagicMock()
-        mock_result.stdout = "active\n"
+        mock_result.stdout = "inactive\n"
         mock_result.returncode = 0
         mock_run.return_value = mock_result
 
         result = php_manager.switch_version("8.2")
-        
+
         assert result is True
         mock_run.assert_called()
 
@@ -141,7 +141,7 @@ class TestPHPManagerSwitchVersion:
         mock_run.return_value = mock_result
 
         php_manager.switch_version("8.2")
-        
+
         first_call = mock_run.call_args_list[0]
         assert 'update-alternatives' in first_call[0][0]
         assert '/usr/bin/php8.2' in first_call[0][0]
@@ -154,11 +154,17 @@ class TestPHPManagerSwitchVersion:
         mock_result.returncode = 0
         mock_run.return_value = mock_result
 
+        # Mock the helper to avoid needing systemctl list-units output
+        php_manager._stop_php_fpm = MagicMock(return_value=True)
+
         php_manager.switch_version("8.2")
-        
+
+        # Verify stop helper was called and start was called
+        php_manager._stop_php_fpm.assert_called_once()
+        # Check that systemctl start was called for the FPM service
         calls = mock_run.call_args_list
-        fpm_calls = [c for c in calls if 'php' in str(c) and 'fpm' in str(c)]
-        assert len(fpm_calls) >= 1
+        start_calls = [c for c in calls if 'start' in str(c) and 'fpm' in str(c)]
+        assert len(start_calls) >= 1
 
     @patch('wslaragon.services.php.subprocess.run')
     def test_switch_version_returns_false_on_exception(self, mock_run, php_manager):
@@ -166,7 +172,7 @@ class TestPHPManagerSwitchVersion:
         mock_run.side_effect = Exception("Error")
 
         result = php_manager.switch_version("8.2")
-        
+
         assert result is False
 
 
@@ -326,6 +332,48 @@ class TestPHPManagerUpdateConfig:
         
         assert result is False
 
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_update_config_fallback_on_called_process_error(self, mock_run, php_manager):
+        """Test update_config falls back to _restart_php_fpm on CalledProcessError"""
+        php_manager.write_ini = MagicMock(return_value=True)
+        php_manager._restart_php_fpm = MagicMock(return_value=True)
+
+        # get_current_version returns a version
+        version_result = MagicMock()
+        version_result.stdout = "PHP 8.2.5\n"
+        # systemctl restart raises CalledProcessError
+        restart_error = subprocess.CalledProcessError(1, 'systemctl restart')
+
+        mock_run.side_effect = [version_result, restart_error]
+
+        result = php_manager.update_config('memory_limit', '256M')
+        
+        assert result is True
+        php_manager._restart_php_fpm.assert_called_once()
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_update_config_fallback_when_no_version(self, mock_run, php_manager):
+        """Test update_config falls back to _restart_php_fpm when version is None"""
+        mock_result = MagicMock()
+        mock_result.stdout = ""  # No PHP version found
+        mock_run.return_value = mock_result
+        
+        php_manager.write_ini = MagicMock(return_value=True)
+        php_manager._restart_php_fpm = MagicMock(return_value=True)
+
+        result = php_manager.update_config('memory_limit', '256M')
+        
+        assert result is True
+        php_manager._restart_php_fpm.assert_called_once()
+
+    def test_update_config_exception_returns_false(self, php_manager):
+        """Test update_config returns False on unexpected exception"""
+        php_manager.write_ini = MagicMock(side_effect=Exception("Unexpected error"))
+
+        result = php_manager.update_config('memory_limit', '256M')
+        
+        assert result is False
+
 
 class TestPHPManagerGetExtensions:
     """Test suite for get_extensions method"""
@@ -390,8 +438,11 @@ class TestPHPManagerEnableExtension:
         mock_result.returncode = 0
         mock_run.return_value = mock_result
 
+        # Mock the helper to avoid needing systemctl output
+        php_manager._restart_php_fpm = MagicMock(return_value=True)
+
         result = php_manager.enable_extension("mysqli")
-        
+
         assert result is True
 
     @patch('wslaragon.services.php.subprocess.run')
@@ -401,24 +452,28 @@ class TestPHPManagerEnableExtension:
         mock_result.returncode = 0
         mock_run.return_value = mock_result
 
+        php_manager._restart_php_fpm = MagicMock(return_value=True)
+
         php_manager.enable_extension("mysqli")
-        
+
         first_call = mock_run.call_args_list[0]
         assert 'phpenmod' in first_call[0][0]
         assert 'mysqli' in first_call[0][0]
 
-    @patch('wslaragon.services.php.subprocess.run')
-    def test_enable_extension_restarts_fpm(self, mock_run, php_manager):
-        """Test enable_extension restarts PHP-FPM"""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_run.return_value = mock_result
+    def test_enable_extension_restarts_fpm(self, php_manager):
+        """Test enable_extension restarts PHP-FPM via helper"""
+        with patch('wslaragon.services.php.subprocess.run') as mock_run:
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_run.return_value = mock_result
 
-        php_manager.enable_extension("mysqli")
-        
-        calls = mock_run.call_args_list
-        restart_calls = [c for c in calls if 'restart' in str(c)]
-        assert len(restart_calls) >= 1
+            result = php_manager.enable_extension("mysqli")
+
+            assert result is True
+            # Verify phpenmod was called
+            calls = mock_run.call_args_list
+            phpenmod_calls = [c for c in calls if 'phpenmod' in str(c)]
+            assert len(phpenmod_calls) >= 1
 
     @patch('wslaragon.services.php.subprocess.run')
     def test_enable_extension_returns_false_on_error(self, mock_run, php_manager):
@@ -426,7 +481,7 @@ class TestPHPManagerEnableExtension:
         mock_run.side_effect = Exception("Error")
 
         result = php_manager.enable_extension("mysqli")
-        
+
         assert result is False
 
 
@@ -445,8 +500,11 @@ class TestPHPManagerDisableExtension:
         mock_result.returncode = 0
         mock_run.return_value = mock_result
 
+        # Mock the helper to avoid needing systemctl output
+        php_manager._restart_php_fpm = MagicMock(return_value=True)
+
         result = php_manager.disable_extension("mysqli")
-        
+
         assert result is True
 
     @patch('wslaragon.services.php.subprocess.run')
@@ -456,24 +514,28 @@ class TestPHPManagerDisableExtension:
         mock_result.returncode = 0
         mock_run.return_value = mock_result
 
+        php_manager._restart_php_fpm = MagicMock(return_value=True)
+
         php_manager.disable_extension("mysqli")
-        
+
         first_call = mock_run.call_args_list[0]
         assert 'phpdismod' in first_call[0][0]
         assert 'mysqli' in first_call[0][0]
 
-    @patch('wslaragon.services.php.subprocess.run')
-    def test_disable_extension_restarts_fpm(self, mock_run, php_manager):
-        """Test disable_extension restarts PHP-FPM"""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_run.return_value = mock_result
+    def test_disable_extension_restarts_fpm(self, php_manager):
+        """Test disable_extension restarts PHP-FPM via helper"""
+        with patch('wslaragon.services.php.subprocess.run') as mock_run:
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_run.return_value = mock_result
 
-        php_manager.disable_extension("mysqli")
-        
-        calls = mock_run.call_args_list
-        restart_calls = [c for c in calls if 'restart' in str(c)]
-        assert len(restart_calls) >= 1
+            result = php_manager.disable_extension("mysqli")
+
+            assert result is True
+            # Verify phpdismod was called
+            calls = mock_run.call_args_list
+            phpdismod_calls = [c for c in calls if 'phpdismod' in str(c)]
+            assert len(phpdismod_calls) >= 1
 
     @patch('wslaragon.services.php.subprocess.run')
     def test_disable_extension_returns_false_on_error(self, mock_run, php_manager):
@@ -481,7 +543,7 @@ class TestPHPManagerDisableExtension:
         mock_run.side_effect = Exception("Error")
 
         result = php_manager.disable_extension("mysqli")
-        
+
         assert result is False
 
 
@@ -527,3 +589,160 @@ post_max_size => 128M
         php_manager.get_ini_directives()
         
         mock_run.assert_called_with(['php', '-i'], capture_output=True, text=True)
+
+
+class TestPHPManagerGetFpmServices:
+    """Test suite for _get_php_fpm_services helper method"""
+
+    @pytest.fixture
+    def php_manager(self, mock_config):
+        from wslaragon.services.php import PHPManager
+        return PHPManager(mock_config)
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_get_php_fpm_services_finds_services(self, mock_run, php_manager):
+        """Test _get_php_fpm_services finds running PHP-FPM services"""
+        mock_result = MagicMock()
+        mock_result.stdout = """php8.1-fpm.service  loaded active running  PHP 8.1 FPM
+php8.2-fpm.service  loaded active running  PHP 8.2 FPM
+nginx.service       loaded active running  A high performance web server
+"""
+        mock_run.return_value = mock_result
+
+        result = php_manager._get_php_fpm_services()
+        
+        assert 'php8.1-fpm.service' in result
+        assert 'php8.2-fpm.service' in result
+        assert 'nginx.service' not in result
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_get_php_fpm_services_empty(self, mock_run, php_manager):
+        """Test _get_php_fpm_services returns empty when no services found"""
+        mock_result = MagicMock()
+        mock_result.stdout = "nginx.service  loaded active running  A high performance web server\n"
+        mock_run.return_value = mock_result
+
+        result = php_manager._get_php_fpm_services()
+        
+        assert result == []
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_get_php_fpm_services_exception(self, mock_run, php_manager):
+        """Test _get_php_fpm_services returns empty on exception"""
+        mock_run.side_effect = Exception("systemctl not found")
+
+        result = php_manager._get_php_fpm_services()
+        
+        assert result == []
+
+
+class TestPHPManagerRestartPhpFpm:
+    """Test suite for _restart_php_fpm helper method"""
+
+    @pytest.fixture
+    def php_manager(self, mock_config):
+        from wslaragon.services.php import PHPManager
+        return PHPManager(mock_config)
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_restart_php_fpm_success(self, mock_run, php_manager):
+        """Test _restart_php_fpm restarts all found services"""
+        # First call: systemctl list-units
+        list_result = MagicMock()
+        list_result.stdout = "php8.2-fpm.service  loaded active running  PHP 8.2 FPM\n"
+        # Second call: sudo systemctl restart
+        restart_result = MagicMock()
+        restart_result.returncode = 0
+        
+        mock_run.side_effect = [list_result, restart_result]
+
+        result = php_manager._restart_php_fpm()
+        
+        assert result is True
+        assert mock_run.call_count == 2
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_restart_php_fpm_no_services(self, mock_run, php_manager):
+        """Test _restart_php_fpm returns True when no services found"""
+        list_result = MagicMock()
+        list_result.stdout = ""
+        mock_run.return_value = list_result
+
+        result = php_manager._restart_php_fpm()
+        
+        assert result is True
+        assert mock_run.call_count == 1  # Only the list-units call
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_restart_php_fpm_partial_failure(self, mock_run, php_manager):
+        """Test _restart_php_fpm returns False when one service fails to restart"""
+        list_result = MagicMock()
+        list_result.stdout = "php8.1-fpm.service  loaded active running  PHP 8.1 FPM\nphp8.2-fpm.service  loaded active running  PHP 8.2 FPM\n"
+        restart_ok = MagicMock()
+        restart_ok.returncode = 0
+        
+        mock_run.side_effect = [list_result, restart_ok, subprocess.CalledProcessError(1, 'systemctl')]
+
+        result = php_manager._restart_php_fpm()
+        
+        assert result is False
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_restart_php_fpm_unexpected_exception(self, mock_run, php_manager):
+        """Test _restart_php_fpm handles unexpected exceptions"""
+        list_result = MagicMock()
+        list_result.stdout = "php8.2-fpm.service  loaded active running  PHP 8.2 FPM\n"
+        restart_ok = MagicMock()
+        restart_ok.returncode = 0
+        
+        mock_run.side_effect = [list_result, Exception("Unexpected error")]
+
+        result = php_manager._restart_php_fpm()
+        
+        assert result is False
+
+
+class TestPHPManagerStopPhpFpm:
+    """Test suite for _stop_php_fpm helper method"""
+
+    @pytest.fixture
+    def php_manager(self, mock_config):
+        from wslaragon.services.php import PHPManager
+        return PHPManager(mock_config)
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_stop_php_fpm_success(self, mock_run, php_manager):
+        """Test _stop_php_fpm stops all found services"""
+        list_result = MagicMock()
+        list_result.stdout = "php8.2-fpm.service  loaded active running  PHP 8.2 FPM\n"
+        stop_result = MagicMock()
+        
+        mock_run.side_effect = [list_result, stop_result]
+
+        result = php_manager._stop_php_fpm()
+        
+        assert result is True
+        assert mock_run.call_count == 2
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_stop_php_fpm_no_services(self, mock_run, php_manager):
+        """Test _stop_php_fpm returns True when no services found"""
+        list_result = MagicMock()
+        list_result.stdout = ""
+        mock_run.return_value = list_result
+
+        result = php_manager._stop_php_fpm()
+        
+        assert result is True
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_stop_php_fpm_exception(self, mock_run, php_manager):
+        """Test _stop_php_fpm returns False on exception"""
+        list_result = MagicMock()
+        list_result.stdout = "php8.2-fpm.service  loaded active running  PHP 8.2 FPM\n"
+        
+        mock_run.side_effect = [list_result, Exception("Stop failed")]
+
+        result = php_manager._stop_php_fpm()
+        
+        assert result is False

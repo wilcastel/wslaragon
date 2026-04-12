@@ -291,8 +291,8 @@ class TestMysqlCommandGroup:
 
         result = runner.invoke(mysql, [])
 
-        # Click groups return exit_code 2 when no subcommand is provided
-        assert result.exit_code == 2
+        # Click 8+ groups show help and return exit_code 0 when no subcommand is provided
+        assert result.exit_code == 0
         assert 'Commands:' in result.output
 
     def test_mysql_databases_help(self, runner):
