@@ -25,7 +25,8 @@ Entender cómo se organiza WSLaragon te ayudará a personalizarlo y solucionar p
 │   │   ├── php.py       # Gestión de PHP
 │   │   ├── nginx.py     # Gestión de Nginx
 │   │   ├── mysql.py     # Gestión de MySQL (validación SQL, consultas parametrizadas)
-│   │   ├── sites.py     # Gestión de sitios (God Object - pendiente refactor)
+│   │   ├── sites.py     # Gestión de sitios (delegación a site_creators)
+│   │   ├── site_creators.py  # Strategy pattern - creadores de sitios (PHP, Node, Python, WordPress, etc.)
 │   │   ├── ssl.py       # Gestión de SSL/mkcert
 │   │   ├── backup.py    # Backup/restore de sitios (protección contra path traversal)
 │   │   ├── node/        # Gestión de Node.js
@@ -35,9 +36,18 @@ Entender cómo se organiza WSLaragon te ayudará a personalizarlo y solucionar p
 │   ├── mcp/             # Model Context Protocol server
 │   │   └── server.py
 │   └── __init__.py
-├── tests/               # Test suite
-│   ├── unit/            # Tests unitarios (56 tests)
-│   └── integration/     # Tests de integración
+├── tests/               # Test suite (1,114+ tests, 99.85% coverage)
+│   ├── conftest.py      # Fixtures compartidos (mock_config, temp_dir, etc.)
+│   ├── unit/            # Tests unitarios (27 archivos, ~1,083 tests)
+│   │   ├── test_config.py
+│   │   ├── test_sites.py
+│   │   ├── test_site_creators.py
+│   │   ├── test_backup.py
+│   │   ├── test_nginx_commands.py
+│   │   ├── test_node_commands.py
+│   │   └── ...          # 21 archivos más
+│   └── integration/     # Tests de integración (3 archivos, ~31 tests)
+│       └── test_integration.py
 ├── scripts/             # Scripts de instalación y setup
 │   └── vars.sh          # Variables compartidas entre scripts
 ├── docs/                # Documentación oficial
@@ -45,6 +55,27 @@ Entender cómo se organiza WSLaragon te ayudará a personalizarlo y solucionar p
 ├── .env                 # Configuración local (No subir a Git)
 └── .env.example         # Plantilla para el .env
 ```
+
+## 🔧 Patrón Strategy para Creación de Sitios
+
+El componente `site_creators.py` implementa el patrón Strategy para la creación de sitios:
+
+```text
+SiteManager.create_site()
+    ├── Valida el nombre del sitio
+    ├── Selecciona el creador apropiado:
+    │   ├── PHPCreator (sitios PHP/Laravel)
+    │   ├── NodeCreator (aplicaciones Node.js)
+    │   ├── PythonCreator (aplicaciones Python/FastAPI)
+    │   ├── WordPressCreator (instalación automática WP)
+    │   └── StaticCreator (sitios HTML estáticos)
+    └── El creador ejecuta los pasos específicos
+```
+
+Beneficios:
+- **Extensibilidad**: Agregar nuevos tipos de sitio es declarar un nuevo creador
+- **Testabilidad**: Cada creador se prueba independientemente
+- **Mantenibilidad**: Lógica específica por tipo, no mezclada en un God Object
 
 ## 📁 Datos del Usuario
 

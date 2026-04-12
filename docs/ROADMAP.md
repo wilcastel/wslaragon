@@ -51,3 +51,11 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [x] **Advanced Scaffolding**: Integración con Vite para crear proyectos React, Vue, Svelte, etc. (`--vite <template>`) con configuración automática de puertos y SSL.
 - [ ] **Project Templates**: Plantillas personalizadas para arrancar proyectos rápidos.
 
+### Fase 6: Calidad y CI/CD (Completado)
+- [x] **Cobertura de Tests 99.85%**: 1,114 tests (1,083 unitarios + 31 integración)
+- [x] **Strategy Pattern**: Refactor de SiteManager.create_site() — de God Object a 8 creadores
+- [x] **Seguridad**: Sin shell=True, sin SQL injection, path traversal protection en backups
+- [x] **CI/CD Pipeline**: GitHub Actions con lint + test + build por versión de Python
+- [x] **Pre-commit Hooks**: ruff + black + isort + mypy
+- [x] **Coverage Threshold**: Mínimo 90% para pasar CI
+

@@ -57,7 +57,7 @@ WSLaragon es una herramienta de gestión de entorno de desarrollo estilo Laragon
 ### Sistema
 - **WSL2** con Ubuntu 20.04+ o Debian 10+
 - **Windows 10/11** para integración con hosts
-- **Python 3.8+** instalado
+- **Python 3.9+** instalado
 - **Permisos sudo** para configuración de servicios
 
 ### Software (Configurado para tu entorno)
@@ -371,14 +371,19 @@ pre-commit install
 
 ### Tests
 
+**1,114+ tests** | 99.85% coverage | 90% minimum threshold
+
 ```bash
 # Todos los tests
-pytest
+make test
 
 # Tests unitarios
 make test-unit
 
-# Tests con coverage
+# Tests de integración
+make test-integration
+
+# Tests con coverage (falla si <90%)
 make test-cov
 ```
 
@@ -393,7 +398,8 @@ src/wslaragon/
 │   ├── php.py          # Gestión de PHP
 │   ├── nginx.py        # Gestión de Nginx
 │   ├── mysql.py        # Gestión de MySQL
-│   ├── sites.py        # Gestión de sitios
+│   ├── sites.py        # Gestión de sitios (delega a site_creators)
+│   ├── site_creators.py # Strategy pattern: creadores de sitios
 │   ├── ssl.py          # Gestión de SSL
 │   ├── backup.py       # Backup/restore de sitios
 │   └── node/           # Gestión de Node.js/PM2
@@ -409,7 +415,8 @@ src/wslaragon/
 │   ├── nginx_commands.py
 │   ├── doctor.py
 │   └── agent.py
-└── __init__.py
+└── mcp/                # Model Context Protocol server
+    └── server.py
 ```
 
 ## 🤝 Contribuir
