@@ -9,10 +9,26 @@ logger = logging.getLogger(__name__)
 class SSLManager:
     def __init__(self, config):
         self.config = config
-        self.ssl_dir = Path(config.get('ssl.dir'))
-        self.ca_file = Path(config.get('ssl.ca_file'))
-        self.ca_key = Path(config.get('ssl.ca_key'))
-        self.windows_hosts = Path(config.get('windows.hosts_file'))
+        # Provide default values if config keys are missing
+        ssl_dir = config.get('ssl.dir')
+        if ssl_dir is None:
+            ssl_dir = str(Path.home() / ".wslaragon" / "ssl")
+        self.ssl_dir = Path(ssl_dir)
+        
+        ca_file = config.get('ssl.ca_file')
+        if ca_file is None:
+            ca_file = str(self.ssl_dir / "rootCA.pem")
+        self.ca_file = Path(ca_file)
+        
+        ca_key = config.get('ssl.ca_key')
+        if ca_key is None:
+            ca_key = str(self.ssl_dir / "rootCA-key.pem")
+        self.ca_key = Path(ca_key)
+        
+        windows_hosts = config.get('windows.hosts_file')
+        if windows_hosts is None:
+            windows_hosts = "/mnt/c/Windows/System32/drivers/etc/hosts"
+        self.windows_hosts = Path(windows_hosts)
         
         self._ensure_dirs()
     
@@ -95,31 +111,90 @@ class SSLManager:
         return None
     
     def generate_certificate(self, domain: str, additional_domains: List[str] = None) -> bool:
-        """Generate SSL certificate for domain"""
+        """Generate SSL certificate for domain
+        
+        Uses openssl to create a certificate with the domain name in both
+        the CN (Common Name) and SAN (Subject Alternative Name), signed by
+        the local root CA. This ensures compatibility with all browsers and
+        clients, including those that still check CN.
+        """
+        import tempfile
+        
         try:
-            if not self.is_mkcert_installed():
-                return False
-            
             cert_file = self.ssl_dir / f"{domain}.pem"
             key_file = self.ssl_dir / f"{domain}-key.pem"
             
-            # Build domain list
+            # Ensure root CA exists
+            if not self.ca_file.exists() or not self.ca_key.exists():
+                if not self.create_ca():
+                    logger.error("Failed to create root CA for certificate signing")
+                    return False
+            
+            # Build domain list for SANs
             domains = [domain]
             if additional_domains:
                 domains.extend(additional_domains)
             
-            # Generate certificate
-            subprocess.run(['mkcert'] + domains, check=True)
+            # Build SAN entries (always include domain as DNS entry)
+            san_entries = [f"DNS:{d}" for d in domains]
+            # Also add localhost IP for local development convenience
+            san_entries.append("IP:127.0.0.1")
+            san_string = ",".join(san_entries)
             
-            # Move generated files to our SSL directory
-            for file_path in Path('.').glob(f"{domain}*"):
-                if file_path.is_file():
-                    target = self.ssl_dir / file_path.name
-                    subprocess.run(['mv', str(file_path), str(target)], check=True)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_path = Path(tmpdir)
+                csr_file = tmp_path / f"{domain}.csr"
+                tmp_key = tmp_path / f"{domain}-key.pem"
+                tmp_cert = tmp_path / f"{domain}.pem"
+                ext_file = tmp_path / f"{domain}.ext"
+                
+                # Create OpenSSL config for extensions (SANs)
+                ext_content = f"""authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+subjectAltName = {san_string}
+"""
+                with open(ext_file, 'w') as f:
+                    f.write(ext_content)
+                
+                # Generate private key
+                subprocess.run([
+                    'openssl', 'genrsa', '-out', str(tmp_key), '2048'
+                ], check=True, capture_output=True)
+                
+                # Generate CSR with domain as CN (Common Name)
+                subprocess.run([
+                    'openssl', 'req', '-new',
+                    '-key', str(tmp_key),
+                    '-out', str(csr_file),
+                    '-subj', f'/CN={domain}/O=WSLaragon Development/C=US'
+                ], check=True, capture_output=True)
+                
+                # Sign the certificate with our root CA
+                subprocess.run([
+                    'openssl', 'x509', '-req',
+                    '-in', str(csr_file),
+                    '-CA', str(self.ca_file),
+                    '-CAkey', str(self.ca_key),
+                    '-CAcreateserial',
+                    '-out', str(tmp_cert),
+                    '-days', '825',
+                    '-sha256',
+                    '-extfile', str(ext_file)
+                ], check=True, capture_output=True)
+                
+                # Move generated files to SSL directory
+                key_file.parent.mkdir(parents=True, exist_ok=True)
+                subprocess.run(['cp', str(tmp_key), str(key_file)], check=True)
+                subprocess.run(['cp', str(tmp_cert), str(cert_file)], check=True)
+                
+                # Ensure proper permissions
+                key_file.chmod(0o600)
+                cert_file.chmod(0o644)
             
             return cert_file.exists() and key_file.exists()
         except Exception as e:
-            logger.debug(f"generate_certificate failed: {e}")
+            logger.error(f"generate_certificate failed: {e}")
             return False
 
     def generate_cert(self, domain: str) -> Dict:
@@ -267,15 +342,19 @@ Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile", "-ExecutionPoli
     def setup_ssl_for_site(self, site_name: str, tld: str) -> Dict:
         """Setup SSL for a site"""
         try:
+            # Normalize: strip TLD if user included it
+            if site_name.endswith(tld):
+                site_name = site_name[:-len(tld)]
             domain = f"{site_name}{tld}"
             
             # Generate certificate
             if not self.generate_certificate(domain):
                 return {'success': False, 'error': 'Failed to generate certificate'}
             
-            # Add to Windows hosts
-            if not self.add_to_windows_hosts(domain):
-                return {'success': False, 'error': 'Failed to add to Windows hosts'}
+            # Add to Windows hosts (non-fatal if it fails — domain may already exist)
+            hosts_result = self.add_to_windows_hosts(domain)
+            if not hosts_result:
+                logger.warning(f"Could not add {domain} to Windows hosts (may already exist or permission denied)")
             
             # Get certificate info
             cert_info = self.get_certificate_info(domain)
