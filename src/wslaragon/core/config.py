@@ -9,7 +9,19 @@ class Config:
         project_root = Path(__file__).parents[3]
         load_dotenv(dotenv_path=project_root / ".env")
         
-        self.config_dir = Path.home() / ".wslaragon"
+        # Use SUDO_USER's home directory when running with sudo,
+        # otherwise use the current user's home
+        sudo_user = os.getenv('SUDO_USER')
+        if sudo_user:
+            import pwd
+            try:
+                self.home_dir = Path(pwd.getpwnam(sudo_user).pw_dir)
+            except (KeyError, ImportError):
+                self.home_dir = Path.home()
+        else:
+            self.home_dir = Path.home()
+        
+        self.config_dir = self.home_dir / ".wslaragon"
         self.config_file = self.config_dir / "config.yaml"
         self.sites_dir = self.config_dir / "sites"
         self.ssl_dir = self.config_dir / "ssl"
@@ -23,7 +35,7 @@ class Config:
             dir_path.mkdir(exist_ok=True)
     
     def _load_config(self):
-        default_document_root = os.getenv('DOCUMENT_ROOT', str(Path.home() / "web"))
+        default_document_root = os.getenv('DOCUMENT_ROOT', str(self.home_dir / "web"))
         
         default_config = {
             "php": {
