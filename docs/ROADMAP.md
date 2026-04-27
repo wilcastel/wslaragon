@@ -4,6 +4,16 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 
 ## ✅ Completado Recientemente
 
+### 🔒 SSL Mejorado
+- [x] **Certificados con CN correcto**: Generación con openssl (no solo mkcert) para incluir el dominio en el campo CN del certificado.
+- [x] **Auto-instalación de CA root**: Instalación automática de la CA root en el almacén de certificados de Windows (con elevación UAC).
+- [x] **SAN completos**: Los certificados incluyen DNS + IP (127.0.0.1) como Subject Alternative Names.
+
+### 🗄️ Base de Datos
+- [x] **WordPress con MySQL automático**: El flag `--wordpress` ahora crea la base de datos MySQL automáticamente sin necesidad de `--mysql`.
+- [x] **phpMyAdmin**: Nuevo tipo de sitio `--phpmyadmin` para gestión visual de bases de datos MySQL.
+- [x] **Configuración generated**: El `wp-config.php` de WordPress y `config.inc.php` de phpMyAdmin se generan con las credenciales del `.env`.
+
 ### 🛠️ Infraestructura y Configuración
 - [x] **Gestión Dinámica de Configuración PHP**: Modificar `php.ini` desde el CLI (`memory_limit`, `upload_max_filesize`).
 - [x] **Configuración Nginx Avanzada**: Aumento del límite de subida (`client_max_body_size`) para soportar archivos grandes (50MB+).
@@ -19,7 +29,8 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [x] **Laravel con Supabase**: Comando `--supabase` para integración rápida.
 - [x] **Soporte Laravel/Public**: Opción para servir sitios desde `public/`.
 - [x] **Laravel con PostgreSQL**: Comando `--postgres`.
-- [x] **WordPress Auto-Installer**: Comando `--wordpress`.
+- [x] **WordPress Auto-Installer**: Comando `--wordpress` (con MySQL automático).
+- [x] **phpMyAdmin**: Comando `--phpmyadmin` para gestión visual de bases de datos.
 
 ---
 

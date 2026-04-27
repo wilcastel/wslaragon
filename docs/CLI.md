@@ -17,8 +17,8 @@ wslaragon site create mi-web --html
 # Crear sitio HTML completo (index.html, styles/, js/)
 wslaragon site create landing --html
 
-# Ejemplo WordPress completo
-wslaragon site create mi-blog --wordpress --mysql
+# Ejemplo WordPress (la base de datos se crea automáticamente)
+wslaragon site create mi-blog --wordpress
 
 # Ejemplo Laravel 12 con MySQL
 wslaragon site create mi-app --laravel=12 --mysql
@@ -45,10 +45,11 @@ wslaragon site create mi-app-react --vite react
 
 **Opciones:**
 - `--php / --no-php`: Habilitar o deshabilitar PHP-FPM.
-- `--mysql / --no-mysql`: Crear o no una base de datos MySQL automática.
+- `--mysql / --no-mysql`: Crear o no una base de datos MySQL automática. **Para WordPress, `--mysql` se activa automáticamente** — no es necesario especificarlo.
 - `--ssl / --no-ssl`: Generar certificado SSL local (Habilitado por defecto).
 - `--html`: Crear sitio HTML estático con estructura completa (index.html, styles/estilos.css, js/app.js).
-- `--wordpress`: Crear sitio WordPress completo con descarga automática.
+- `--wordpress`: Crear sitio WordPress completo con descarga automática. **Crea la base de datos MySQL automáticamente.**
+- `--phpmyadmin`: Crear sitio phpMyAdmin para gestión visual de bases de datos.
 - `--laravel=VERSIÓN`: Crear sitio Laravel (ej. `--laravel=12` para Laravel 12).
 - `--postgres`: Usar PostgreSQL en lugar de MySQL para Laravel.
 - `--supabase`: Usar Supabase (PostgreSQL + configuración Supabase) para Laravel.

@@ -23,13 +23,13 @@ WEB_ROOT="${WSLARAGON_WEB_ROOT:-$HOME/web}"
 # Service names
 NGINX_SERVICE="nginx"
 MARIADB_SERVICE="mariadb"
-PHP_SERVICE="php8.3-fpm"
+PHP_SERVICE="php8.5-fpm"
 WSLARAGON_WEB_SERVICE="wslaragon-web"
 
-# PHP version
-PHP_VERSION="8.3"
+# PHP version (default: 8.5, also available: 8.4)
+PHP_VERSION="8.5"
 PHP_INI="/etc/php/${PHP_VERSION}/fpm/php.ini"
-PHP_EXTENSIONS_DIR="/usr/lib/php/20230831"
+PHP_EXTENSIONS_DIR="/usr/lib/php/20250925"
 
 # MySQL/MariaDB
 MYSQL_USER="${DB_USER:-root}"

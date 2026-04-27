@@ -64,11 +64,14 @@ El componente `site_creators.py` implementa el patrón Strategy para la creació
 SiteManager.create_site()
     ├── Valida el nombre del sitio
     ├── Selecciona el creador apropiado:
-    │   ├── PHPCreator (sitios PHP/Laravel)
+    │   ├── HtmlCreator (sitios HTML estáticos con estilos y js)
+    │   ├── WordPressCreator (instalación automática WP + MySQL)
+    │   ├── PhpMyAdminCreator (gestión visual de bases de datos)
+    │   ├── LaravelCreator (Laravel con MySQL/PostgreSQL/Supabase)
     │   ├── NodeCreator (aplicaciones Node.js)
     │   ├── PythonCreator (aplicaciones Python/FastAPI)
-    │   ├── WordPressCreator (instalación automática WP)
-    │   └── StaticCreator (sitios HTML estáticos)
+    │   ├── ViteCreator (proyectos Vite: React, Vue, Svelte, etc.)
+    │   └── DefaultCreator (sitios PHP o estáticos simples)
     └── El creador ejecuta los pasos específicos
 ```
 

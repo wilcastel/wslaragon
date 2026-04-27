@@ -101,7 +101,11 @@ sudo systemctl start readernews-worker
 | "Connection refused" (MySQL) | MySQL detenido | `sudo service mysql start` |
 | Jobs no se procesan | Queue worker detenido | `sudo systemctl restart readernews-worker` |
 | SSL no funciona | Puerto 443 ocupado | Verificar que no haya otro nginx |
-| "Permission denied" | Archivos copiados desde Windows | `wslaragon site fix-permissions mi-sitio` |
+| "Permission denied" en Nginx | Home directory sin permisos | `chmod 755 $HOME` o `wslaragon site fix-permissions mi-sitio` |
+| SSL muestra "No seguro" en navegador | CA root no instalada en Windows | Ver [Guía de Instalación → Paso 4](INSTALL.md#4-instalar-la-ca-root-para-ssl-️-importante) |
+| Certificado CN dice "mkcert development" | Certificado viejo generado con mkcert puro | Regenerar con `wslaragon ssl generate dominio.test` |
+| WordPress muestra "Error establishing a database" | Base de datos no creada | `wslaragon site create blog --wordpress` (ya crea la DB automáticamente) |
+| Archivos creados en `/root/web/` con sudo | Bug de HOME en versiones anteriores | Actualizar WSLaragon: `pip install -e .` |
 
 ---
 
