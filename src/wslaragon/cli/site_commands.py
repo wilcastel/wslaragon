@@ -53,18 +53,17 @@ def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astr
     """Create a new site"""
     # Override defaults for Node/Python/Vite/Astro if not explicitly set
     
-    if site_type in ('node', 'python') or vite or astro:
-        # If user didn't explicitly ask for PHP, disable it
-        if php: # php is True by default
+    if site_type in ('node', 'python') or vite:
+        if php:
             php = False
             
-        # If vite is selected, enforce node type implicitly
         if vite and not site_type:
             site_type = 'node'
-        
-        # If astro is selected, enforce node type implicitly
-        if astro and not site_type:
-            site_type = 'node'
+    
+    # Astro SSG: no PHP, no node type (serves static from dist/)
+    if astro:
+        if php:
+            php = False
     
     # phpMyAdmin doesn't need its own database (it manages existing ones)
     if site_type == 'phpmyadmin' and mysql is None:
@@ -387,7 +386,8 @@ def site_ssl(name):
             web_root, 
             ssl=True, 
             php=site_info.get('php', True),
-            proxy_port=site_info.get('proxy_port')
+            proxy_port=site_info.get('proxy_port'),
+            astro_ssg=bool(site_info.get('astro_template'))
         )
         
         if not nginx_result[0]:

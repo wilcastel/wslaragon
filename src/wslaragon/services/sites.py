@@ -84,11 +84,12 @@ class SiteManager:
             if mysql is None:
                 mysql = False
             
-            # Auto-configure for Node/Python/Vite/Astro
-            if site_type in ('node', 'python') or vite_template or astro_template:
+            # Auto-configure for Node/Python/Vite (Astro SSG does NOT need a proxy)
+            is_astro_ssg = bool(astro_template)
+            if site_type in ('node', 'python') or vite_template:
                 if not proxy_port:
                     # Find next free port
-                    start_port = 3000 if site_type == 'node' or vite_template or astro_template else 8000
+                    start_port = 3000 if site_type == 'node' or vite_template else 8000
                     proxy_port = self._find_next_free_port(start_port)
             
             if site_name in self.sites and not recreate:
@@ -112,6 +113,12 @@ class SiteManager:
                     subprocess.run(['sudo', 'rm', '-rf', str(site_base_dir)], check=True)
                     messages.append(f"[yellow]Cleaned existing directory: {site_base_dir}[/yellow]")
             
+            # Astro SSG: no PHP, no MySQL by default
+            if is_astro_ssg:
+                php = False
+                if mysql is None:
+                    mysql = False
+            
             site_base_dir.mkdir(exist_ok=True, parents=True)
             
             is_laravel = site_type is not None and (site_type == 'laravel' or site_type.isdigit())
@@ -120,7 +127,10 @@ class SiteManager:
             # WordPress and phpMyAdmin install in root by default, unlike Laravel which uses public/
             use_public = public_dir or is_laravel
             
-            web_root = site_base_dir / "public" if use_public else site_base_dir
+            if is_astro_ssg:
+                web_root = site_base_dir / "dist"
+            else:
+                web_root = site_base_dir / "public" if use_public else site_base_dir
             
             if use_public and not is_laravel and not web_root.exists():
                 web_root.mkdir(exist_ok=True, parents=True)
@@ -206,7 +216,8 @@ class SiteManager:
                 ssl=ssl, 
                 php=php,
                 proxy_port=proxy_port,
-                api_proxies=api_proxies
+                api_proxies=api_proxies,
+                astro_ssg=is_astro_ssg
             )
             
             if not nginx_created:
@@ -224,6 +235,7 @@ class SiteManager:
                 'proxy_port': proxy_port,
                 'database': database_name if db_type_final else None,
                 'api_proxies': api_proxies,
+                'astro_template': astro_template,
                 'created_at': datetime.now().isoformat(),
                 'enabled': True
             }
@@ -272,7 +284,8 @@ class SiteManager:
                 str(new_web_root),
                 ssl=site_info.get('ssl', False),
                 php=site_info.get('php', True),
-                proxy_port=site_info.get('proxy_port')
+                proxy_port=site_info.get('proxy_port'),
+                astro_ssg=bool(site_info.get('astro_template'))
             )
             
             if not success:
@@ -282,7 +295,8 @@ class SiteManager:
                     str(old_web_root),
                     ssl=site_info.get('ssl', False),
                     php=site_info.get('php', True),
-                    proxy_port=site_info.get('proxy_port')
+                    proxy_port=site_info.get('proxy_port'),
+                    astro_ssg=bool(site_info.get('astro_template'))
                 )
                 return {'success': False, 'error': f"Failed to update Nginx: {error}"}
             
@@ -409,7 +423,8 @@ class SiteManager:
                     ssl=site_info.get('ssl', False),
                     php=site_info.get('php', True),
                     proxy_port=site_info.get('proxy_port'),
-                    api_proxies=site_info.get('api_proxies', {})
+                    api_proxies=site_info.get('api_proxies', {}),
+                    astro_ssg=bool(site_info.get('astro_template'))
                 )
             
             self._save_sites()
@@ -557,7 +572,8 @@ class SiteManager:
                 ssl=site_info.get('ssl', False),
                 php=site_info.get('php', True),
                 proxy_port=site_info.get('proxy_port'),
-                api_proxies=site_info.get('api_proxies', {})
+                api_proxies=site_info.get('api_proxies', {}),
+                astro_ssg=bool(site_info.get('astro_template'))
             )
             
             if not success:
@@ -605,7 +621,8 @@ class SiteManager:
                 ssl=site_info.get('ssl', False),
                 php=site_info.get('php', True),
                 proxy_port=site_info.get('proxy_port'),
-                api_proxies=site_info.get('api_proxies', {})
+                api_proxies=site_info.get('api_proxies', {}),
+                astro_ssg=bool(site_info.get('astro_template'))
             )
             
             if not success:

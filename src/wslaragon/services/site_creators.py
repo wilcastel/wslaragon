@@ -639,18 +639,17 @@ class AstroSiteCreator(SiteCreator):
     def create(self) -> List[str]:
         """Create an Astro project."""
         messages = []
-        proxy_port = self.proxy_port
         site_name = self.site_name
         site_base_dir = self.site_base_dir
         astro_template = self.astro_template or 'basics'
-        
+
         # If template is 'headless', use AstroHeadlessSiteCreator instead
         if astro_template == 'headless':
             creator = AstroHeadlessSiteCreator(
-                self.config, site_name, self.web_root, site_base_dir, self.tld, proxy_port
+                self.config, site_name, self.web_root, site_base_dir, self.tld, self.proxy_port
             )
             return creator.create()
-        
+
         try:
             current_user = os.getenv('SUDO_USER') or os.getenv('USER')
             is_root = os.geteuid() == 0 and current_user
@@ -658,7 +657,6 @@ class AstroSiteCreator(SiteCreator):
             subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{current_user}', str(site_base_dir)], check=True)
             
             if is_root:
-                # Use runuser -l to load user's profile (nvm, etc.) and run as correct user
                 def run_as_user(cmd, **kwargs):
                     return subprocess.run(
                         ['runuser', '-l', current_user, '-c', cmd],
@@ -668,54 +666,44 @@ class AstroSiteCreator(SiteCreator):
                 def run_as_user(cmd, **kwargs):
                     return subprocess.run(cmd, shell=True, **kwargs)
             
-            # Scaffold Astro project with template
             scaffold_cmd = f"npm create astro@latest . -- --template {astro_template} --no-install --no-git --yes"
             result = run_as_user(scaffold_cmd, cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             
             if result.returncode != 0:
-                # Retry with different flags (older versions may not support all flags)
                 scaffold_cmd = f"npm create astro@latest . --yes"
                 result = run_as_user(scaffold_cmd, cwd=str(site_base_dir), input=f"{astro_template}\n\n", capture_output=True, text=True, timeout=120)
                 if result.returncode != 0:
                     raise Exception(f"Astro scaffolding failed: {result.stderr}")
             
-            # Install dependencies
             result = run_as_user("npm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
                 raise Exception(f"Astro npm install failed: {result.stderr}")
             
-            # Update package.json scripts with port
             pkg_path = site_base_dir / "package.json"
             if pkg_path.exists():
                 with open(pkg_path, 'r') as f:
                     pkg = json.load(f)
                 
-                if 'scripts' in pkg:
-                    pkg['scripts']['dev'] = f"astro dev --port {proxy_port} --host"
-                    pkg['scripts']['start'] = f"astro dev --port {proxy_port} --host"
+                if 'scripts' not in pkg:
+                    pkg['scripts'] = {}
+                pkg['scripts']['dev'] = "astro dev --host"
+                pkg['scripts']['build'] = "astro build"
+                pkg['scripts']['preview'] = "astro preview --host"
                 
                 with open(pkg_path, 'w') as f:
                     json.dump(pkg, f, indent=2)
             
-            # Configure astro.config to allow the .test host
-            for cfg_file in ['astro.config.mjs', 'astro.config.js', 'astro.config.ts']:
-                cfg_path = site_base_dir / cfg_file
-                if cfg_path.exists():
-                    with open(cfg_path, 'r') as f:
-                        content = f.read()
-                    
-                    # Add server config if not already present
-                    if 'server' not in content:
-                        content = content.replace(
-                            'defineConfig({',
-                            f'defineConfig({{\n  server: {{ host: true, port: {proxy_port} }},'
-                        )
-                        with open(cfg_path, 'w') as f:
-                            f.write(content)
-                    break
+            result = run_as_user("npm run build", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                raise Exception(f"Astro build failed: {result.stderr}")
+            
+            dist_dir = site_base_dir / "dist"
+            if not dist_dir.exists():
+                raise Exception("Astro build did not produce dist/ directory")
             
             messages.append(f"[green]Astro ({astro_template}) project created successfully![/green]")
-            messages.append(f"[yellow]Node process prepared. Run 'wslaragon node start {site_name}' to serve 'npm run dev'.[/yellow]")
+            messages.append(f"[green]Static site built -> dist/ ({dist_dir})[/green]")
+            messages.append(f"[dim]Dev mode: npm run dev (from {site_base_dir})[/dim]")
             
         except subprocess.CalledProcessError as e:
             raise Exception(f"Astro project creation failed: {str(e)}")
@@ -1247,13 +1235,28 @@ const endpoints = getConfiguredEndpoints();
             if result.returncode != 0:
                 messages.append(f"[yellow]npm install had warnings[/yellow]")
             
+            # Build static site
+            if os.geteuid() == 0 and current_user:
+                build_result = subprocess.run(
+                    ['runuser', '-l', current_user, '-c', 'npm run build'],
+                    cwd=str(site_base_dir), capture_output=True, text=True, timeout=120
+                )
+            else:
+                build_result = subprocess.run(['npm', 'run', 'build'], cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+            
+            dist_dir = site_base_dir / "dist"
+            if build_result.returncode != 0 or not dist_dir.exists():
+                messages.append(f"[yellow]Build failed — run 'npm run build' manually from {site_base_dir}[/yellow]")
+            else:
+                messages.append(f"[green]Static site built -> dist/ ({dist_dir})[/green]")
+            
             # Set permissions
             subprocess.run(['sudo', 'chown', '-R', f'{current_user}:www-data', str(site_base_dir)], check=True)
             
             messages.append(f"[green]Astro Headless project created successfully![/green]")
             messages.append(f"[yellow]Edit .env to configure your API endpoints[/yellow]")
             messages.append(f"[yellow]Add API proxies: wslaragon site api add {site_name} /api https://api.{domain}/api[/yellow]")
-            messages.append(f"[yellow]Start dev: wslaragon node start {site_name}[/yellow]")
+            messages.append(f"[dim]Dev mode: npm run dev (from {site_base_dir})[/dim]")
             
         except subprocess.CalledProcessError as e:
             raise Exception(f"Astro Headless project creation failed: {str(e)}")

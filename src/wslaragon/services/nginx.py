@@ -57,7 +57,7 @@ class NginxManager:
     
     def create_site_config(self, site_name: str, document_root: str, 
                           ssl: bool = False, php: bool = True, proxy_port: int = None,
-                          api_proxies: Dict[str, str] = None) -> str:
+                          api_proxies: Dict[str, str] = None, astro_ssg: bool = False) -> str:
         """Generate Nginx site configuration"""
         site_name = self._normalize_site_name(site_name)
         domain = f"{site_name}{self.tld}"
@@ -94,7 +94,7 @@ class NginxManager:
     }}
 """
         
-# Proxy configuration (Exclusive: overrides PHP/Static logic)
+        # Proxy configuration (Exclusive: overrides PHP/Static logic)
         if proxy_port:
             common_config = f"""{api_proxy_config}
     # Dev server proxy
@@ -110,6 +110,31 @@ class NginxManager:
         proxy_cache_bypass $http_upgrade;
         client_max_body_size {self.config.get('nginx.client_max_body_size', '128M')};
     }}"""
+        elif astro_ssg:
+            common_config = f"""{api_proxy_config}
+    root {document_root};
+    index index.html;
+    client_max_body_size {self.config.get('nginx.client_max_body_size', '128M')};
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
+    # Static assets with long cache
+    location ~* \\.(jpg|jpeg|png|gif|ico|css|js|svg|woff2|woff|ttf|eot)$ {{
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }}
+
+    # Astro SPA/SSG fallback
+    location / {{
+        try_files $uri $uri/index.html $uri.html =404;
+    }}
+
+    location = /favicon.ico {{ access_log off; log_not_found off; }}
+    location = /robots.txt {{ access_log off; log_not_found off; }}"""
         else:
             # PHP-FPM part
             php_config = ""
@@ -192,12 +217,12 @@ server {{
     
     def add_site(self, site_name: str, document_root: str, 
                 ssl: bool = False, php: bool = True, proxy_port: int = None,
-                api_proxies: Dict[str, str] = None) -> Tuple[bool, Optional[str]]:
+                api_proxies: Dict[str, str] = None, astro_ssg: bool = False) -> Tuple[bool, Optional[str]]:
         """Add a new site configuration"""
         try:
             config_content = self.create_site_config(
                 site_name, document_root, ssl, php, proxy_port,
-                api_proxies=api_proxies
+                api_proxies=api_proxies, astro_ssg=astro_ssg
             )
             
             site_name = self._normalize_site_name(site_name)
