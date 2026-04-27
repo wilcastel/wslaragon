@@ -17,12 +17,12 @@ class SiteManager:
         self.config = config
         self.nginx = nginx_manager
         self.mysql = mysql_manager
-        self.sites_dir = Path(config.get('sites.dir', str(Path.home() / ".wslaragon" / "sites")))
+        self.sites_dir = Path(config.get('sites.dir', str(config.home_dir / ".wslaragon" / "sites")))
         
         # Provide default if document_root is missing
         document_root = config.get('sites.document_root')
         if document_root is None:
-            document_root = str(Path.home() / "web")
+            document_root = str(config.home_dir / "web")
         self.document_root = Path(document_root)
         
         # Provide default if tld is missing
@@ -242,6 +242,8 @@ class SiteManager:
             
             self.sites[site_name] = site_info
             self._save_sites()
+            
+            self.fix_permissions(site_name)
             
             panel_content = f"[bold green]Site created successfully![/bold green]\n\n"
             panel_content += f"Domain: {site_info['domain']}\n"
