@@ -577,32 +577,24 @@ class ViteSiteCreator(SiteCreator):
         
         try:
             current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+            is_root = os.geteuid() == 0 and current_user
             
             subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{current_user}', str(site_base_dir)], check=True)
             
-            npm_path = shutil.which('npm')
+            if is_root:
+                def run_as_user(cmd, **kwargs):
+                    return subprocess.run(
+                        ['runuser', '-l', current_user, '-c', cmd],
+                        **kwargs
+                    )
+            else:
+                def run_as_user(cmd, **kwargs):
+                    return subprocess.run(cmd, shell=True, **kwargs)
             
-            if not npm_path:
-                if os.geteuid() == 0 and current_user:
-                    try:
-                        res = subprocess.run(['runuser', '-l', current_user, '-c', 'which npm'], capture_output=True, text=True)
-                        if res.returncode == 0:
-                            npm_path = res.stdout.strip()
-                    except:
-                        pass
+            run_as_user(f"npm create vite@latest . -- --template {vite_template}", 
+                       cwd=str(site_base_dir), check=True, input="\nn\n", text=True)
             
-            if not npm_path:
-                npm_path = "npm"
-
-            exec_cmd_prefix = []
-            if os.geteuid() == 0 and current_user:
-                exec_cmd_prefix = ['sudo', '-u', current_user]
-            
-            full_cmd_create = exec_cmd_prefix + [npm_path, 'create', 'vite@latest', '.', '--', '--template', vite_template]
-            subprocess.run(full_cmd_create, cwd=str(site_base_dir), check=True, input="\nn\n", text=True)
-            
-            full_cmd_install = exec_cmd_prefix + [npm_path, 'install']
-            subprocess.run(full_cmd_install, cwd=str(site_base_dir), check=True)
+            run_as_user("npm install", cwd=str(site_base_dir), check=True)
             
             pkg_path = site_base_dir / "package.json"
             with open(pkg_path, 'r') as f:
@@ -634,6 +626,760 @@ class ViteSiteCreator(SiteCreator):
             raise Exception(f"Vite scaffolding failed: {str(e)}")
         
         return messages
+
+
+class AstroSiteCreator(SiteCreator):
+    """Create an Astro project."""
+    
+    def __init__(self, config, site_name: str, web_root: Path, site_base_dir: Path, tld: str, 
+                 proxy_port: int = None, astro_template: str = None):
+        super().__init__(config, site_name, web_root, site_base_dir, tld, proxy_port)
+        self.astro_template = astro_template
+    
+    def create(self) -> List[str]:
+        """Create an Astro project."""
+        messages = []
+        proxy_port = self.proxy_port
+        site_name = self.site_name
+        site_base_dir = self.site_base_dir
+        astro_template = self.astro_template or 'basics'
+        
+        # If template is 'headless', use AstroHeadlessSiteCreator instead
+        if astro_template == 'headless':
+            creator = AstroHeadlessSiteCreator(
+                self.config, site_name, self.web_root, site_base_dir, self.tld, proxy_port
+            )
+            return creator.create()
+        
+        try:
+            current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+            is_root = os.geteuid() == 0 and current_user
+            
+            subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{current_user}', str(site_base_dir)], check=True)
+            
+            if is_root:
+                # Use runuser -l to load user's profile (nvm, etc.) and run as correct user
+                def run_as_user(cmd, **kwargs):
+                    return subprocess.run(
+                        ['runuser', '-l', current_user, '-c', cmd],
+                        **kwargs
+                    )
+            else:
+                def run_as_user(cmd, **kwargs):
+                    return subprocess.run(cmd, shell=True, **kwargs)
+            
+            # Scaffold Astro project with template
+            scaffold_cmd = f"npm create astro@latest . -- --template {astro_template} --no-install --no-git --yes"
+            result = run_as_user(scaffold_cmd, cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+            
+            if result.returncode != 0:
+                # Retry with different flags (older versions may not support all flags)
+                scaffold_cmd = f"npm create astro@latest . --yes"
+                result = run_as_user(scaffold_cmd, cwd=str(site_base_dir), input=f"{astro_template}\n\n", capture_output=True, text=True, timeout=120)
+                if result.returncode != 0:
+                    raise Exception(f"Astro scaffolding failed: {result.stderr}")
+            
+            # Install dependencies
+            result = run_as_user("npm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                raise Exception(f"Astro npm install failed: {result.stderr}")
+            
+            # Update package.json scripts with port
+            pkg_path = site_base_dir / "package.json"
+            if pkg_path.exists():
+                with open(pkg_path, 'r') as f:
+                    pkg = json.load(f)
+                
+                if 'scripts' in pkg:
+                    pkg['scripts']['dev'] = f"astro dev --port {proxy_port} --host"
+                    pkg['scripts']['start'] = f"astro dev --port {proxy_port} --host"
+                
+                with open(pkg_path, 'w') as f:
+                    json.dump(pkg, f, indent=2)
+            
+            # Configure astro.config to allow the .test host
+            for cfg_file in ['astro.config.mjs', 'astro.config.js', 'astro.config.ts']:
+                cfg_path = site_base_dir / cfg_file
+                if cfg_path.exists():
+                    with open(cfg_path, 'r') as f:
+                        content = f.read()
+                    
+                    # Add server config if not already present
+                    if 'server' not in content:
+                        content = content.replace(
+                            'defineConfig({',
+                            f'defineConfig({{\n  server: {{ host: true, port: {proxy_port} }},'
+                        )
+                        with open(cfg_path, 'w') as f:
+                            f.write(content)
+                    break
+            
+            messages.append(f"[green]Astro ({astro_template}) project created successfully![/green]")
+            messages.append(f"[yellow]Node process prepared. Run 'wslaragon node start {site_name}' to serve 'npm run dev'.[/yellow]")
+            
+        except subprocess.CalledProcessError as e:
+            raise Exception(f"Astro project creation failed: {str(e)}")
+        
+        return messages
+
+
+class AstroHeadlessSiteCreator(SiteCreator):
+    """Create an Astro headless project preconfigured for API-driven hydration.
+    
+    Generates a minimal, clean project with the island architecture pattern.
+    No APIs are hardcoded — the user configures which ones they need via:
+    
+    1. Edit .env to set API endpoints
+    2. wslaragon site api add <name> <path> <backend> to create Nginx proxies
+    
+    Includes:
+    - .env.example with all possible API configurations (commented out)
+    - .env with minimal defaults (site name + URL)
+    - src/utils/api.ts — generic API client with per-endpoint configuration
+    - src/components/Island.tsx — minimal example Preact island
+    - src/layouts/BaseLayout.astro — responsive base layout
+    - src/pages/index.astro — home page showing the pattern
+    - astro.config.mjs — hybrid rendering + dev server proxy config
+    """
+    
+    def create(self) -> List[str]:
+        messages = []
+        proxy_port = self.proxy_port
+        site_name = self.site_name
+        site_base_dir = self.site_base_dir
+        tld = self.tld
+        domain = f"{site_name}{tld}"
+        current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+        
+        try:
+            if site_base_dir.exists():
+                subprocess.run(['sudo', 'rm', '-rf', str(site_base_dir)], check=True)
+            site_base_dir.mkdir(parents=True, exist_ok=True)
+            
+            src_dir = site_base_dir / "src"
+            components_dir = src_dir / "components"
+            layouts_dir = src_dir / "layouts"
+            pages_dir = src_dir / "pages"
+            utils_dir = src_dir / "utils"
+            public_dir = site_base_dir / "public"
+            
+            for d in [components_dir, layouts_dir, pages_dir, utils_dir, public_dir]:
+                d.mkdir(parents=True, exist_ok=True)
+            
+            # --- .env (minimal — user adds APIs as needed) ---
+            env_content = f"""# WSLaragon Astro Headless — API Configuration
+# =============================================
+# PRIVATE_ vars: server-side only (build time / SSR). Never sent to browser.
+# PUBLIC_ vars: embedded in client JS. Safe for islands that hydrate.
+#
+# Add APIs with: wslaragon site api add {site_name} <path> <backend_url>
+# Example: wslaragon site api add {site_name} /api https://api.{domain}/api
+
+SITE_NAME={site_name}
+SITE_URL=https://{domain}
+"""
+            with open(site_base_dir / ".env", 'w') as f:
+                f.write(env_content)
+            
+            # --- .env.example (reference with all patterns) ---
+            env_example = f"""# WSLaragon Astro Headless — API Configuration Examples
+# =============================================
+# Copy the endpoints you need to .env and customize.
+# Then add Nginx proxies: wslaragon site api add {site_name} <path> <backend_url>
+
+# Content API (Laravel, Strapi, WordPress, etc.)
+# PRIVATE_CONTENT_API_URL=https://api.{domain}/api
+# PUBLIC_CONTENT_API_URL=https://{domain}/api
+
+# Ads / Monetization API
+# PRIVATE_ADS_API_URL=https://ads.{domain}/api
+# PUBLIC_ADS_API_URL=https://{domain}/ads-api
+
+# Search API (Meilisearch, Elasticsearch, FastAPI, etc.)
+# PRIVATE_SEARCH_API_URL=https://search.{domain}/api
+# PUBLIC_SEARCH_API_URL=https://{domain}/search-api
+# PUBLIC_SEARCH_API_KEY=your-public-key
+
+# Auth API (if needed)
+# PRIVATE_AUTH_API_URL=https://auth.{domain}/api
+
+# Analytics API (if needed)
+# PRIVATE_ANALYTICS_API_URL=https://analytics.{domain}/api
+
+SITE_NAME={site_name}
+SITE_URL=https://{domain}
+"""
+            with open(site_base_dir / ".env.example", 'w') as f:
+                f.write(env_example)
+            
+            # --- package.json ---
+            pkg = {
+                "name": site_name,
+                "type": "module",
+                "version": "0.0.1",
+                "scripts": {
+                    "dev": f"astro dev --port {proxy_port} --host",
+                    "start": f"astro dev --port {proxy_port} --host",
+                    "build": "astro build",
+                    "preview": f"astro preview --port {proxy_port} --host",
+                    "astro": "astro"
+                },
+                "dependencies": {
+                    "astro": "^5.0.0",
+                    "@astrojs/preact": "^4.0.0",
+                    "preact": "^10.0.0"
+                }
+            }
+            with open(site_base_dir / "package.json", 'w') as f:
+                json.dump(pkg, f, indent=2)
+            
+            # --- astro.config.mjs ---
+            astro_config = f"""import {{ defineConfig }} from 'astro/config';
+import preact from '@astrojs/preact';
+
+export default defineConfig({{
+  output: 'hybrid',
+  server: {{
+    host: true,
+    port: {proxy_port},
+  }},
+  vite: {{
+    server: {{
+      proxy: {{
+        // Add API proxies here as you configure them.
+        // Example: '/api' -> 'https://api.{domain}/api'
+        // These are DEV-ONLY proxies. In production, Nginx handles routing.
+        //
+        // After running: wslaragon site api add {site_name} /api https://api.{domain}/api
+        // Uncomment below:
+        // '/api': {{
+        //   target: process.env.PRIVATE_CONTENT_API_URL || 'https://api.{domain}',
+        //   changeOrigin: true,
+        // }},
+      }},
+    }},
+  }},
+  integrations: [preact()],
+}});
+"""
+            with open(site_base_dir / "astro.config.mjs", 'w') as f:
+                f.write(astro_config)
+            
+            # --- tsconfig.json ---
+            tsconfig = {
+                "extends": "astro/tsconfigs/base",
+                "compilerOptions": {
+                    "jsx": "react-jsx",
+                    "jsxImportSource": "preact"
+                }
+            }
+            with open(site_base_dir / "tsconfig.json", 'w') as f:
+                json.dump(tsconfig, f, indent=2)
+            
+            # --- src/utils/api.ts ---
+            api_utils = """/**
+ * API client utilities for WSLaragon Astro Headless
+ * 
+ * Usage patterns:
+ * 
+ *   Server-side (.astro files):  const data = await fetchApi('content', '/posts');
+ *   Client-side (.tsx islands):   const data = await fetchApi('content', '/posts');
+ *
+ * Each API endpoint is defined by a path prefix that maps to an environment variable.
+ * Add new APIs by:
+ *   1. Adding PUBLIC_*_API_URL to .env
+ *   2. Adding the endpoint name and path here
+ *   3. Running: wslaragon site api add <site> <path> <backend_url>
+ */
+
+interface ApiConfig {
+  /** Path prefix used in the browser (e.g., '/api') */
+  path: string;
+  /** Full URL from PUBLIC_ env var, falls back to relative path */
+  url: string;
+}
+
+// Registry of API endpoints.
+// Add entries here when you add new APIs to .env
+const API_REGISTRY: Record<string, { envKey: string; defaultPath: string }> = {
+  content:  { envKey: 'PUBLIC_CONTENT_API_URL',  defaultPath: '/api' },
+  ads:      { envKey: 'PUBLIC_ADS_API_URL',      defaultPath: '/ads-api' },
+  search:   { envKey: 'PUBLIC_SEARCH_API_URL',   defaultPath: '/search-api' },
+  auth:     { envKey: 'PUBLIC_AUTH_API_URL',      defaultPath: '/auth-api' },
+  analytics:{ envKey: 'PUBLIC_ANALYTICS_API_URL',  defaultPath: '/analytics-api' },
+};
+
+// Build endpoint map from env vars (only includes configured APIs)
+const endpoints: Record<string, ApiConfig> = {};
+for (const [name, config] of Object.entries(API_REGISTRY)) {
+  const url = import.meta.env[config.envKey] as string | undefined;
+  if (url) {
+    endpoints[name] = { path: config.defaultPath, url };
+  }
+}
+
+export type ApiEndpoint = keyof typeof endpoints;
+
+/**
+ * Fetch from a registered API endpoint.
+ * Uses relative paths in production (Nginx proxies) or full URLs from env vars.
+ */
+export async function fetchApi<T = unknown>(
+  endpoint: ApiEndpoint,
+  path: string,
+  options?: RequestInit
+): Promise<T> {
+  const config = endpoints[endpoint];
+  if (!config) {
+    throw new Error(`Unknown API endpoint: ${endpoint}. Available: ${Object.keys(endpoints).join(', ')}`);
+  }
+
+  const url = config.path + path;
+  const response = await fetch(url, {
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    ...options,
+  });
+
+  if (!response.ok) {
+    throw new Error(`API error (${response.status}): ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Server-side only fetch — uses PRIVATE_ env vars.
+ * Use in .astro files for build-time data fetching.
+ * This data NEVER reaches the browser.
+ */
+export async function fetchApiSSR<T = unknown>(
+  endpoint: ApiEndpoint,
+  path: string,
+  options?: RequestInit
+): Promise<T> {
+  const privateEnvKey = API_REGISTRY[endpoint].envKey.replace('PUBLIC_', 'PRIVATE_');
+  const url = import.meta.env[privateEnvKey] || process.env[privateEnvKey];
+  
+  if (!url) {
+    throw new Error(`Private API URL not configured for ${endpoint}. Set ${privateEnvKey} in .env`);
+  }
+
+  const response = await fetch(url + path, {
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    ...options,
+  });
+
+  if (!response.ok) {
+    throw new Error(`API error (${response.status}): ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/** Get list of configured endpoint names */
+export function getConfiguredEndpoints(): string[] {
+  return Object.keys(endpoints);
+}
+"""
+            with open(utils_dir / "api.ts", 'w') as f:
+                f.write(api_utils)
+            
+            # --- src/components/Island.tsx (minimal example island) ---
+            island_content = """import { useState, useEffect } from 'preact/hooks';
+import { fetchApi, type ApiEndpoint } from '../utils/api';
+
+interface Props {
+  /** API endpoint name (must be configured in .env) */
+  endpoint: ApiEndpoint;
+  /** API path to fetch, e.g., '/posts' or '/items/5' */
+  path: string;
+  /** Loading message */
+  loading?: string;
+  /** Fallback when no data or API not configured */
+  fallback?: string;
+}
+
+/**
+ * Generic island component that fetches data from any configured API.
+ * Use as an example to build your own specialized islands.
+ * 
+ * Hydration strategies:
+ *   client:load    — hydrate immediately (critical content)
+ *   client:visible  — hydrate when visible in viewport (below fold)
+ *   client:idle    — hydrate when browser is idle (low priority)
+ *   client:only    — skip SSR, only hydrate on client
+ */
+export default function Island({ endpoint, path, loading = 'Cargando...', fallback = 'Sin datos' }: Props) {
+  const [data, setData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchApi(endpoint, path)
+      .then(setData)
+      .catch(err => setError(err.message));
+  }, [endpoint, path]);
+
+  if (error) return <p class="island-error">{error}</p>;
+  if (!data) return <p class="island-loading">{loading}</p>;
+
+  return (
+    <div class="island" data-endpoint={endpoint}>
+      <pre>{JSON.stringify(data, null, 2)}</pre>
+    </div>
+  );
+}
+"""
+            with open(components_dir / "Island.tsx", 'w') as f:
+                f.write(island_content)
+            
+            # --- src/layouts/BaseLayout.astro ---
+            layout_content = f"""---
+export interface Props {{
+  title: string;
+  description?: string;
+}}
+
+const {{ title, description = site_name }} = Astro.props;
+const siteName = import.meta.env.SITE_NAME || '{site_name}';
+---
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={{description}} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{{title}} | {{siteName}}</title>
+  </head>
+  <body>
+    <header>
+      <nav>
+        <a href="/" class="logo">{{siteName}}</a>
+      </nav>
+    </header>
+    <main>
+      <slot />
+    </main>
+    <footer>
+      <p>&copy; {{new Date().getFullYear()}} {{siteName}}</p>
+    </footer>
+  </body>
+</html>
+
+<style>
+  :root {{
+    --color-bg: #f8fafc;
+    --color-text: #0f172a;
+    --color-primary: #6366f1;
+    --color-border: #e2e8f0;
+  }}
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--color-bg);
+    color: var(--color-text);
+    line-height: 1.6;
+  }}
+  header {{
+    border-bottom: 1px solid var(--color-border);
+    padding: 1rem 2rem;
+  }}
+  .logo {{
+    font-weight: 700;
+    font-size: 1.25rem;
+    color: var(--color-primary);
+    text-decoration: none;
+  }}
+  main {{
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: 2rem;
+  }}
+  footer {{
+    border-top: 1px solid var(--color-border);
+    padding: 2rem;
+    text-align: center;
+    color: #64748b;
+  }}
+  .island, .island-loading, .island-error {{
+    padding: 1rem;
+    border-radius: 0.5rem;
+    margin: 1rem 0;
+  }}
+  .island {{ background: white; border: 1px solid var(--color-border); }}
+  .island-loading {{ color: #94a3b8; }}
+  .island-error {{ background: #fef2f2; color: #dc2626; }}
+</style>
+"""
+            with open(layouts_dir / "BaseLayout.astro", 'w') as f:
+                f.write(layout_content)
+            
+            # --- src/pages/index.astro ---
+            index_page = f"""---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import {{ getConfiguredEndpoints }} from '../utils/api';
+
+const endpoints = getConfiguredEndpoints();
+
+// Server-side data fetching example:
+// Uncomment when you have a content API configured in .env
+// import {{ fetchApiSSR }} from '../utils/api';
+// const posts = await fetchApiSSR('content', '/posts').catch(() => []);
+---
+
+<BaseLayout title="Inicio">
+  <section class="hero">
+    <h1>{site_name}</h1>
+    <p>Astro Headless con islas interactivas.</p>
+  </section>
+
+  <section class="setup">
+    <h2>Configuración</h2>
+    <p>Editá <code>.env</code> para agregar tus APIs:</p>
+    <pre class="env-example">PUBLIC_CONTENT_API_URL=https://{domain}/api
+# PUBLIC_ADS_API_URL=https://{domain}/ads-api
+# PUBLIC_SEARCH_API_URL=https://{domain}/search-api</pre>
+
+    <p>Luego agregá los proxies de Nginx:</p>
+    <pre class="cmd-example">wslaragon site api add {site_name} /api https://api.{domain}/api
+# wslaragon site api add {site_name} /search-api https://search.{domain}/api</pre>
+
+    {{endpoints.length > 0 ? (
+      <p class="endpoints-active">✓ APIs configuradas: {{endpoints.join(', ')}}</p>
+    ) : (
+      <p class="endpoints-empty">Ninguna API configurada aún. Agregá endpoints en .env y ejecutá <code>wslaragon site api add</code></p>
+    )}}
+  </section>
+
+  <section class="pattern">
+    <h2>Patrón de Islas</h2>
+    <div class="pattern-grid">
+      <div class="pattern-card">
+        <h3>Build Time (0 JS)</h3>
+        <p>Datos obtenidos en el servidor. El HTML se genera estático.</p>
+        <pre>const data = await fetchApiSSR('content', '/posts');</pre>
+      </div>
+      <div class="pattern-card">
+        <h3>Hidratación (client:*)</h3>
+        <p>Componentes Preact que se hidratan en el navegador.</p>
+        <pre>&lt;Island client:visible endpoint="content" path="/posts" /&gt;</pre>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .hero {{
+    text-align: center;
+    padding: 3rem 0;
+  }}
+  .hero h1 {{
+    font-size: 2.5rem;
+    color: var(--color-primary);
+  }}
+  .setup {{
+    background: white;
+    padding: 2rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--color-border);
+    margin-bottom: 2rem;
+  }}
+  .env-example, .cmd-example {{
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    overflow-x: auto;
+    font-size: 0.875rem;
+  }}
+  .endpoints-active {{
+    color: #16a34a;
+    font-weight: 600;
+  }}
+  .endpoints-empty {{
+    color: #94a3b8;
+  }}
+  .pattern-grid {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }}
+  .pattern-card {{
+    padding: 1.5rem;
+    border: 1px solid var(--color-border);
+    border-radius: 0.5rem;
+  }}
+  .pattern-card h3 {{
+    color: var(--color-primary);
+    margin-bottom: 0.5rem;
+  }}
+  .pattern-card pre {{
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 0.75rem;
+    border-radius: 0.375rem;
+    font-size: 0.8rem;
+    overflow-x: auto;
+  }}
+  @media (max-width: 768px) {{
+    .pattern-grid {{
+      grid-template-columns: 1fr;
+    }}
+  }}
+</style>
+"""
+            with open(pages_dir / "index.astro", 'w') as f:
+                f.write(index_page)
+            
+            # --- public/favicon.svg ---
+            favicon = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36"><text y="32" font-size="32">⚡</text></svg>"""
+            with open(public_dir / "favicon.svg", 'w') as f:
+                f.write(favicon)
+            
+            # Install dependencies
+            if os.geteuid() == 0 and current_user:
+                result = subprocess.run(
+                    ['runuser', '-l', current_user, '-c', 'npm install'],
+                    cwd=str(site_base_dir), capture_output=True, text=True, timeout=180
+                )
+            else:
+                result = subprocess.run(['npm', 'install'], cwd=str(site_base_dir), capture_output=True, text=True, timeout=180)
+            if result.returncode != 0:
+                messages.append(f"[yellow]npm install had warnings[/yellow]")
+            
+            # Set permissions
+            subprocess.run(['sudo', 'chown', '-R', f'{current_user}:www-data', str(site_base_dir)], check=True)
+            
+            messages.append(f"[green]Astro Headless project created successfully![/green]")
+            messages.append(f"[yellow]Edit .env to configure your API endpoints[/yellow]")
+            messages.append(f"[yellow]Add API proxies: wslaragon site api add {site_name} /api https://api.{domain}/api[/yellow]")
+            messages.append(f"[yellow]Start dev: wslaragon node start {site_name}[/yellow]")
+            
+        except subprocess.CalledProcessError as e:
+            raise Exception(f"Astro Headless project creation failed: {str(e)}")
+        
+        return messages
+
+
+class PhpMyAdminSiteCreator(SiteCreator):
+    """Create a phpMyAdmin site for database management."""
+    
+    def create(self) -> List[str]:
+        """Download and install phpMyAdmin."""
+        web_root = self.web_root
+        site_name = self.site_name
+        current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+        
+        # Download phpMyAdmin
+        pma_version = '5.2.2'
+        pma_tar_path = f'/tmp/phpMyAdmin-{site_name}.tar.xz'
+        pma_url = f'https://files.phpmyadmin.net/phpMyAdmin/{pma_version}/phpMyAdmin-{pma_version}-all-languages.tar.xz'
+        
+        # Download
+        result = subprocess.run(
+            ['wget', '-q', '-O', pma_tar_path, pma_url],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            # Fallback to .tar.gz
+            pma_url_gz = f'https://files.phpmyadmin.net/phpMyAdmin/{pma_version}/phpMyAdmin-{pma_version}-all-languages.tar.gz'
+            result = subprocess.run(
+                ['wget', '-q', '-O', pma_tar_path, pma_url_gz],
+                capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                raise Exception(f"Failed to download phpMyAdmin: {result.stderr}")
+        
+        # Extract
+        result = subprocess.run(
+            ['tar', '-xf', pma_tar_path, '-C', '/tmp'],
+            capture_output=True, text=True,
+            cwd='/tmp'
+        )
+        if result.returncode != 0:
+            raise Exception(f"Failed to extract phpMyAdmin: {result.stderr}")
+        
+        # Find extracted directory
+        pma_extracted = Path(f'/tmp/phpMyAdmin-{pma_version}-all-languages')
+        if not pma_extracted.exists():
+            # Try to find it
+            pma_dirs = list(Path('/tmp').glob('phpMyAdmin-*-all-languages'))
+            if pma_dirs:
+                pma_extracted = pma_dirs[0]
+            else:
+                raise Exception("Could not find extracted phpMyAdmin directory")
+        
+        # Clear web_root and copy files
+        if web_root.exists():
+            shutil.rmtree(str(web_root))
+        
+        subprocess.run(['cp', '-r', f'{pma_extracted}/.', str(web_root)], check=True)
+        subprocess.run(['rm', '-rf', str(pma_extracted)], check=False)
+        subprocess.run(['rm', '-f', pma_tar_path], check=False)
+        
+        # Set permissions
+        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:www-data', str(web_root)], check=True)
+        subprocess.run(['sudo', 'chmod', '-R', '755', str(web_root)], check=True)
+        
+        # Create blowfish_secret for cookie auth
+        blowfish_secret = secrets.token_urlsafe(32)
+        
+        # Get MySQL credentials from config
+        db_password = self.config.get('mysql.password', '')
+        db_user = self.config.get('mysql.user', 'root')
+        
+        # Create config.inc.php
+        config_content = f"""<?php
+/**
+ * phpMyAdmin configuration - auto-generated by WSLaragon
+ */
+
+// Authentication type
+$cfg['Servers'][1]['auth_type'] = 'cookie';
+
+// Server settings
+$cfg['Servers'][1]['host'] = 'localhost';
+$cfg['Servers'][1]['port'] = '3306';
+$cfg['Servers'][1]['connect_type'] = 'tcp';
+$cfg['Servers'][1]['compress'] = false;
+$cfg['Servers'][1]['AllowNoPassword'] = false;
+
+// Blowfish secret for cookie encryption
+$cfg['blowfish_secret'] = '{blowfish_secret}';
+
+// Upload directory
+$cfg['UploadDir'] = '';
+$cfg['SaveDir'] = '';
+
+// Temp directory
+$cfg['TempDir'] = '/tmp/';
+
+// Default language
+$cfg['DefaultLang'] = 'es';
+
+// Max rows to display
+$cfg['MaxRows'] = 30;
+
+// Allow login without password on localhost (development)
+$cfg['Servers'][1]['AllowNoPassword'] = true;
+
+// Navigation settings
+$cfg['NavigationDBSeparator'] = '_';
+
+// Hide databases pattern (system databases)
+// $cfg['Servers'][1]['hide_db'] = '^(information_schema|performance_schema|mysql|sys)$';
+?>"""
+        
+        with open(web_root / "config.inc.php", 'w') as f:
+            f.write(config_content)
+        
+        # Create tmp directory for phpMyAdmin
+        tmp_dir = web_root / 'tmp'
+        tmp_dir.mkdir(exist_ok=True)
+        subprocess.run(['sudo', 'chown', '-R', f'www-data:www-data', str(tmp_dir)], check=False)
+        
+        return [f"[green]phpMyAdmin {pma_version} installed successfully![/green]",
+                f"[yellow]Access at: https://{site_name}{self.tld}[/yellow]"]
 
 
 class DefaultSiteCreator(SiteCreator):
@@ -683,14 +1429,18 @@ def get_site_creator(site_type: Optional[str], vite_template: Optional[str], php
                       config, site_name: str, web_root: Path, site_base_dir: Path, 
                       tld: str, proxy_port: int = None, 
                       version: int = None, db_type: str = None, 
-                      database_name: str = None) -> Optional[SiteCreator]:
+                      database_name: str = None, astro_template: str = None) -> Optional[SiteCreator]:
     """Factory function to get the appropriate site creator."""
     if vite_template:
         return ViteSiteCreator(config, site_name, web_root, site_base_dir, tld, proxy_port, vite_template=vite_template)
+    elif astro_template:
+        return AstroSiteCreator(config, site_name, web_root, site_base_dir, tld, proxy_port, astro_template=astro_template)
     elif site_type == 'html':
         return HtmlSiteCreator(config, site_name, web_root, site_base_dir, tld)
     elif site_type == 'wordpress':
         return WordPressSiteCreator(config, site_name, web_root, site_base_dir, tld)
+    elif site_type == 'phpmyadmin':
+        return PhpMyAdminSiteCreator(config, site_name, web_root, site_base_dir, tld)
     elif site_type is not None and (site_type == 'laravel' or site_type.isdigit()):
         laravel_version = int(site_type) if site_type.isdigit() else version or 12
         return LaravelSiteCreator(config, site_name, web_root, site_base_dir, tld,
