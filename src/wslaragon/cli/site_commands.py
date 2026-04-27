@@ -44,7 +44,8 @@ def site():
 @click.option('--node', 'site_type', flag_value='node', help='Create Node.js app (auto-port starting 3000)')
 @click.option('--python', 'site_type', flag_value='python', help='Create Python app (auto-port starting 8000)')
 @click.option('--vite', help='Create Vite app with template (react, vue, svelte, vanilla, etc.)')
-@click.option('--astro', help='Create Astro app with template (basics, blog, minimal, etc.)')
+@click.option('--astro', is_flag=False, flag_value='basics', default=None,
+              help='Create Astro app. Use bare --astro for basics, or --astro=blog/minimal/headless')
 @click.option('--postgres', 'db_type', flag_value='postgres', help='Use PostgreSQL instead of MySQL')
 @click.option('--supabase', 'db_type', flag_value='supabase', help='Use Supabase (PostgreSQL + Supabase config)')
 @click.option('--force', 'recreate', is_flag=True, default=False, help='Force recreate site (overwrite existing files)')

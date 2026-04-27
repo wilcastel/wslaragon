@@ -41,6 +41,18 @@ wslaragon site create mi-script --python
 
 # Ejemplo Vite React (Auto-puerto 3000+, npm install automático)
 wslaragon site create mi-app-react --vite react
+
+# Ejemplo Astro (Auto-puerto 3000+, npm install automático)
+wslaragon site create mi-astro --astro
+
+# Astro con template específico
+wslaragon site create mi-blog --astro=blog
+wslaragon site create mi-minimal --astro=minimal
+
+# Astro Headless — sitio API-driven con island architecture
+wslaragon site create dash --astro=headless
+# Luego agregar APIs dinámicamente:
+wslaragon site api add dash /api https://api.dash.test/api
 ```
 
 **Opciones:**
@@ -56,6 +68,7 @@ wslaragon site create mi-app-react --vite react
 - `--node`: Crear sitio para Node.js (asigna puerto libre automáticamente iniciando en 3000, deshabilita PHP/MySQL).
 - `--python`: Crear sitio para Python (asigna puerto libre automáticamente iniciando en 8000, deshabilita PHP/MySQL).
 - `--vite <template>`: Crear sitio Vite usando una plantilla (react, vue, svelte, vanilla, etc). Asigna puerto Node.
+- `--astro`: Crear sitio Astro. Usa template `basics` por defecto. Especificar template: `--astro=blog`, `--astro=minimal`, `--astro=headless`. Asigna puerto Node.
 - `--proxy [PORT]`: Configurar como Proxy Inverso para Apps manuales en el puerto especificado.
 - `--public`: Apuntar document root a directorio `public/`.
 - `--database`: Nombre personalizado para la base de datos.
@@ -68,15 +81,20 @@ wslaragon site list
 ```
 
 ### 3. Borrar un Sitio
-Elimina la configuración y, opcionalmente, los archivos y la base de datos.
+Elimina la configuración Nginx, SSL, y opcionalmente los archivos y la base de datos.
 
 ```bash
-# Borrar solo configuración
+# Borrar sitio (pregunta si borrar archivos)
 wslaragon site delete mi-web
 
-# Borrar todo (archivos + base de datos)
-wslaragon site delete mi-web --remove-files --remove-database
+# Borrar todo incluyendo base de datos
+wslaragon site delete mi-web --remove-database
+
+# Mantener archivos (responder No cuando pregunta)
+wslaragon site delete mi-web
 ```
+
+> **Nota**: El comando pregunta interactivamente si deseás eliminar los archivos del proyecto. La base de datos se elimina solo con `--remove-database`.
 
 ### 4. Habilitar / Deshabilitar
 Activa o desactiva un sitio en Nginx sin borrarlo.
@@ -93,7 +111,24 @@ Si tienes problemas de escritura (ej. logs, cache, uploads) o has copiado archiv
 wslaragon site fix-permissions mi-web
 ```
 
-### 6. Configuración de Directorio Público (Laravel/Symfony)
+### 6. API Proxies (Astro Headless / sitios API-driven)
+Agrega o elimina proxies reversos Nginx por sitio. Ideal para sitios Astro headless que consumen APIs externas.
+
+```bash
+# Listar proxies de un sitio
+wslaragon site api list dash
+
+# Agregar un proxy: path local → backend URL
+wslaragon site api add dash /api https://api.dash.test/api
+wslaragon site api add dash /search https://search.dash.test/api
+
+# Eliminar un proxy
+wslaragon site api remove dash /api
+```
+
+> Los proxies se persisten en `sites.json` y la configuración Nginx se regenera automáticamente.
+
+### 7. Configuración de Directorio Público (Laravel/Symfony)
 Configura Nginx para servir el sitio desde el directorio `public/` en lugar de la raíz.
 
 ```bash
@@ -105,7 +140,7 @@ wslaragon site public mi-blog --enable   # Apunta a public/
 wslaragon site public mi-blog --disable  # Apunta a la raíz ./
 ```
 
-### 7. Backup y Restauración
+### 8. Backup y Restauración
 Para migrar sitios entre instalaciones o crear copias de seguridad.
 
 ```bash
