@@ -129,10 +129,13 @@ class SiteManager:
                 web_root.mkdir(exist_ok=True, parents=True)
 
 # Use Strategy pattern for site creation
-            # Run creator when: new site (no dir), recreate, or dir exists but site
-            # was deleted from registry (stale content from previous delete without --remove-files).
-            # Skip only when site already exists in registry (handled by early return above).
-            if not proxy_port:
+            # Run creator for all sites that have a site_type or template.
+            # Generic proxy-only sites (node/python without template) skip scaffolding.
+            needs_scaffolding = site_type in ('html', 'wordpress', 'phpmyadmin', 'laravel') or \
+                                site_type and site_type.isdigit() or \
+                                vite_template or astro_template
+            
+            if needs_scaffolding or (not proxy_port):
                 # Directory is fresh or user explicitly asked to recreate — run creator
                 laravel_version = None
                 if is_laravel:
