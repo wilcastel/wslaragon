@@ -11,6 +11,13 @@ class NginxManager:
         self.config_dir = Path(config.get('nginx.config_dir'))
         self.sites_available = Path(config.get('nginx.sites_available'))
         self.sites_enabled = Path(config.get('nginx.sites_enabled'))
+        self.tld = config.get('sites.tld', '.test')
+    
+    def _normalize_site_name(self, site_name: str) -> str:
+        """Strip the TLD suffix if included in the site name."""
+        if site_name.endswith(self.tld):
+            site_name = site_name[:-len(self.tld)]
+        return site_name
     
     def test_config(self) -> bool:
         """Test Nginx configuration"""
@@ -49,15 +56,48 @@ class NginxManager:
             return False
     
     def create_site_config(self, site_name: str, document_root: str, 
-                          ssl: bool = False, php: bool = True, proxy_port: int = None) -> str:
+                          ssl: bool = False, php: bool = True, proxy_port: int = None,
+                          api_proxies: Dict[str, str] = None) -> str:
         """Generate Nginx site configuration"""
-        tld = self.config.get('sites.tld')
-        domain = f"{site_name}{tld}"
+        site_name = self._normalize_site_name(site_name)
+        domain = f"{site_name}{self.tld}"
+        api_proxies = api_proxies or {}
         
-        # Proxy configuration (Exclusive: overrides PHP/Static logic)
+        # Build API proxy location blocks
+        # Nginx needs variable-based proxy_pass for dynamic DNS resolution
+        # of .test domains (resolved via /etc/hosts at runtime)
+        api_proxy_config = ""
+        for path, backend in api_proxies.items():
+            # Extract host and port from backend URL
+            from urllib.parse import urlparse
+            parsed = urlparse(backend)
+            backend_host = parsed.hostname or backend
+            backend_port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+            backend_scheme = parsed.scheme or 'https'
+            
+            # Nginx requires a variable for dynamic DNS resolution
+            # We use set directive to store the backend URL
+            var_name = path.replace('/', '').replace('-', '_')
+            api_proxy_config += f"""
+    # API proxy: {path} -> {backend}
+    set $backend_{var_name} {backend_scheme}://{backend_host}:{backend_port};
+    location {path}/ {{
+        proxy_pass $backend_{var_name};
+        proxy_http_version 1.1;
+        proxy_set_header Host {backend_host};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Accept "application/json";
+        proxy_ssl_server_name on;
+        client_max_body_size 128M;
+    }}
+"""
+        
+# Proxy configuration (Exclusive: overrides PHP/Static logic)
         if proxy_port:
-            common_config = f"""
-    # Proxy Configuration
+            common_config = f"""{api_proxy_config}
+    # Dev server proxy
     location / {{
         proxy_pass http://127.0.0.1:{proxy_port};
         proxy_http_version 1.1;
@@ -151,15 +191,17 @@ server {{
         return config.strip()
     
     def add_site(self, site_name: str, document_root: str, 
-                ssl: bool = False, php: bool = True, proxy_port: int = None) -> Tuple[bool, Optional[str]]:
+                ssl: bool = False, php: bool = True, proxy_port: int = None,
+                api_proxies: Dict[str, str] = None) -> Tuple[bool, Optional[str]]:
         """Add a new site configuration"""
         try:
             config_content = self.create_site_config(
-                site_name, document_root, ssl, php, proxy_port
+                site_name, document_root, ssl, php, proxy_port,
+                api_proxies=api_proxies
             )
             
-            tld = self.config.get('sites.tld', '.test')
-            domain = f"{site_name}{tld}"
+            site_name = self._normalize_site_name(site_name)
+            domain = f"{site_name}{self.tld}"
             config_file = self.sites_available / f"{domain}.conf"
             
             # Write configuration using sudo tee
@@ -185,8 +227,8 @@ server {{
     def enable_site(self, site_name: str) -> Tuple[bool, Optional[str]]:
         """Enable a site"""
         try:
-            tld = self.config.get('sites.tld', '.test')
-            domain = f"{site_name}{tld}"
+            site_name = self._normalize_site_name(site_name)
+            domain = f"{site_name}{self.tld}"
             source = self.sites_available / f"{domain}.conf"
             target = self.sites_enabled / f"{domain}.conf"
             
@@ -213,8 +255,8 @@ server {{
     def disable_site(self, site_name: str) -> bool:
         """Disable a site"""
         try:
-            tld = self.config.get('sites.tld', '.test')
-            domain = f"{site_name}{tld}"
+            site_name = self._normalize_site_name(site_name)
+            domain = f"{site_name}{self.tld}"
             config_file = self.sites_enabled / f"{domain}.conf"
             subprocess.run(['sudo', 'rm', '-f', str(config_file)], check=True)
             return self.reload()
@@ -225,8 +267,8 @@ server {{
     def remove_site(self, site_name: str) -> bool:
         """Remove a site completely"""
         try:
-            tld = self.config.get('sites.tld', '.test')
-            domain = f"{site_name}{tld}"
+            site_name = self._normalize_site_name(site_name)
+            domain = f"{site_name}{self.tld}"
             
             # Disable first
             self.disable_site(site_name)

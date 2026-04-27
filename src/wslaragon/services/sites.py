@@ -18,8 +18,15 @@ class SiteManager:
         self.nginx = nginx_manager
         self.mysql = mysql_manager
         self.sites_dir = Path(config.get('sites.dir', str(Path.home() / ".wslaragon" / "sites")))
-        self.document_root = Path(config.get('sites.document_root'))
-        self.tld = config.get('sites.tld')
+        
+        # Provide default if document_root is missing
+        document_root = config.get('sites.document_root')
+        if document_root is None:
+            document_root = str(Path.home() / "web")
+        self.document_root = Path(document_root)
+        
+        # Provide default if tld is missing
+        self.tld = config.get('sites.tld', '.test')
         self.sites_file = self.sites_dir / "sites.json"
         
         self._ensure_dirs()
@@ -44,22 +51,44 @@ class SiteManager:
         with open(self.sites_file, 'w') as f:
             json.dump(self.sites, f, indent=2)
     
+    def _normalize_site_name(self, site_name: str) -> str:
+        """Strip the TLD suffix if the user included it in the site name.
+        
+        'dash.aaa.test' -> 'dash.aaa'
+        'dash.aaa'      -> 'dash.aaa'
+        'blog'           -> 'blog'
+        """
+        if site_name.endswith(self.tld):
+            site_name = site_name[:-len(self.tld)]
+        return site_name
+
     def create_site(self, site_name: str, php: bool = True, 
-                   mysql: bool = False, ssl: bool = True,
+                   mysql: bool = None, ssl: bool = True,
                    database_name: str = None, public_dir: bool = False,
                    proxy_port: int = None, site_type: str = None, 
                    db_type: str = None, recreate: bool = False,
-                   vite_template: str = None) -> Dict:
+                   vite_template: str = None, astro_template: str = None) -> Dict:
         """Create a new site"""
         try:
-            if not site_name or not site_name.replace('-', '').replace('_', '').isalnum():
-                return {'success': False, 'error': 'Invalid site name'}
+            # Normalize: strip TLD if user included it
+            site_name = self._normalize_site_name(site_name)
             
-            # Auto-configure for Node/Python
-            if site_type in ('node', 'python') or vite_template:
+            if not site_name or not self._is_valid_site_name(site_name):
+                return {'success': False, 'error': 'Invalid site name. Use letters, numbers, hyphens, underscores and dots (e.g. dash.misitio)'}
+            
+            # Auto-enable mysql for WordPress (WP requires a database)
+            if site_type == 'wordpress' and mysql is None:
+                mysql = True
+            
+            # Default mysql to False if still None (user didn't specify)
+            if mysql is None:
+                mysql = False
+            
+            # Auto-configure for Node/Python/Vite/Astro
+            if site_type in ('node', 'python') or vite_template or astro_template:
                 if not proxy_port:
                     # Find next free port
-                    start_port = 3000 if site_type == 'node' or vite_template else 8000
+                    start_port = 3000 if site_type == 'node' or vite_template or astro_template else 8000
                     proxy_port = self._find_next_free_port(start_port)
             
             if site_name in self.sites and not recreate:
@@ -77,17 +106,18 @@ class SiteManager:
                          return {'success': False, 'error': f"Port {proxy_port} is already used by site '{existing_site['name']}'"}
 
             if site_exists:
-                if recreate:
+                if recreate or site_name not in self.sites:
+                    # recreate=True OR site was deleted but directory left behind.
+                    # Clean it so the creator gets a fresh directory.
                     subprocess.run(['sudo', 'rm', '-rf', str(site_base_dir)], check=True)
-                    messages.append(f"[yellow]Deleted existing folder for recreate[/yellow]")
-                else:
-                    messages.append(f"[yellow]Using existing folder: {site_base_dir}[/yellow]")
+                    messages.append(f"[yellow]Cleaned existing directory: {site_base_dir}[/yellow]")
             
             site_base_dir.mkdir(exist_ok=True, parents=True)
             
             is_laravel = site_type is not None and (site_type == 'laravel' or site_type.isdigit())
             is_wordpress = site_type == 'wordpress'
-            # WordPress installs in root by default, unlike Laravel
+            is_phpmyadmin = site_type == 'phpmyadmin'
+            # WordPress and phpMyAdmin install in root by default, unlike Laravel which uses public/
             use_public = public_dir or is_laravel
             
             web_root = site_base_dir / "public" if use_public else site_base_dir
@@ -98,8 +128,12 @@ class SiteManager:
             elif not use_public and not web_root.exists():
                 web_root.mkdir(exist_ok=True, parents=True)
 
-            # Use Strategy pattern for site creation
-            if not proxy_port and (not site_exists or recreate):
+# Use Strategy pattern for site creation
+            # Run creator when: new site (no dir), recreate, or dir exists but site
+            # was deleted from registry (stale content from previous delete without --remove-files).
+            # Skip only when site already exists in registry (handled by early return above).
+            if not proxy_port:
+                # Directory is fresh or user explicitly asked to recreate — run creator
                 laravel_version = None
                 if is_laravel:
                     if site_type and site_type != 'laravel':
@@ -113,7 +147,8 @@ class SiteManager:
                 creator = get_site_creator(
                     site_type, vite_template, php, self.config,
                     site_name, web_root, site_base_dir, self.tld, proxy_port,
-                    version=laravel_version, db_type=db_type, database_name=database_name
+                    version=laravel_version, db_type=db_type, database_name=database_name,
+                    astro_template=astro_template
                 )
                 if creator:
                     creator_messages = creator.create()
@@ -124,7 +159,8 @@ class SiteManager:
             
             if db_type_final in ('mysql', 'postgres', 'supabase'):
                 if not database_name:
-                    database_name = f"{site_name}_db"
+                    # Sanitize: replace dots with underscores for DB names
+                    database_name = f"{site_name.replace('.', '_')}_db"
                 
                 if db_type_final == 'mysql':
                     if self.mysql.database_exists(database_name):
@@ -151,6 +187,10 @@ class SiteManager:
                 # Handled by PythonSiteCreator above
                 pass
             
+            # Astro headless starts with no proxies — user adds them via:
+            # wslaragon site api add <name> /api https://backend.test
+            api_proxies = {}
+            
             if ssl:
                 ssl_mgr = SSLManager(self.config)
                 ssl_result = ssl_mgr.setup_ssl_for_site(site_name, self.tld)
@@ -162,7 +202,8 @@ class SiteManager:
                 str(web_root), 
                 ssl=ssl, 
                 php=php,
-                proxy_port=proxy_port
+                proxy_port=proxy_port,
+                api_proxies=api_proxies
             )
             
             if not nginx_created:
@@ -179,6 +220,7 @@ class SiteManager:
                 'ssl': ssl,
                 'proxy_port': proxy_port,
                 'database': database_name if db_type_final else None,
+                'api_proxies': api_proxies,
                 'created_at': datetime.now().isoformat(),
                 'enabled': True
             }
@@ -206,6 +248,7 @@ class SiteManager:
     def update_site_root(self, site_name: str, public_dir: bool = True) -> Dict:
         """Update site document root (e.g. to point to public/)"""
         try:
+            site_name = self._normalize_site_name(site_name)
             if site_name not in self.sites:
                 return {'success': False, 'error': 'Site not found'}
             
@@ -256,6 +299,7 @@ class SiteManager:
                     remove_database: bool = False) -> Dict:
         """Delete a site"""
         try:
+            site_name = self._normalize_site_name(site_name)
             if site_name not in self.sites:
                 return {'success': False, 'error': 'Site not found'}
             
@@ -290,6 +334,7 @@ class SiteManager:
     def enable_site(self, site_name: str) -> Dict:
         """Enable a site"""
         try:
+            site_name = self._normalize_site_name(site_name)
             if site_name not in self.sites:
                 return {'success': False, 'error': 'Site not found'}
             
@@ -310,6 +355,7 @@ class SiteManager:
     def disable_site(self, site_name: str) -> Dict:
         """Disable a site"""
         try:
+            site_name = self._normalize_site_name(site_name)
             if site_name not in self.sites:
                 return {'success': False, 'error': 'Site not found'}
             
@@ -333,31 +379,34 @@ class SiteManager:
     
     def get_site(self, site_name: str) -> Optional[Dict]:
         """Get site information"""
+        site_name = self._normalize_site_name(site_name)
         return self.sites.get(site_name)
     
     def update_site(self, site_name: str, **kwargs) -> Dict:
         """Update site configuration"""
         try:
+            site_name = self._normalize_site_name(site_name)
             if site_name not in self.sites:
                 return {'success': False, 'error': 'Site not found'}
             
             site_info = self.sites[site_name]
             
             # Update allowed fields
-            allowed_fields = ['php', 'mysql', 'ssl', 'database', 'proxy_port']
+            allowed_fields = ['php', 'mysql', 'ssl', 'database', 'proxy_port', 'api_proxies']
             for field, value in kwargs.items():
                 if field in allowed_fields:
                     site_info[field] = value
             
             # Recreate Nginx configuration if needed
-            if any(field in kwargs for field in ['php', 'ssl', 'proxy_port']):
+            if any(field in kwargs for field in ['php', 'ssl', 'proxy_port', 'api_proxies']):
                 self.nginx.remove_site(site_name)
                 self.nginx.add_site(
                     site_name,
                     site_info['document_root'],
                     ssl=site_info.get('ssl', False),
                     php=site_info.get('php', True),
-                    proxy_port=site_info.get('proxy_port')
+                    proxy_port=site_info.get('proxy_port'),
+                    api_proxies=site_info.get('api_proxies', {})
                 )
             
             self._save_sites()
@@ -370,6 +419,7 @@ class SiteManager:
     def get_site_logs(self, site_name: str) -> Dict[str, str]:
         """Get site logs"""
         try:
+            site_name = self._normalize_site_name(site_name)
             if site_name not in self.sites:
                 return {'error': 'Site not found'}
             
@@ -395,6 +445,7 @@ class SiteManager:
     
     def get_site_url(self, site_name: str) -> Optional[str]:
         """Get site URL"""
+        site_name = self._normalize_site_name(site_name)
         if site_name in self.sites:
             protocol = 'https' if self.sites[site_name].get('ssl') else 'http'
             return f"{protocol}://{site_name}{self.tld}"
@@ -403,6 +454,7 @@ class SiteManager:
     def fix_permissions(self, site_name: str) -> Dict:
         """Fix file owner and permissions for a site"""
         try:
+            site_name = self._normalize_site_name(site_name)
             if site_name not in self.sites:
                 return {'success': False, 'error': 'Site not found'}
             
@@ -463,6 +515,145 @@ class SiteManager:
             logger.error(f"Failed to fix permissions for {site_name}: {e}")
             return {'success': False, 'error': str(e)}
     
+    def add_api_proxy(self, site_name: str, path: str, backend: str) -> Dict:
+        """Add an API proxy to a site (e.g. /api -> https://api.example.test)"""
+        try:
+            site_name = self._normalize_site_name(site_name)
+            if site_name not in self.sites:
+                return {'success': False, 'error': 'Site not found'}
+            
+            site_info = self.sites[site_name]
+            
+            # Normalize path: ensure it starts with /
+            if not path.startswith('/'):
+                path = '/' + path
+            
+            # Remove trailing slash from path (location blocks match /path/ pattern)
+            path = path.rstrip('/')
+            
+            # Validate backend URL
+            if not backend.startswith(('http://', 'https://')):
+                backend = 'https://' + backend
+            
+            # Initialize api_proxies if missing
+            if 'api_proxies' not in site_info:
+                site_info['api_proxies'] = {}
+            
+            # Check for duplicate path
+            if path in site_info['api_proxies']:
+                return {'success': False, 'error': f"API proxy path '{path}' already exists (-> {site_info['api_proxies'][path]})"}
+            
+            site_info['api_proxies'][path] = backend
+            self._save_sites()
+            
+            # Regenerate Nginx config with new proxy
+            self.nginx.remove_site(site_name)
+            success, error = self.nginx.add_site(
+                site_name,
+                site_info['document_root'],
+                ssl=site_info.get('ssl', False),
+                php=site_info.get('php', True),
+                proxy_port=site_info.get('proxy_port'),
+                api_proxies=site_info.get('api_proxies', {})
+            )
+            
+            if not success:
+                # Revert the change
+                del site_info['api_proxies'][path]
+                self._save_sites()
+                return {'success': False, 'error': f"Failed to update Nginx config: {error}"}
+            
+            return {'success': True, 'site': site_info, 'path': path, 'backend': backend}
+            
+        except Exception as e:
+            logger.error(f"Failed to add API proxy for {site_name}: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def remove_api_proxy(self, site_name: str, path: str) -> Dict:
+        """Remove an API proxy from a site"""
+        try:
+            site_name = self._normalize_site_name(site_name)
+            if site_name not in self.sites:
+                return {'success': False, 'error': 'Site not found'}
+            
+            site_info = self.sites[site_name]
+            
+            # Normalize path
+            if not path.startswith('/'):
+                path = '/' + path
+            path = path.rstrip('/')
+            
+            if 'api_proxies' not in site_info or path not in site_info['api_proxies']:
+                return {'success': False, 'error': f"No API proxy found at path '{path}'"}
+            
+            old_backend = site_info['api_proxies'].pop(path)
+            
+            # Clean up empty api_proxies
+            if not site_info['api_proxies']:
+                del site_info['api_proxies']
+            
+            self._save_sites()
+            
+            # Regenerate Nginx config without the proxy
+            self.nginx.remove_site(site_name)
+            success, error = self.nginx.add_site(
+                site_name,
+                site_info['document_root'],
+                ssl=site_info.get('ssl', False),
+                php=site_info.get('php', True),
+                proxy_port=site_info.get('proxy_port'),
+                api_proxies=site_info.get('api_proxies', {})
+            )
+            
+            if not success:
+                # Revert the change
+                if 'api_proxies' not in site_info:
+                    site_info['api_proxies'] = {}
+                site_info['api_proxies'][path] = old_backend
+                self._save_sites()
+                return {'success': False, 'error': f"Failed to update Nginx config: {error}"}
+            
+            return {'success': True, 'site': site_info, 'removed_path': path, 'removed_backend': old_backend}
+            
+        except Exception as e:
+            logger.error(f"Failed to remove API proxy for {site_name}: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def list_api_proxies(self, site_name: str) -> Dict:
+        """List all API proxies for a site"""
+        site_name = self._normalize_site_name(site_name)
+        if site_name not in self.sites:
+            return {'success': False, 'error': 'Site not found'}
+        
+        site_info = self.sites[site_name]
+        proxies = site_info.get('api_proxies', {})
+        
+        return {'success': True, 'proxies': proxies}
+    
+    @staticmethod
+    def _is_valid_site_name(name: str) -> bool:
+        """Validate site name: allows letters, numbers, hyphens, underscores and dots.
+        Supports subdomains like 'dash.misitio', 'api.v2.myapp'.
+        Rejects names starting/ending with dot or hyphen, consecutive dots, etc.
+        """
+        if not name:
+            return False
+        # Must only contain allowed characters
+        allowed_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.')
+        if not all(c in allowed_chars for c in name):
+            return False
+        # Cannot start or end with dot or hyphen
+        if name[0] in '.-' or name[-1] in '.-':
+            return False
+        # No consecutive dots
+        if '..' in name:
+            return False
+        # Each label between dots must be valid
+        for label in name.split('.'):
+            if not label or label.startswith('-') or label.endswith('-'):
+                return False
+        return True
+
     def _find_next_free_port(self, start_port: int) -> int:
         """Find the next available port starting from start_port"""
         import socket
