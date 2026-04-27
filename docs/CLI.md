@@ -42,7 +42,7 @@ wslaragon site create mi-script --python
 # Ejemplo Vite React (Auto-puerto 3000+, npm install automático)
 wslaragon site create mi-app-react --vite react
 
-# Ejemplo Astro (Auto-puerto 3000+, npm install automático)
+# Ejemplo Astro SSG (sitio estático, nginx sirve dist/, sin proceso)
 wslaragon site create mi-astro --astro
 
 # Astro con template específico
@@ -54,6 +54,8 @@ wslaragon site create dash --astro=headless
 # Luego agregar APIs dinámicamente:
 wslaragon site api add dash /api https://api.dash.test/api
 ```
+
+> **Astro SSG**: El sitio se compila a HTML estático (`npm run build` → `dist/`). Nginx sirve los archivos directamente, sin proxy ni proceso corriendo. Para desarrollo con HMR, ejecutá `npm run dev` manualmente desde la carpeta del proyecto.
 
 **Opciones:**
 - `--php / --no-php`: Habilitar o deshabilitar PHP-FPM.
@@ -68,7 +70,7 @@ wslaragon site api add dash /api https://api.dash.test/api
 - `--node`: Crear sitio para Node.js (asigna puerto libre automáticamente iniciando en 3000, deshabilita PHP/MySQL).
 - `--python`: Crear sitio para Python (asigna puerto libre automáticamente iniciando en 8000, deshabilita PHP/MySQL).
 - `--vite <template>`: Crear sitio Vite usando una plantilla (react, vue, svelte, vanilla, etc). Asigna puerto Node.
-- `--astro`: Crear sitio Astro. Usa template `basics` por defecto. Especificar template: `--astro=blog`, `--astro=minimal`, `--astro=headless`. Asigna puerto Node.
+- `--astro`: Crear sitio Astro SSG. Usa template `basics` por defecto. Especificar template: `--astro=blog`, `--astro=minimal`, `--astro=headless`. Compila a estáticos en `dist/`, nginx sirve directamente sin proxy.
 - `--proxy [PORT]`: Configurar como Proxy Inverso para Apps manuales en el puerto especificado.
 - `--public`: Apuntar document root a directorio `public/`.
 - `--database`: Nombre personalizado para la base de datos.
@@ -105,11 +107,19 @@ wslaragon site enable mi-web
 ```
 
 ### 5. Reparar Permisos
-Si tienes problemas de escritura (ej. logs, cache, uploads) o has copiado archivos desde Windows, usa este comando para reasignar el propietario y permisos.
+Si tienes problemas de escritura (ej. WordPress no sube archivos, VSCode no puede guardar, logs, cache, uploads) o has copiado archivos desde Windows, usa este comando para reasignar el propietario y permisos.
 
 ```bash
 wslaragon site fix-permissions mi-web
 ```
+
+> Los permisos se corrigen automáticamente al crear un sitio. Usá este comando solo en sitios existentes que necesiten reparación.
+
+**Qué hace:**
+- `chown -R usuario:www-data` — el usuario puede editar desde VSCode, www-data (Nginx/PHP) puede leer y escribir
+- `chmod -R 775` — owner y grupo con permisos completos
+- `setgid` en directorios — nuevos archivos heredan el grupo `www-data`
+- WordPress: agrega `FS_METHOD = 'direct'` a `wp-config.php`
 
 ### 6. API Proxies (Astro Headless / sitios API-driven)
 Agrega o elimina proxies reversos Nginx por sitio. Ideal para sitios Astro headless que consumen APIs externas.
