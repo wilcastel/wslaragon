@@ -107,6 +107,17 @@ class TestSiteManagerCreateSite:
         assert result['success'] is False
         assert 'already exists' in result['error']
 
+    @patch('wslaragon.services.sites.get_site_creator', return_value=None)
+    def test_create_site_rolls_back_directory_when_nginx_fails(self, _mock_creator, site_manager):
+        """Test create_site cleans orphan directory on failure"""
+        site_manager.nginx.add_site.return_value = (False, "nginx failed")
+
+        result = site_manager.create_site('rollbackme', php=True, ssl=False)
+
+        assert result['success'] is False
+        assert 'Failed to create Nginx configuration' in result['error']
+        assert not (site_manager.document_root / 'rollbackme').exists()
+
 
 class TestSiteManagerListSites:
     """Test suite for list_sites method"""

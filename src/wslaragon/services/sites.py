@@ -2,6 +2,7 @@ import json
 import logging
 import subprocess
 import os
+import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
@@ -50,6 +51,22 @@ class SiteManager:
         """Save sites configuration to JSON file"""
         with open(self.sites_file, 'w') as f:
             json.dump(self.sites, f, indent=2)
+
+    def _cleanup_failed_site_directory(self, site_base_dir: Optional[Path]):
+        """Best-effort cleanup for partially created site directories."""
+        if not site_base_dir or not site_base_dir.exists():
+            return
+
+        try:
+            shutil.rmtree(site_base_dir)
+            return
+        except Exception as cleanup_error:
+            logger.warning(f"Standard cleanup failed for {site_base_dir}: {cleanup_error}")
+
+        try:
+            subprocess.run(['sudo', 'rm', '-rf', str(site_base_dir)], check=True, timeout=60)
+        except Exception as sudo_cleanup_error:
+            logger.warning(f"Sudo cleanup also failed for {site_base_dir}: {sudo_cleanup_error}")
     
     def _normalize_site_name(self, site_name: str) -> str:
         """Strip the TLD suffix if the user included it in the site name.
@@ -69,6 +86,8 @@ class SiteManager:
                    db_type: str = None, recreate: bool = False,
                    vite_template: str = None, astro_template: str = None) -> Dict:
         """Create a new site"""
+        site_base_dir: Optional[Path] = None
+        cleanup_on_failure = False
         try:
             # Normalize: strip TLD if user included it
             site_name = self._normalize_site_name(site_name)
@@ -98,6 +117,10 @@ class SiteManager:
             site_base_dir = self.document_root / site_name
             site_exists = site_base_dir.exists()
             messages = []
+
+            # Cleanup partial files if creation fails after this point.
+            # Applies to fresh creates and forced recreates.
+            cleanup_on_failure = (not site_exists) or recreate or (site_exists and site_name not in self.sites)
             
             # Check for proxy port collisions
             if proxy_port:
@@ -135,7 +158,9 @@ class SiteManager:
             if use_public and not is_laravel and not web_root.exists():
                 web_root.mkdir(exist_ok=True, parents=True)
                 messages.append(f"[green]Created public folder: {web_root}[/green]")
-            elif not use_public and not web_root.exists():
+            # IMPORTANT: For Astro SSG we must NOT pre-create dist/ before scaffolding.
+            # `npm create astro@latest .` writes to a random subfolder when cwd is not empty.
+            elif not use_public and not web_root.exists() and not is_astro_ssg:
                 web_root.mkdir(exist_ok=True, parents=True)
 
 # Use Strategy pattern for site creation
@@ -182,7 +207,7 @@ class SiteManager:
                     else:
                         db_created, db_error = self.mysql.create_database(database_name)
                         if not db_created:
-                            return {'success': False, 'error': f'Failed to create database: {db_error}'}
+                            raise Exception(f'Failed to create database: {db_error}')
                         messages.append(f"[green]Created new database: {database_name}[/green]")
                 elif db_type_final in ('postgres', 'supabase'):
                     db_created = True
@@ -208,7 +233,7 @@ class SiteManager:
                 ssl_mgr = SSLManager(self.config)
                 ssl_result = ssl_mgr.setup_ssl_for_site(site_name, self.tld)
                 if not ssl_result['success']:
-                    return {'success': False, 'error': f"Failed to generate SSL: {ssl_result['error']}"}
+                    raise Exception(f"Failed to generate SSL: {ssl_result['error']}")
             
             nginx_created, nginx_error = self.nginx.add_site(
                 site_name, 
@@ -221,7 +246,7 @@ class SiteManager:
             )
             
             if not nginx_created:
-                return {'success': False, 'error': f'Failed to create Nginx configuration: {nginx_error}'}
+                raise Exception(f'Failed to create Nginx configuration: {nginx_error}')
             
             site_info = {
                 'name': site_name,
@@ -259,6 +284,8 @@ class SiteManager:
             return {'success': True, 'site': site_info, 'messages': messages}
             
         except Exception as e:
+            if cleanup_on_failure and site_name not in self.sites:
+                self._cleanup_failed_site_directory(site_base_dir)
             logger.error(f"Failed to create site {site_name}: {e}")
             return {'success': False, 'error': str(e)}
 
