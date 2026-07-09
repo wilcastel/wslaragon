@@ -47,7 +47,7 @@ class Config:
                 "config_dir": "/etc/nginx",
                 "sites_available": "/etc/nginx/sites-available",
                 "sites_enabled": "/etc/nginx/sites-enabled",
-                "client_max_body_size": "128M"
+                "client_max_body_size": "512M"
             },
             "mysql": {
                 "data_dir": "/var/lib/mysql",

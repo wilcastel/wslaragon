@@ -10,6 +10,7 @@ from rich.table import Table
 
 from ..core.config import Config
 from ..services.php import PHPManager
+from ..services.nginx import NginxManager
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -182,3 +183,53 @@ def get_config(key):
 
 # Register config as a subgroup of php
 php.add_command(config)
+
+
+@php.command('upload-limit')
+@click.argument('size', default='512M')
+def upload_limit(size):
+    """Set upload size limits across ALL PHP versions + nginx.
+
+    Updates upload_max_filesize, post_max_size, memory_limit,
+    max_execution_time, and max_input_time in every installed PHP version
+    (both FPM and CLI). Also updates nginx client_max_body_size.
+
+    Default: 512M.  Example: wslaragon php upload-limit 1G
+    """
+    config_obj = Config()
+    php_mgr = PHPManager(config_obj)
+
+    installed = php_mgr.get_installed_versions()
+    if not installed:
+        console.print("[red]No PHP versions found installed.[/red]")
+        return
+
+    try:
+        subprocess.run(['sudo', '-v'], check=True)
+    except subprocess.CalledProcessError:
+        console.print("[red]This command requires sudo privileges.[/red]")
+        return
+
+    console.print(f"[bold]Setting upload limits to {size} across PHP {', '.join(installed)}...[/bold]")
+
+    with console.status("[bold green]Updating php.ini files..."):
+        results = php_mgr.set_upload_limits(size)
+
+    all_ok = True
+    for path, ok in results.items():
+        if not ok:
+            console.print(f"[red]  FAILED: writing upload limits to {path}[/red]")
+            all_ok = False
+
+    nginx_mgr = NginxManager(config_obj)
+    with console.status("[bold green]Updating nginx client_max_body_size..."):
+        nginx_ok = nginx_mgr.update_client_max_body_size(size)
+
+    if not nginx_ok:
+        console.print("[red]  FAILED to update nginx client_max_body_size[/red]")
+        all_ok = False
+
+    if all_ok:
+        console.print(f"[green]Upload limits set to {size} across all PHP versions and nginx.[/green]")
+    else:
+        console.print("[yellow]Some settings failed. Check errors above.[/yellow]")

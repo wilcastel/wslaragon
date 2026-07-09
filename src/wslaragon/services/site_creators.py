@@ -29,6 +29,25 @@ class SiteCreator(ABC):
         """Create the site scaffolding. Returns list of message strings."""
         pass
 
+    def _prepare_run_as_user(self, site_base_dir: Path):
+        """Chown site_base_dir to the invoking (non-root) user and return a
+        run_as_user(cmd, **kwargs) callable that runs shell commands as that
+        user — npm/npx scaffolding tools must not run as root.
+        """
+        current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+        is_root = os.geteuid() == 0 and current_user
+
+        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{current_user}', str(site_base_dir)], check=True)
+
+        if is_root:
+            def run_as_user(cmd, **kwargs):
+                return subprocess.run(['runuser', '-l', current_user, '-c', cmd], **kwargs)
+        else:
+            def run_as_user(cmd, **kwargs):
+                return subprocess.run(cmd, shell=True, **kwargs)
+
+        return run_as_user
+
 
 class HtmlSiteCreator(SiteCreator):
     """Create a static HTML site with styles and js folders."""
@@ -219,11 +238,16 @@ document.addEventListener('DOMContentLoaded', function() {{
 
 class WordPressSiteCreator(SiteCreator):
     """Create a WordPress site."""
+    def __init__(self, config, site_name: str, web_root: Path, site_base_dir: Path, tld: str,
+                 proxy_port: int = None, database_name: str = None):
+        super().__init__(config, site_name, web_root, site_base_dir, tld, proxy_port)
+        self.database_name = database_name
     
     def create(self) -> List[str]:
         """Create a WordPress site."""
         web_root = self.web_root
         site_name = self.site_name
+        database_name = self.database_name or f"{site_name.replace('.', '_')}_db"
         db_password = self.config.get('mysql.password')
         current_user = os.getenv('SUDO_USER') or os.getenv('USER')
         
@@ -249,7 +273,7 @@ class WordPressSiteCreator(SiteCreator):
 /**
  * The base configuration for WordPress
  */
-define( 'DB_NAME', '{site_name}_db' );
+define( 'DB_NAME', '{database_name}' );
 define( 'DB_USER', 'root' );
 define( 'DB_PASSWORD', '{db_password}' );
 define( 'DB_HOST', 'localhost' );
@@ -576,22 +600,9 @@ class ViteSiteCreator(SiteCreator):
         vite_template = self.vite_template
         
         try:
-            current_user = os.getenv('SUDO_USER') or os.getenv('USER')
-            is_root = os.geteuid() == 0 and current_user
-            
-            subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{current_user}', str(site_base_dir)], check=True)
-            
-            if is_root:
-                def run_as_user(cmd, **kwargs):
-                    return subprocess.run(
-                        ['runuser', '-l', current_user, '-c', cmd],
-                        **kwargs
-                    )
-            else:
-                def run_as_user(cmd, **kwargs):
-                    return subprocess.run(cmd, shell=True, **kwargs)
-            
-            run_as_user(f"npm create vite@latest . -- --template {vite_template}", 
+            run_as_user = self._prepare_run_as_user(site_base_dir)
+
+            run_as_user(f"npm create vite@latest . -- --template {vite_template}",
                        cwd=str(site_base_dir), check=True, input="\nn\n", text=True)
             
             run_as_user("npm install", cwd=str(site_base_dir), check=True)
@@ -621,10 +632,68 @@ class ViteSiteCreator(SiteCreator):
 
             messages.append(f"[green]Vite ({vite_template}) project created successfully![/green]")
             messages.append(f"[yellow]Node process prepared. Run 'wslaragon node start {site_name}' to serve 'npm run dev'.[/yellow]")
-            
-        except subprocess.CalledProcessError as e:
+
+        except Exception as e:
             raise Exception(f"Vite scaffolding failed: {str(e)}")
-        
+
+        return messages
+
+
+class SvelteKitSiteCreator(SiteCreator):
+    """Create a SvelteKit project prepared for WSLaragon's Node process manager."""
+
+    def create(self) -> List[str]:
+        messages = []
+        proxy_port = self.proxy_port
+        site_name = self.site_name
+        site_base_dir = self.site_base_dir
+        domain = f"{site_name}{self.tld}"
+
+        try:
+            run_as_user = self._prepare_run_as_user(site_base_dir)
+
+            scaffold_cmd = "npx sv create . --template minimal --types ts --no-add-ons --no-install"
+            result = run_as_user(scaffold_cmd, cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                fallback_cmd = "npm create svelte@latest . -- --template skeleton --types typescript --no-add-ons --no-install"
+                result = run_as_user(fallback_cmd, cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+                if result.returncode != 0:
+                    raise Exception(f"SvelteKit scaffolding failed: {result.stderr}")
+
+            result = run_as_user("npm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                raise Exception(f"SvelteKit npm install failed: {result.stderr}")
+
+            pkg_path = site_base_dir / "package.json"
+            if pkg_path.exists():
+                with open(pkg_path, 'r') as f:
+                    pkg = json.load(f)
+
+                if 'scripts' not in pkg:
+                    pkg['scripts'] = {}
+                pkg['scripts']['dev'] = f"vite dev --host 0.0.0.0 --port {proxy_port}"
+                pkg['scripts']['start'] = f"vite dev --host 0.0.0.0 --port {proxy_port}"
+                pkg['scripts'].setdefault('build', 'vite build')
+
+                with open(pkg_path, 'w') as f:
+                    json.dump(pkg, f, indent=2)
+
+            vite_config = site_base_dir / "vite.config.ts"
+            if vite_config.exists():
+                content = vite_config.read_text()
+                if 'allowedHosts' not in content and 'defineConfig({' in content:
+                    content = content.replace(
+                        'defineConfig({',
+                        f"defineConfig({{\n\tserver: {{\n\t\tallowedHosts: ['{domain}']\n\t}},"
+                    )
+                    vite_config.write_text(content)
+
+            messages.append(f"[green]SvelteKit project created successfully![/green]")
+            messages.append(f"[yellow]Node process prepared. Run 'wslaragon node start {site_name}' to serve 'npm run dev'.[/yellow]")
+
+        except Exception as e:
+            raise Exception(f"SvelteKit project creation failed: {str(e)}")
+
         return messages
 
 
@@ -651,21 +720,8 @@ class AstroSiteCreator(SiteCreator):
             return creator.create()
 
         try:
-            current_user = os.getenv('SUDO_USER') or os.getenv('USER')
-            is_root = os.geteuid() == 0 and current_user
-            
-            subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{current_user}', str(site_base_dir)], check=True)
-            
-            if is_root:
-                def run_as_user(cmd, **kwargs):
-                    return subprocess.run(
-                        ['runuser', '-l', current_user, '-c', cmd],
-                        **kwargs
-                    )
-            else:
-                def run_as_user(cmd, **kwargs):
-                    return subprocess.run(cmd, shell=True, **kwargs)
-            
+            run_as_user = self._prepare_run_as_user(site_base_dir)
+
             scaffold_cmd = f"npm create astro@latest . -- --template {astro_template} --no-install --no-git --yes"
             result = run_as_user(scaffold_cmd, cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             
@@ -1326,12 +1382,10 @@ class PhpMyAdminSiteCreator(SiteCreator):
         
         # Create blowfish_secret for cookie auth
         blowfish_secret = secrets.token_urlsafe(32)
-        
-        # Get MySQL credentials from config
-        db_password = self.config.get('mysql.password', '')
-        db_user = self.config.get('mysql.user', 'root')
-        
+
         # Create config.inc.php
+        # Note: auth_type is 'cookie', so MySQL credentials are entered on the
+        # phpMyAdmin login page and are not baked into this file.
         config_content = f"""<?php
 /**
  * phpMyAdmin configuration - auto-generated by WSLaragon
@@ -1345,7 +1399,6 @@ $cfg['Servers'][1]['host'] = 'localhost';
 $cfg['Servers'][1]['port'] = '3306';
 $cfg['Servers'][1]['connect_type'] = 'tcp';
 $cfg['Servers'][1]['compress'] = false;
-$cfg['Servers'][1]['AllowNoPassword'] = false;
 
 // Blowfish secret for cookie encryption
 $cfg['blowfish_secret'] = '{blowfish_secret}';
@@ -1441,7 +1494,7 @@ def get_site_creator(site_type: Optional[str], vite_template: Optional[str], php
     elif site_type == 'html':
         return HtmlSiteCreator(config, site_name, web_root, site_base_dir, tld)
     elif site_type == 'wordpress':
-        return WordPressSiteCreator(config, site_name, web_root, site_base_dir, tld)
+        return WordPressSiteCreator(config, site_name, web_root, site_base_dir, tld, database_name=database_name)
     elif site_type == 'phpmyadmin':
         return PhpMyAdminSiteCreator(config, site_name, web_root, site_base_dir, tld)
     elif site_type is not None and (site_type == 'laravel' or site_type.isdigit()):
@@ -1451,6 +1504,8 @@ def get_site_creator(site_type: Optional[str], vite_template: Optional[str], php
                                   db_type=db_type, database_name=database_name)
     elif site_type == 'node':
         return NodeSiteCreator(config, site_name, web_root, site_base_dir, tld, proxy_port)
+    elif site_type == 'sveltekit':
+        return SvelteKitSiteCreator(config, site_name, web_root, site_base_dir, tld, proxy_port)
     elif site_type == 'python':
         return PythonSiteCreator(config, site_name, web_root, site_base_dir, tld, proxy_port)
     else:

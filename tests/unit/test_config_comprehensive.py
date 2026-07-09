@@ -87,6 +87,37 @@ class TestConfigInit:
 
     @patch('wslaragon.core.config.Path.home')
     @patch('wslaragon.core.config.load_dotenv')
+    @patch('pwd.getpwnam')
+    def test_init_uses_sudo_user_home_dir(self, mock_getpwnam, mock_load_dotenv, mock_home, tmp_path):
+        """Test __init__ resolves home dir from SUDO_USER when running under sudo."""
+        mock_home.return_value = tmp_path
+        fake_home = tmp_path / "sudouser_home"
+        fake_home.mkdir()
+        mock_pw_record = MagicMock()
+        mock_pw_record.pw_dir = str(fake_home)
+        mock_getpwnam.return_value = mock_pw_record
+
+        with patch.dict(os.environ, {'SUDO_USER': 'testuser'}, clear=True):
+            config = Config()
+
+        assert config.home_dir == fake_home
+        mock_getpwnam.assert_called_once_with('testuser')
+
+    @patch('wslaragon.core.config.Path.home')
+    @patch('wslaragon.core.config.load_dotenv')
+    @patch('pwd.getpwnam')
+    def test_init_sudo_user_lookup_fails_falls_back_to_home(self, mock_getpwnam, mock_load_dotenv, mock_home, tmp_path):
+        """Test __init__ falls back to Path.home() when SUDO_USER lookup raises KeyError."""
+        mock_home.return_value = tmp_path
+        mock_getpwnam.side_effect = KeyError('no such user')
+
+        with patch.dict(os.environ, {'SUDO_USER': 'ghost'}, clear=True):
+            config = Config()
+
+        assert config.home_dir == tmp_path
+
+    @patch('wslaragon.core.config.Path.home')
+    @patch('wslaragon.core.config.load_dotenv')
     def test_init_env_vars_override_existing_config(self, mock_load_dotenv, mock_home, tmp_path):
         """Test env vars override values even when config.yaml exists."""
         mock_home.return_value = tmp_path
@@ -153,7 +184,7 @@ class TestLoadConfig:
             config = Config()
         
         assert config.get('php.version') == '8.3'
-        assert config.get('nginx.client_max_body_size') == '128M'
+        assert config.get('nginx.client_max_body_size') == '512M'
         assert config.get('mysql.user') == 'root'
         assert config.config_file.exists()
 
@@ -548,7 +579,7 @@ class TestConfigDefaultValues:
         assert config.get('nginx.config_dir') == '/etc/nginx'
         assert config.get('nginx.sites_available') == '/etc/nginx/sites-available'
         assert config.get('nginx.sites_enabled') == '/etc/nginx/sites-enabled'
-        assert config.get('nginx.client_max_body_size') == '128M'
+        assert config.get('nginx.client_max_body_size') == '512M'
 
     @patch('wslaragon.core.config.Path.home')
     @patch('wslaragon.core.config.load_dotenv')

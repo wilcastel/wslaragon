@@ -948,19 +948,22 @@ class TestCreateSiteExistingFolder:
         return create_site_manager(tmp_path, mock_nginx_manager, mock_mysql_manager)
 
     @patch("subprocess.run")
-    def test_create_site_uses_existing_folder_message(self, mock_run, site_manager):
-        """Test that create_site shows 'Using existing folder' message when directory exists and recreate=False - Line 84."""
+    def test_create_site_cleans_leftover_unregistered_folder(self, mock_run, site_manager):
+        """create_site wipes a leftover, unregistered directory instead of reusing it
+        (changed by the Astro-scaffold-misplacement fix: reusing a stale folder risked
+        mixing an old scaffold with a new one)."""
         site_manager.nginx.add_site.return_value = (True, None)
 
-        # Create the site directory before calling create_site
+        # Create the site directory before calling create_site, but don't register
+        # it in site_manager.sites — this simulates a leftover from a prior failed run.
         doc_root = site_manager.document_root / "existingsite"
         doc_root.mkdir(parents=True, exist_ok=True)
 
         result = site_manager.create_site("existingsite", ssl=False)
 
         assert result["success"] is True
-        # Check that the message about using existing folder is present
-        assert any("Using existing folder" in msg for msg in result.get("messages", []))
+        assert any("Cleaned existing directory" in msg for msg in result.get("messages", []))
+        assert any("rm" in str(call) for call in mock_run.call_args_list)
 
 
 class TestCreateSiteLaravelVersionFallback:

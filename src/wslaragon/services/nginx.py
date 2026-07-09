@@ -72,8 +72,8 @@ class NginxManager:
             from urllib.parse import urlparse
             parsed = urlparse(backend)
             backend_host = parsed.hostname or backend
-            backend_port = parsed.port or (443 if parsed.scheme == 'https' else 80)
             backend_scheme = parsed.scheme or 'https'
+            backend_port = parsed.port or (443 if backend_scheme == 'https' else 80)
             
             # Nginx requires a variable for dynamic DNS resolution
             # We use set directive to store the backend URL
@@ -90,7 +90,7 @@ class NginxManager:
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Accept "application/json";
         proxy_ssl_server_name on;
-        client_max_body_size 128M;
+        client_max_body_size {self.config.get('nginx.client_max_body_size', '128M')};
     }}
 """
         
@@ -144,7 +144,7 @@ class NginxManager:
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:/var/run/php/php{self.config.get('php.version')}-fpm.sock;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        client_max_body_size 128M;
+        client_max_body_size {self.config.get('nginx.client_max_body_size', '128M')};
     }}"""
 
             # Common configuration elements
@@ -333,3 +333,58 @@ server {{
             logger.debug(f"get_site_config failed: {e}")
             pass
         return None
+
+    def update_client_max_body_size(self, size: str) -> bool:
+        """Update the global nginx client_max_body_size.
+
+        Creates/updates /etc/nginx/conf.d/wslaragon.conf and updates
+        the wslaragon config so future site configs use the new value.
+        """
+        try:
+            conf_d = self.config_dir / 'conf.d'
+            mkdir_result = subprocess.run(
+                ['sudo', 'mkdir', '-p', str(conf_d)],
+                capture_output=True, text=True
+            )
+            if mkdir_result.returncode != 0:
+                logger.debug(f"Failed to create {conf_d}: {mkdir_result.stderr}")
+                return False
+
+            dropin = conf_d / 'wslaragon.conf'
+            previous_content = dropin.read_text() if dropin.exists() else None
+
+            content = f"# Managed by WSLaragon\nclient_max_body_size {size};\n"
+
+            process = subprocess.Popen(
+                ['sudo', 'tee', str(dropin)],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            process.communicate(input=content)
+            if process.returncode != 0:
+                return False
+
+            if not self.test_config():
+                # Roll back the drop-in so a value nginx rejects never lingers
+                # on disk and breaks a later, unrelated `systemctl restart nginx`.
+                if previous_content is not None:
+                    rollback = subprocess.Popen(
+                        ['sudo', 'tee', str(dropin)],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    rollback.communicate(input=previous_content)
+                else:
+                    subprocess.run(['sudo', 'rm', '-f', str(dropin)], capture_output=True, text=True)
+                return False
+
+            self.config.set('nginx.client_max_body_size', size)
+
+            return self.reload()
+        except Exception as e:
+            logger.debug(f"update_client_max_body_size failed: {e}")
+            return False

@@ -235,8 +235,49 @@ class TestNginxManagerCreateSiteConfig:
     def test_create_site_config_includes_client_max_body_size(self, nginx_manager):
         """Test that client_max_body_size is included"""
         config = nginx_manager.create_site_config("myapp", "/var/www/myapp")
-        
+
         assert "client_max_body_size 128M" in config
+
+    def test_create_site_config_strips_tld_suffix(self, nginx_manager):
+        """Test that a site name already including the TLD is normalized"""
+        config = nginx_manager.create_site_config("myapp.test", "/var/www/myapp")
+
+        assert "server_name myapp.test" in config
+        assert "server_name myapp.test.test" not in config
+
+    def test_create_site_config_with_api_proxies(self, nginx_manager):
+        """Test that api_proxies generates proxy location blocks (used with proxy_port)"""
+        config = nginx_manager.create_site_config(
+            "myapp", "/var/www/myapp", proxy_port=3000,
+            api_proxies={"/api": "https://backend.example.com:8443"}
+        )
+
+        assert "API proxy: /api -> https://backend.example.com:8443" in config
+        assert "set $backend_api https://backend.example.com:8443;" in config
+        assert "location /api/ {" in config
+        assert "proxy_set_header Host backend.example.com" in config
+
+    def test_create_site_config_with_api_proxies_default_scheme_and_port(self, nginx_manager):
+        """Test api_proxies falls back to hostname-only backend without scheme/port"""
+        config = nginx_manager.create_site_config(
+            "myapp", "/var/www/myapp", astro_ssg=True,
+            api_proxies={"/legacy": "backend-host"}
+        )
+
+        # When the backend URL has no scheme, urlparse() leaves scheme=''
+        # so both backend_scheme and backend_port fall back consistently:
+        # scheme defaults to 'https', and the port defaults to 443 to match it.
+        assert "set $backend_legacy https://backend-host:443;" in config
+
+    def test_create_site_config_astro_ssg(self, nginx_manager):
+        """Test astro_ssg branch serves static files from document root"""
+        config = nginx_manager.create_site_config(
+            "myapp", "/var/www/myapp/dist", astro_ssg=True
+        )
+
+        assert "root /var/www/myapp/dist" in config
+        assert "index index.html" in config
+        assert "fastcgi_pass" not in config
 
 
 class TestNginxManagerAddSite:
@@ -549,12 +590,141 @@ class TestNginxManagerGetSiteConfig:
         """Test get_site_config returns None on exception"""
         sites_available = tmp_path / "sites-available"
         sites_available.mkdir(parents=True)
-        
+
         nginx_manager.sites_available = sites_available
         config_file = sites_available / "myapp.conf"
         config_file.write_text("content")
         config_file.chmod(0o000)
-        
+
         result = nginx_manager.get_site_config("myapp")
-        
+
         assert result is None
+
+
+class TestNginxManagerUpdateClientMaxBodySize:
+    """Test suite for update_client_max_body_size"""
+
+    @pytest.fixture
+    def nginx_manager(self, mock_config, tmp_path):
+        from wslaragon.services.nginx import NginxManager
+        manager = NginxManager(mock_config)
+        # Use a throwaway directory instead of the real /etc/nginx
+        manager.config_dir = tmp_path / "nginx"
+        return manager
+
+    @patch('wslaragon.services.nginx.subprocess.Popen')
+    @patch('wslaragon.services.nginx.subprocess.run')
+    def test_update_client_max_body_size_success(self, mock_run, mock_popen, nginx_manager):
+        """Test successful update writes drop-in, validates, persists, then reloads"""
+        mock_run.return_value = MagicMock(returncode=0)
+        write_process = MagicMock()
+        write_process.communicate.return_value = ("", "")
+        write_process.returncode = 0
+        mock_popen.return_value = write_process
+
+        nginx_manager.test_config = MagicMock(return_value=True)
+        nginx_manager.reload = MagicMock(return_value=True)
+
+        result = nginx_manager.update_client_max_body_size("1G")
+
+        assert result is True
+        nginx_manager.config.set.assert_called_once_with('nginx.client_max_body_size', '1G')
+        nginx_manager.reload.assert_called_once()
+
+    @patch('wslaragon.services.nginx.subprocess.Popen')
+    @patch('wslaragon.services.nginx.subprocess.run')
+    def test_update_client_max_body_size_rolls_back_on_invalid_config(self, mock_run, mock_popen, nginx_manager):
+        """Test that a value nginx rejects is rolled back and never persisted"""
+        mock_run.return_value = MagicMock(returncode=0)
+        write_process = MagicMock()
+        write_process.communicate.return_value = ("", "")
+        write_process.returncode = 0
+        mock_popen.return_value = write_process
+
+        nginx_manager.test_config = MagicMock(return_value=False)
+        nginx_manager.reload = MagicMock(return_value=True)
+
+        result = nginx_manager.update_client_max_body_size("garbage")
+
+        assert result is False
+        nginx_manager.config.set.assert_not_called()
+        nginx_manager.reload.assert_not_called()
+        # No previous drop-in existed, so the rollback path must remove the bad one
+        rm_calls = [c for c in mock_run.call_args_list if 'rm' in c[0][0]]
+        assert len(rm_calls) == 1
+
+    @patch('wslaragon.services.nginx.subprocess.run')
+    def test_update_client_max_body_size_fails_when_mkdir_fails(self, mock_run, nginx_manager):
+        """Test that a failed sudo mkdir returns False without touching config"""
+        mock_run.return_value = MagicMock(returncode=1, stderr="Permission denied")
+
+        result = nginx_manager.update_client_max_body_size("1G")
+
+        assert result is False
+        nginx_manager.config.set.assert_not_called()
+
+    @patch('wslaragon.services.nginx.subprocess.Popen')
+    @patch('wslaragon.services.nginx.subprocess.run')
+    def test_update_client_max_body_size_fails_when_tee_write_fails(self, mock_run, mock_popen, nginx_manager):
+        """Test that a failed sudo tee write returns False before validating config"""
+        mock_run.return_value = MagicMock(returncode=0)
+        write_process = MagicMock()
+        write_process.communicate.return_value = ("", "permission denied")
+        write_process.returncode = 1
+        mock_popen.return_value = write_process
+
+        nginx_manager.test_config = MagicMock(return_value=True)
+        nginx_manager.reload = MagicMock(return_value=True)
+
+        result = nginx_manager.update_client_max_body_size("1G")
+
+        assert result is False
+        nginx_manager.test_config.assert_not_called()
+        nginx_manager.config.set.assert_not_called()
+
+    @patch('wslaragon.services.nginx.subprocess.Popen')
+    @patch('wslaragon.services.nginx.subprocess.run')
+    def test_update_client_max_body_size_restores_previous_content_on_invalid_config(
+        self, mock_run, mock_popen, nginx_manager
+    ):
+        """Test that an existing drop-in's content is rewritten (not deleted) on rollback"""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        # A previous drop-in already exists on disk with prior content
+        conf_d = nginx_manager.config_dir / 'conf.d'
+        conf_d.mkdir(parents=True)
+        dropin = conf_d / 'wslaragon.conf'
+        dropin.write_text("# Managed by WSLaragon\nclient_max_body_size 256M;\n")
+
+        write_process = MagicMock()
+        write_process.communicate.return_value = ("", "")
+        write_process.returncode = 0
+        rollback_process = MagicMock()
+        rollback_process.communicate.return_value = ("", "")
+        rollback_process.returncode = 0
+        mock_popen.side_effect = [write_process, rollback_process]
+
+        nginx_manager.test_config = MagicMock(return_value=False)
+        nginx_manager.reload = MagicMock(return_value=True)
+
+        result = nginx_manager.update_client_max_body_size("garbage")
+
+        assert result is False
+        nginx_manager.config.set.assert_not_called()
+        # Rollback must rewrite via tee with the previous content, not `rm`
+        assert mock_popen.call_count == 2
+        rollback_process.communicate.assert_called_once_with(
+            input="# Managed by WSLaragon\nclient_max_body_size 256M;\n"
+        )
+        rm_calls = [c for c in mock_run.call_args_list if 'rm' in c[0][0]]
+        assert len(rm_calls) == 0
+
+    @patch('wslaragon.services.nginx.subprocess.run')
+    def test_update_client_max_body_size_returns_false_on_exception(self, mock_run, nginx_manager):
+        """Test that an unexpected exception is caught and returns False"""
+        mock_run.side_effect = OSError("boom")
+
+        result = nginx_manager.update_client_max_body_size("1G")
+
+        assert result is False
+        nginx_manager.config.set.assert_not_called()

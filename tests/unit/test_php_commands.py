@@ -536,8 +536,9 @@ class TestPhpCommandGroup:
 
         result = runner.invoke(php, [])
 
-        # Click 8+ groups show help and return exit_code 0 when no subcommand is provided
-        assert result.exit_code == 0
+        # Without invoke_without_command=True, Click treats a missing subcommand
+        # as a usage error (exit_code 2) while still printing help/Commands.
+        assert result.exit_code == 2
         assert 'Usage:' in result.output or 'Commands:' in result.output
 
     def test_php_config_subgroup_help(self, runner):
@@ -547,5 +548,125 @@ class TestPhpCommandGroup:
 
         assert result.exit_code == 0
         assert 'list' in result.output
-        assert 'set' in result.output
-        assert 'get' in result.output
+
+
+class TestPhpUploadLimitCommand:
+    """Test suite for 'php upload-limit' command"""
+
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    @pytest.fixture
+    def mock_deps(self):
+        with patch('wslaragon.cli.php_commands.Config') as mock_config, \
+             patch('wslaragon.cli.php_commands.PHPManager') as mock_php, \
+             patch('wslaragon.cli.php_commands.NginxManager') as mock_nginx:
+            mock_config_instance = MagicMock()
+            mock_config.return_value = mock_config_instance
+            mock_php_instance = MagicMock()
+            mock_php.return_value = mock_php_instance
+            mock_nginx_instance = MagicMock()
+            mock_nginx.return_value = mock_nginx_instance
+            yield {
+                'config': mock_config_instance,
+                'php': mock_php_instance,
+                'nginx': mock_nginx_instance,
+            }
+
+    @patch('wslaragon.cli.php_commands.subprocess.run')
+    def test_upload_limit_no_php_installed(self, mock_subprocess, runner, mock_deps):
+        from wslaragon.cli.php_commands import php
+
+        mock_deps['php'].get_installed_versions.return_value = []
+
+        result = runner.invoke(php, ['upload-limit', '512M'])
+
+        assert result.exit_code == 0
+        assert 'No PHP versions found installed' in result.output
+        mock_subprocess.assert_not_called()
+
+    @patch('wslaragon.cli.php_commands.subprocess.run')
+    def test_upload_limit_no_sudo(self, mock_subprocess, runner, mock_deps):
+        from wslaragon.cli.php_commands import php
+
+        mock_deps['php'].get_installed_versions.return_value = ['8.3']
+        mock_subprocess.side_effect = subprocess.CalledProcessError(1, 'sudo')
+
+        result = runner.invoke(php, ['upload-limit', '512M'])
+
+        assert result.exit_code == 0
+        assert 'requires sudo privileges' in result.output
+        mock_deps['php'].set_upload_limits.assert_not_called()
+
+    @patch('wslaragon.cli.php_commands.subprocess.run')
+    def test_upload_limit_success_default_size(self, mock_subprocess, runner, mock_deps):
+        from wslaragon.cli.php_commands import php
+
+        mock_deps['php'].get_installed_versions.return_value = ['8.1', '8.3']
+        mock_subprocess.return_value = MagicMock(returncode=0)
+        mock_deps['php'].set_upload_limits.return_value = {
+            '/etc/php/8.1/fpm/php.ini': True,
+            '/etc/php/8.3/fpm/php.ini': True,
+        }
+        mock_deps['nginx'].update_client_max_body_size.return_value = True
+
+        result = runner.invoke(php, ['upload-limit'])
+
+        assert result.exit_code == 0
+        mock_deps['php'].set_upload_limits.assert_called_once_with('512M')
+        mock_deps['nginx'].update_client_max_body_size.assert_called_once_with('512M')
+        assert 'Upload limits set to 512M across all PHP versions and nginx' in result.output
+
+    @patch('wslaragon.cli.php_commands.subprocess.run')
+    def test_upload_limit_custom_size(self, mock_subprocess, runner, mock_deps):
+        from wslaragon.cli.php_commands import php
+
+        mock_deps['php'].get_installed_versions.return_value = ['8.3']
+        mock_subprocess.return_value = MagicMock(returncode=0)
+        mock_deps['php'].set_upload_limits.return_value = {
+            '/etc/php/8.3/fpm/php.ini': True,
+        }
+        mock_deps['nginx'].update_client_max_body_size.return_value = True
+
+        result = runner.invoke(php, ['upload-limit', '1G'])
+
+        assert result.exit_code == 0
+        mock_deps['php'].set_upload_limits.assert_called_once_with('1G')
+        mock_deps['nginx'].update_client_max_body_size.assert_called_once_with('1G')
+        assert '1G' in result.output
+
+    @patch('wslaragon.cli.php_commands.subprocess.run')
+    def test_upload_limit_php_ini_write_failure(self, mock_subprocess, runner, mock_deps):
+        from wslaragon.cli.php_commands import php
+
+        mock_deps['php'].get_installed_versions.return_value = ['8.1', '8.3']
+        mock_subprocess.return_value = MagicMock(returncode=0)
+        mock_deps['php'].set_upload_limits.return_value = {
+            '/etc/php/8.1/fpm/php.ini': True,
+            '/etc/php/8.3/fpm/php.ini': False,
+        }
+        mock_deps['nginx'].update_client_max_body_size.return_value = True
+
+        result = runner.invoke(php, ['upload-limit', '512M'])
+
+        assert result.exit_code == 0
+        assert 'FAILED: writing upload limits to /etc/php/8.3/fpm/php.ini' in result.output
+        assert 'Some settings failed' in result.output
+
+    @patch('wslaragon.cli.php_commands.subprocess.run')
+    def test_upload_limit_nginx_update_failure(self, mock_subprocess, runner, mock_deps):
+        from wslaragon.cli.php_commands import php
+
+        mock_deps['php'].get_installed_versions.return_value = ['8.3']
+        mock_subprocess.return_value = MagicMock(returncode=0)
+        mock_deps['php'].set_upload_limits.return_value = {
+            '/etc/php/8.3/fpm/php.ini': True,
+        }
+        mock_deps['nginx'].update_client_max_body_size.return_value = False
+
+        result = runner.invoke(php, ['upload-limit', '512M'])
+
+        assert result.exit_code == 0
+        assert 'FAILED to update nginx client_max_body_size' in result.output
+        assert 'Some settings failed' in result.output

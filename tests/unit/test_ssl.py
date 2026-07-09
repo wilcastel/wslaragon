@@ -39,6 +39,23 @@ class TestSSLManagerInit:
         """Test that init sets windows_hosts"""
         assert ssl_manager.windows_hosts is not None
 
+    @patch('wslaragon.services.ssl.Path.home')
+    def test_init_uses_defaults_when_config_keys_missing(self, mock_home, tmp_path):
+        """Test that missing ssl.dir / ssl.ca_file / ssl.ca_key / windows.hosts_file
+        config keys fall back to hardcoded defaults instead of raising."""
+        from wslaragon.services.ssl import SSLManager
+
+        mock_home.return_value = tmp_path
+        config = MagicMock()
+        config.get.return_value = None
+
+        ssl_manager = SSLManager(config)
+
+        assert ssl_manager.ssl_dir == tmp_path / ".wslaragon" / "ssl"
+        assert ssl_manager.ca_file == ssl_manager.ssl_dir / "rootCA.pem"
+        assert ssl_manager.ca_key == ssl_manager.ssl_dir / "rootCA-key.pem"
+        assert ssl_manager.windows_hosts == Path("/mnt/c/Windows/System32/drivers/etc/hosts")
+
 
 class TestSSLManagerEnsureDirs:
     """Test suite for _ensure_dirs method"""
@@ -291,13 +308,20 @@ class TestSSLManagerGenerateCertificate:
         
         assert result is True
 
-    def test_generate_certificate_returns_false_when_no_mkcert(self, ssl_manager):
-        """Test generate_certificate returns False when mkcert not installed"""
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_generate_certificate_returns_false_when_no_mkcert(self, mock_run, ssl_manager):
+        """Test generate_certificate returns False when mkcert isn't installed and can't be installed"""
+        # generate_certificate bootstraps the root CA via create_ca(), which falls
+        # back to install_mkcert() when mkcert is missing — mock both legs of that
+        # chain so the test can't fall through to real curl/mkcert/sudo calls.
         ssl_manager.is_mkcert_installed = MagicMock(return_value=False)
+        ssl_manager.install_mkcert = MagicMock(return_value=False)
+        mock_run.return_value = MagicMock(returncode=1)
 
         result = ssl_manager.generate_certificate("example.test")
-        
+
         assert result is False
+        mock_run.assert_not_called()
 
     @patch('wslaragon.services.ssl.subprocess.run')
     def test_generate_certificate_with_additional_domains(self, mock_run, ssl_manager, tmp_path):
@@ -322,7 +346,20 @@ class TestSSLManagerGenerateCertificate:
         mock_run.side_effect = Exception("Command failed")
 
         result = ssl_manager.generate_certificate("example.test")
-        
+
+        assert result is False
+
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_generate_certificate_returns_false_on_exception_after_ca_exists(self, mock_run, ssl_manager):
+        """Test generate_certificate's own try/except catches failures once the root
+        CA already exists on disk (bypassing create_ca()'s own exception handling,
+        which would otherwise swallow the error before it reaches this method)."""
+        ssl_manager.ca_file.write_text("ca cert")
+        ssl_manager.ca_key.write_text("ca key")
+        mock_run.side_effect = Exception("openssl genrsa failed")
+
+        result = ssl_manager.generate_certificate("example.test")
+
         assert result is False
 
     @patch('wslaragon.services.ssl.subprocess.run')
@@ -766,21 +803,34 @@ class TestSSLManagerSetupSSLForSite:
         assert result['success'] is False
         assert 'error' in result
 
-    def test_setup_ssl_for_site_returns_failure_on_hosts_error(self, ssl_manager):
-        """Test setup_ssl_for_site returns failure on hosts file error"""
+    def test_setup_ssl_for_site_succeeds_when_hosts_update_fails(self, ssl_manager):
+        """A Windows-hosts update failure is non-fatal (domain may already exist there),
+        so setup_ssl_for_site should still report success as long as the cert was generated."""
         ssl_manager.generate_certificate = MagicMock(return_value=True)
         ssl_manager.add_to_windows_hosts = MagicMock(return_value=False)
 
         result = ssl_manager.setup_ssl_for_site("myapp", ".test")
-        
-        assert result['success'] is False
-        assert 'error' in result
+
+        assert result['success'] is True
+        assert result['domain'] == 'myapp.test'
 
     def test_setup_ssl_for_site_handles_exception(self, ssl_manager):
         """Test setup_ssl_for_site handles exceptions"""
         ssl_manager.generate_certificate = MagicMock(side_effect=Exception("Error"))
 
         result = ssl_manager.setup_ssl_for_site("myapp", ".test")
-        
+
         assert result['success'] is False
         assert 'error' in result
+
+    def test_setup_ssl_for_site_strips_tld_already_in_site_name(self, ssl_manager):
+        """Test setup_ssl_for_site normalizes a site_name that already includes the TLD"""
+        ssl_manager.generate_certificate = MagicMock(return_value=True)
+        ssl_manager.add_to_windows_hosts = MagicMock(return_value=True)
+        ssl_manager.get_certificate_info = MagicMock(return_value={'subject': 'test'})
+
+        result = ssl_manager.setup_ssl_for_site("myapp.test", ".test")
+
+        assert result['success'] is True
+        assert result['domain'] == 'myapp.test'
+        ssl_manager.generate_certificate.assert_called_once_with('myapp.test')

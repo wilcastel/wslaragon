@@ -291,8 +291,9 @@ class TestMysqlCommandGroup:
 
         result = runner.invoke(mysql, [])
 
-        # Click 8+ groups show help and return exit_code 0 when no subcommand is provided
-        assert result.exit_code == 0
+        # Without invoke_without_command=True, Click treats a missing subcommand
+        # as a usage error (exit_code 2) while still printing help/Commands.
+        assert result.exit_code == 2
         assert 'Commands:' in result.output
 
     def test_mysql_databases_help(self, runner):

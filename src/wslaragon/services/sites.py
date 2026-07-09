@@ -136,11 +136,9 @@ class SiteManager:
                     subprocess.run(['sudo', 'rm', '-rf', str(site_base_dir)], check=True)
                     messages.append(f"[yellow]Cleaned existing directory: {site_base_dir}[/yellow]")
             
-            # Astro SSG: no PHP, no MySQL by default
+            # Astro SSG: no PHP
             if is_astro_ssg:
                 php = False
-                if mysql is None:
-                    mysql = False
             
             site_base_dir.mkdir(exist_ok=True, parents=True)
             
@@ -289,6 +287,179 @@ class SiteManager:
             logger.error(f"Failed to create site {site_name}: {e}")
             return {'success': False, 'error': str(e)}
 
+    def create_headless_site(self, site_name: str, backend: str, frontend: str,
+                             ssl: bool = True, database_name: str = None,
+                             recreate: bool = False) -> Dict:
+        """Create a headless site pair: frontend at name.test and backend at api.name.test."""
+        root_dir: Optional[Path] = None
+        backend_site_name: Optional[str] = None
+        db_name: Optional[str] = None
+        db_created_by_us = False
+        try:
+            site_name = self._normalize_site_name(site_name)
+            if not site_name or not self._is_valid_site_name(site_name):
+                return {'success': False, 'error': 'Invalid site name. Use letters, numbers, hyphens, underscores and dots (e.g. dash.misitio)'}
+            if backend not in ('wordpress', 'laravel'):
+                return {'success': False, 'error': 'Invalid backend. Use wordpress or laravel'}
+            if frontend == 'sveltkit':
+                frontend = 'sveltekit'
+            if frontend not in ('sveltekit', 'astro'):
+                return {'success': False, 'error': 'Invalid frontend. Use sveltekit or astro'}
+
+            backend_site_name = f"api.{site_name}"
+            colliding_sites = [name for name in (site_name, backend_site_name) if name in self.sites]
+            if colliding_sites and not recreate:
+                return {'success': False, 'error': f"Site already exists: {', '.join(colliding_sites)}"}
+
+            root_dir = self.document_root / site_name
+            if root_dir.exists():
+                if not recreate:
+                    return {'success': False, 'error': f"Site directory already exists: {root_dir}"}
+                subprocess.run(['sudo', 'rm', '-rf', str(root_dir)], check=True)
+
+            backend_dir = root_dir / "back"
+            frontend_dir = root_dir / "front"
+            backend_web_root = backend_dir / "public" if backend == 'laravel' else backend_dir
+            frontend_web_root = frontend_dir / "dist" if frontend == 'astro' else frontend_dir
+            root_dir.mkdir(parents=True, exist_ok=True)
+            backend_dir.mkdir(parents=True, exist_ok=True)
+            frontend_dir.mkdir(parents=True, exist_ok=True)
+
+            frontend_proxy_port = None
+            if frontend == 'sveltekit':
+                frontend_proxy_port = self._find_next_free_port(3000)
+
+            db_name = database_name or f"{backend_site_name.replace('.', '_')}_db"
+            messages = []
+
+            backend_creator = get_site_creator(
+                backend, None, True, self.config, backend_site_name,
+                backend_web_root, backend_dir, self.tld, None,
+                version=12, db_type='mysql', database_name=db_name
+            )
+            if backend_creator:
+                messages.extend(backend_creator.create())
+
+            if self.mysql.database_exists(db_name):
+                messages.append(f"[yellow]Using existing database: {db_name}[/yellow]")
+            else:
+                db_created, db_error = self.mysql.create_database(db_name)
+                if not db_created:
+                    raise Exception(f'Failed to create database: {db_error}')
+                db_created_by_us = True
+                messages.append(f"[green]Created new database: {db_name}[/green]")
+
+            if frontend == 'astro':
+                frontend_creator = get_site_creator(
+                    None, None, False, self.config, site_name,
+                    frontend_web_root, frontend_dir, self.tld, None,
+                    astro_template='basics'
+                )
+            else:
+                frontend_creator = get_site_creator(
+                    'sveltekit', None, False, self.config, site_name,
+                    frontend_web_root, frontend_dir, self.tld, frontend_proxy_port
+                )
+            if frontend_creator:
+                messages.extend(frontend_creator.create())
+
+            if ssl:
+                ssl_mgr = SSLManager(self.config)
+                for configured_site in (site_name, backend_site_name):
+                    ssl_result = ssl_mgr.setup_ssl_for_site(configured_site, self.tld)
+                    if not ssl_result['success']:
+                        raise Exception(f"Failed to generate SSL for {configured_site}: {ssl_result['error']}")
+
+            backend_nginx_created, backend_nginx_error = self.nginx.add_site(
+                backend_site_name, str(backend_web_root), ssl=ssl, php=True
+            )
+            if not backend_nginx_created:
+                raise Exception(f'Failed to create backend Nginx configuration: {backend_nginx_error}')
+
+            frontend_nginx_created, frontend_nginx_error = self.nginx.add_site(
+                site_name, str(frontend_web_root), ssl=ssl, php=False,
+                proxy_port=frontend_proxy_port, astro_ssg=(frontend == 'astro')
+            )
+            if not frontend_nginx_created:
+                raise Exception(f'Failed to create frontend Nginx configuration: {frontend_nginx_error}')
+
+            now = datetime.now().isoformat()
+            frontend_site_info = {
+                'name': site_name,
+                'domain': f"{site_name}{self.tld}",
+                'document_root': str(frontend_dir),
+                'web_root': str(frontend_web_root),
+                'php': False,
+                'mysql': False,
+                'db_type': None,
+                'ssl': ssl,
+                'proxy_port': frontend_proxy_port,
+                'database': None,
+                'api_proxies': {},
+                'astro_template': 'basics' if frontend == 'astro' else None,
+                'headless': True,
+                'role': 'frontend',
+                'root': str(root_dir),
+                'backend': backend,
+                'frontend': frontend,
+                'backend_site': backend_site_name,
+                'created_at': now,
+                'enabled': True
+            }
+            backend_site_info = {
+                'name': backend_site_name,
+                'domain': f"{backend_site_name}{self.tld}",
+                'document_root': str(backend_dir),
+                'web_root': str(backend_web_root),
+                'php': True,
+                'mysql': True,
+                'db_type': 'mysql',
+                'ssl': ssl,
+                'proxy_port': None,
+                'database': db_name,
+                'api_proxies': {},
+                'headless': True,
+                'role': 'backend',
+                'root': str(root_dir),
+                'backend': backend,
+                'frontend': frontend,
+                'frontend_site': site_name,
+                'created_at': now,
+                'enabled': True
+            }
+
+            self.sites[site_name] = frontend_site_info
+            self.sites[backend_site_name] = backend_site_info
+            self._save_sites()
+
+            self.fix_permissions(site_name)
+            self.fix_permissions(backend_site_name)
+
+            return {
+                'success': True,
+                'site': frontend_site_info,
+                'backend_site': backend_site_info,
+                'messages': messages
+            }
+
+        except Exception as e:
+            for rollback_site in (site_name, backend_site_name):
+                if rollback_site:
+                    try:
+                        self.nginx.remove_site(rollback_site)
+                    except Exception:
+                        pass
+                    self.sites.pop(rollback_site, None)
+            self._save_sites()
+            self._cleanup_failed_site_directory(root_dir)
+            if db_created_by_us and db_name:
+                try:
+                    self.mysql.drop_database(db_name)
+                except Exception:
+                    pass
+            logger.error(f"Failed to create headless site {site_name}: {e}")
+            return {'success': False, 'error': str(e)}
+
     def update_site_root(self, site_name: str, public_dir: bool = True) -> Dict:
         """Update site document root (e.g. to point to public/)"""
         try:
@@ -341,38 +512,56 @@ class SiteManager:
         
 
     
-    def delete_site(self, site_name: str, remove_files: bool = False, 
+    def delete_site(self, site_name: str, remove_files: bool = False,
                     remove_database: bool = False) -> Dict:
-        """Delete a site"""
+        """Delete a site. If it's one half of a headless pair, deletes both halves."""
         try:
             site_name = self._normalize_site_name(site_name)
             if site_name not in self.sites:
                 return {'success': False, 'error': 'Site not found'}
-            
+
             site_info = self.sites[site_name]
-            
-            # Remove Nginx configuration
-            self.nginx.remove_site(site_name)
-            
-            # Remove database if requested
-            if remove_database and site_info.get('database'):
-                # Only attempt to delete MySQL databases
-                # Postgres/Supabase are external (Docker) and we don't manage their lifecycle yet
-                if site_info.get('db_type') == 'mysql' or not site_info.get('db_type'):
-                    self.mysql.drop_database(site_info['database'])
-            
-            # Remove files if requested
-            if remove_files:
-                site_doc_root = Path(site_info['document_root'])
-                if site_doc_root.exists():
-                    subprocess.run(['sudo', 'rm', '-rf', str(site_doc_root)], check=True, timeout=60)
-            
-            # Remove from sites registry
-            del self.sites[site_name]
+
+            # Headless sites are created and stored as a linked frontend/backend
+            # pair sharing one root directory — deleting only one half would
+            # orphan the other's registry entry, nginx config and directory.
+            paired_site_name = site_info.get('backend_site') or site_info.get('frontend_site')
+            names_to_delete = [site_name]
+            if site_info.get('headless') and paired_site_name and paired_site_name in self.sites:
+                names_to_delete.append(paired_site_name)
+            shared_root = site_info.get('root')
+
+            for name in names_to_delete:
+                info = self.sites[name]
+
+                # Remove Nginx configuration
+                self.nginx.remove_site(name)
+
+                # Remove database if requested
+                if remove_database and info.get('database'):
+                    # Only attempt to delete MySQL databases
+                    # Postgres/Supabase are external (Docker) and we don't manage their lifecycle yet
+                    if info.get('db_type') == 'mysql' or not info.get('db_type'):
+                        self.mysql.drop_database(info['database'])
+
+                # Remove files now unless they live under a shared root
+                # (handled once, below, so we don't delete it twice)
+                if remove_files and not shared_root:
+                    site_doc_root = Path(info['document_root'])
+                    if site_doc_root.exists():
+                        subprocess.run(['sudo', 'rm', '-rf', str(site_doc_root)], check=True, timeout=60)
+
+                del self.sites[name]
+
+            if remove_files and shared_root:
+                root_path = Path(shared_root)
+                if root_path.exists():
+                    subprocess.run(['sudo', 'rm', '-rf', str(root_path)], check=True, timeout=60)
+
             self._save_sites()
-            
+
             return {'success': True}
-            
+
         except Exception as e:
             logger.error(f"Failed to delete site {site_name}: {e}")
             return {'success': False, 'error': str(e)}

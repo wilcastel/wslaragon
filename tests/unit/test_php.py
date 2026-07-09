@@ -147,24 +147,53 @@ class TestPHPManagerSwitchVersion:
         assert '/usr/bin/php8.2' in first_call[0][0]
 
     @patch('wslaragon.services.php.subprocess.run')
-    def test_switch_version_starts_fpm_if_active(self, mock_run, php_manager):
-        """Test switch_version starts FPM service if active version"""
+    def test_switch_version_always_starts_fpm(self, mock_run, php_manager):
+        """Test switch_version always stops all FPM services and starts the target"""
         mock_result = MagicMock()
-        mock_result.stdout = "active\n"
         mock_result.returncode = 0
         mock_run.return_value = mock_result
 
-        # Mock the helper to avoid needing systemctl list-units output
         php_manager._stop_php_fpm = MagicMock(return_value=True)
 
         php_manager.switch_version("8.2")
 
-        # Verify stop helper was called and start was called
         php_manager._stop_php_fpm.assert_called_once()
-        # Check that systemctl start was called for the FPM service
         calls = mock_run.call_args_list
         start_calls = [c for c in calls if 'start' in str(c) and 'fpm' in str(c)]
         assert len(start_calls) >= 1
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_switch_version_starts_fpm_when_not_active(self, mock_run, php_manager):
+        """Test switch_version enables and starts FPM even when it was not previously running"""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+
+        php_manager._stop_php_fpm = MagicMock(return_value=True)
+
+        result = php_manager.switch_version("8.5")
+
+        assert result is True
+        php_manager._stop_php_fpm.assert_called_once()
+        calls = mock_run.call_args_list
+        enable_calls = [c for c in calls if 'enable' in str(c) and 'fpm' in str(c)]
+        start_calls = [c for c in calls if 'start' in str(c) and 'fpm' in str(c)]
+        assert len(enable_calls) >= 1
+        assert len(start_calls) >= 1
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_switch_version_updates_config(self, mock_run, php_manager):
+        """Test switch_version persists new version in config.yaml"""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+
+        php_manager._stop_php_fpm = MagicMock(return_value=True)
+
+        php_manager.switch_version("8.5")
+
+        php_manager.config.set.assert_any_call('php.version', '8.5')
+        php_manager.config.set.assert_any_call('php.ini_file', '/etc/php/8.5/fpm/php.ini')
 
     @patch('wslaragon.services.php.subprocess.run')
     def test_switch_version_returns_false_on_exception(self, mock_run, php_manager):
@@ -174,6 +203,146 @@ class TestPHPManagerSwitchVersion:
         result = php_manager.switch_version("8.2")
 
         assert result is False
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_switch_version_rolls_back_fpm_on_start_failure(self, mock_run, php_manager):
+        """Test switch_version restarts the previously-running FPM service if the new one fails to start"""
+        import subprocess as sp
+
+        def side_effect(cmd, **kwargs):
+            if cmd[:3] == ['sudo', 'systemctl', 'start'] and 'php8.3-fpm' in cmd:
+                raise sp.CalledProcessError(1, cmd)
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "php8.2-fpm.service loaded active running PHP 8.2 FastCGI Process Manager\n"
+            return result
+
+        mock_run.side_effect = side_effect
+
+        result = php_manager.switch_version("8.3")
+
+        assert result is False
+        rollback_calls = [
+            c for c in mock_run.call_args_list
+            if c[0][0][:3] == ['sudo', 'systemctl', 'start'] and 'php8.2-fpm.service' in c[0][0]
+        ]
+        assert len(rollback_calls) >= 1
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_switch_version_reverts_cli_switch_on_fpm_start_failure(self, mock_run, php_manager):
+        """Test switch_version reverts update-alternatives to the previous version on failure"""
+        import subprocess as sp
+
+        # mock_config reports 'php.version' as '8.3' — switching to 8.4 and
+        # failing should revert the CLI back to 8.3.
+        def side_effect(cmd, **kwargs):
+            if cmd[:3] == ['sudo', 'systemctl', 'start'] and 'php8.4-fpm' in cmd:
+                raise sp.CalledProcessError(1, cmd)
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            return result
+
+        mock_run.side_effect = side_effect
+
+        result = php_manager.switch_version("8.4")
+
+        assert result is False
+        revert_calls = [
+            c for c in mock_run.call_args_list
+            if c[0][0] == ['sudo', 'update-alternatives', '--set', 'php', '/usr/bin/php8.3']
+        ]
+        assert len(revert_calls) == 1
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_switch_version_does_not_revert_cli_when_same_version(self, mock_run, php_manager):
+        """Test switch_version does not re-run update-alternatives when reverting to the same version"""
+        import subprocess as sp
+
+        def side_effect(cmd, **kwargs):
+            if cmd[:3] == ['sudo', 'systemctl', 'start'] and 'php8.3-fpm' in cmd:
+                raise sp.CalledProcessError(1, cmd)
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            return result
+
+        mock_run.side_effect = side_effect
+
+        result = php_manager.switch_version("8.3")
+
+        assert result is False
+        alternatives_calls = [
+            c for c in mock_run.call_args_list if 'update-alternatives' in c[0][0]
+        ]
+        assert len(alternatives_calls) == 1
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_switch_version_rollback_skips_restarting_target_service(self, mock_run, php_manager):
+        """Test that the rollback loop skips the target fpm_service itself (no double-start)"""
+        import subprocess as sp
+
+        php_manager._get_php_fpm_services = MagicMock(return_value=['php8.3-fpm', 'php8.2-fpm'])
+
+        def side_effect(cmd, **kwargs):
+            if cmd[:3] == ['sudo', 'systemctl', 'start'] and 'php8.3-fpm' in cmd:
+                raise sp.CalledProcessError(1, cmd)
+            result = MagicMock()
+            result.returncode = 0
+            return result
+
+        mock_run.side_effect = side_effect
+
+        result = php_manager.switch_version("8.3")
+
+        assert result is False
+        target_start_calls = [
+            c for c in mock_run.call_args_list
+            if c[0][0][:3] == ['sudo', 'systemctl', 'start'] and c[0][0][3] == 'php8.3-fpm'
+        ]
+        # Only the original (failed) start attempt — rollback must not retry the target itself
+        assert len(target_start_calls) == 1
+
+
+class TestPHPManagerGetAllPhpIniPaths:
+    """Test suite for _get_all_php_ini_paths method"""
+
+    @pytest.fixture
+    def php_manager(self, mock_config):
+        from wslaragon.services.php import PHPManager
+        return PHPManager(mock_config)
+
+    def test_returns_existing_fpm_and_cli_ini_paths(self, php_manager):
+        """Test that only existing php.ini paths across installed versions are returned"""
+        php_manager.get_installed_versions = MagicMock(return_value=['8.1', '8.3'])
+
+        def fake_exists(self):
+            return str(self) in (
+                '/etc/php/8.1/fpm/php.ini',
+                '/etc/php/8.3/cli/php.ini',
+            )
+
+        with patch.object(Path, 'exists', fake_exists):
+            paths = php_manager._get_all_php_ini_paths()
+
+        assert paths == [Path('/etc/php/8.1/fpm/php.ini'), Path('/etc/php/8.3/cli/php.ini')]
+
+    def test_returns_empty_list_when_no_versions_installed(self, php_manager):
+        """Test that no installed versions yields an empty path list"""
+        php_manager.get_installed_versions = MagicMock(return_value=[])
+
+        paths = php_manager._get_all_php_ini_paths()
+
+        assert paths == []
+
+    def test_returns_empty_list_when_no_ini_files_exist(self, php_manager):
+        """Test that missing ini files on disk are excluded from the result"""
+        php_manager.get_installed_versions = MagicMock(return_value=['8.1'])
+
+        with patch.object(Path, 'exists', return_value=False):
+            paths = php_manager._get_all_php_ini_paths()
+
+        assert paths == []
 
 
 class TestPHPManagerReadIni:
@@ -269,8 +438,92 @@ class TestPHPManagerWriteIni:
     def test_write_ini_returns_false_on_error(self, mock_file, mock_popen, php_manager):
         """Test write_ini returns False on error"""
         result = php_manager.write_ini({'memory_limit': '256M'})
-        
+
         assert result is False
+
+    @patch('wslaragon.services.php.subprocess.Popen')
+    @patch('builtins.open', create=True)
+    def test_write_ini_writes_to_given_path_not_default(self, mock_file, mock_popen, php_manager):
+        """Test write_ini writes to an explicit ini_path instead of self.php_ini_path"""
+        ini_content = "memory_limit = 128M\n"
+        mock_file.return_value.__enter__.return_value.readlines.return_value = ini_content.split('\n')
+
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = (b"", b"")
+        mock_popen.return_value = mock_process
+
+        other_path = Path('/etc/php/8.1/cli/php.ini')
+        result = php_manager.write_ini({'memory_limit': '256M'}, other_path)
+
+        assert result is True
+        mock_file.assert_any_call(other_path, 'r')
+        popen_call = mock_popen.call_args
+        assert str(other_path) in popen_call[0][0]
+
+
+class TestPHPManagerSetUploadLimits:
+    """Test suite for set_upload_limits method"""
+
+    @pytest.fixture
+    def php_manager(self, mock_config):
+        from wslaragon.services.php import PHPManager
+        return PHPManager(mock_config)
+
+    def test_set_upload_limits_writes_once_per_ini_path(self, php_manager):
+        """set_upload_limits should batch all directives into a single write_ini call per path"""
+        paths = [Path('/etc/php/8.1/fpm/php.ini'), Path('/etc/php/8.1/cli/php.ini')]
+        php_manager._get_all_php_ini_paths = MagicMock(return_value=paths)
+        php_manager.write_ini = MagicMock(return_value=True)
+        php_manager._restart_php_fpm = MagicMock(return_value=True)
+
+        results = php_manager.set_upload_limits('1G')
+
+        assert php_manager.write_ini.call_count == len(paths)
+        expected_directives = {
+            'upload_max_filesize': '1G',
+            'post_max_size': '1G',
+            'memory_limit': '1G',
+            'max_execution_time': '600',
+            'max_input_time': '600',
+        }
+        for call, path in zip(php_manager.write_ini.call_args_list, paths):
+            assert call[0][0] == expected_directives
+            assert call[0][1] == path
+        assert results == {str(p): True for p in paths}
+
+    def test_set_upload_limits_restarts_fpm(self, php_manager):
+        """set_upload_limits should restart PHP-FPM after writing"""
+        php_manager._get_all_php_ini_paths = MagicMock(return_value=[Path('/etc/php/8.1/fpm/php.ini')])
+        php_manager.write_ini = MagicMock(return_value=True)
+        php_manager._restart_php_fpm = MagicMock(return_value=True)
+
+        php_manager.set_upload_limits('512M')
+
+        php_manager._restart_php_fpm.assert_called_once()
+
+
+class TestPHPManagerUpdateConfigAllVersions:
+    """Test suite for update_config_all_versions method"""
+
+    @pytest.fixture
+    def php_manager(self, mock_config):
+        from wslaragon.services.php import PHPManager
+        return PHPManager(mock_config)
+
+    def test_update_config_all_versions_writes_via_write_ini(self, php_manager):
+        """update_config_all_versions should delegate to write_ini per path"""
+        paths = [Path('/etc/php/8.1/fpm/php.ini'), Path('/etc/php/8.2/fpm/php.ini')]
+        php_manager._get_all_php_ini_paths = MagicMock(return_value=paths)
+        php_manager.write_ini = MagicMock(return_value=True)
+        php_manager._restart_php_fpm = MagicMock(return_value=True)
+
+        results = php_manager.update_config_all_versions('memory_limit', '256M')
+
+        for call, path in zip(php_manager.write_ini.call_args_list, paths):
+            assert call[0][0] == {'memory_limit': '256M'}
+            assert call[0][1] == path
+        assert results == {str(p): True for p in paths}
 
 
 class TestPHPManagerUpdateConfig:

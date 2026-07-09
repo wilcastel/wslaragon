@@ -30,7 +30,7 @@ def site():
 
 
 @site.command()
-@click.argument('name')
+@click.argument('name', required=False)
 @click.option('--php/--no-php', default=True, help='Enable PHP')
 @click.option('--mysql/--no-mysql', default=None, help='Create MySQL database (default: True for WordPress)')
 @click.option('--ssl/--no-ssl', default=True, help='Enable SSL (default: True)')
@@ -46,10 +46,15 @@ def site():
 @click.option('--vite', help='Create Vite app with template (react, vue, svelte, vanilla, etc.)')
 @click.option('--astro', is_flag=False, flag_value='basics', default=None,
               help='Create Astro app. Use bare --astro for basics, or --astro=blog/minimal/headless')
+@click.option('--headless', 'is_headless', is_flag=True, default=False,
+              help='Create a headless site (paired frontend + backend, requires --url/--backend/--frontend)')
+@click.option('--backend', type=click.Choice(['wordpress', 'laravel']), help='Headless backend type')
+@click.option('--frontend', type=click.Choice(['sveltekit', 'sveltkit', 'astro']), help='Headless frontend type')
+@click.option('--url', 'headless_url', help='Headless site base URL/name (e.g. misitio)')
 @click.option('--postgres', 'db_type', flag_value='postgres', help='Use PostgreSQL instead of MySQL')
 @click.option('--supabase', 'db_type', flag_value='supabase', help='Use Supabase (PostgreSQL + Supabase config)')
 @click.option('--force', 'recreate', is_flag=True, default=False, help='Force recreate site (overwrite existing files)')
-def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astro, db_type, recreate):
+def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astro, is_headless, backend, frontend, headless_url, db_type, recreate):
     """Create a new site"""
     # Override defaults for Node/Python/Vite/Astro if not explicitly set
     
@@ -82,15 +87,43 @@ def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astr
         console.print("[red]✗ This command requires sudo privileges[/red]")
         return
 
-    with console.status(f"[bold green]Creating site {name}..."):
-        result = site_mgr.create_site(name, php=php, mysql=mysql, ssl=ssl, 
-                                    database_name=database, public_dir=public,
-                                    proxy_port=proxy, site_type=site_type, db_type=db_type,
-                                    recreate=recreate, vite_template=vite,
-                                    astro_template=astro)
+    if is_headless:
+        if not headless_url:
+            console.print("[red]✗ --url is required for headless sites[/red]")
+            return
+        if not backend or not frontend:
+            console.print("[red]✗ --backend and --frontend are required for headless sites[/red]")
+            return
+        if frontend == 'sveltkit':
+            frontend = 'sveltekit'
+
+        with console.status(f"[bold green]Creating headless site {headless_url}..."):
+            result = site_mgr.create_headless_site(
+                headless_url, backend=backend, frontend=frontend, ssl=ssl,
+                database_name=database, recreate=recreate
+            )
+    else:
+        if not name:
+            console.print("[red]✗ Missing argument 'NAME'[/red]")
+            return
+        with console.status(f"[bold green]Creating site {name}..."):
+            result = site_mgr.create_site(name, php=php, mysql=mysql, ssl=ssl,
+                                        database_name=database, public_dir=public,
+                                        proxy_port=proxy, site_type=site_type, db_type=db_type,
+                                        recreate=recreate, vite_template=vite,
+                                        astro_template=astro)
     
     if result['success']:
         site_info = result['site']
+        if site_info.get('headless'):
+            console.print(Panel(f"[bold green]Headless site created successfully![/bold green]\n\n"
+                               f"Frontend: {site_info['domain']} -> {site_info['document_root']}\n"
+                               f"Backend: {result['backend_site']['domain']} -> {result['backend_site']['document_root']}\n"
+                               f"Frontend Type: {site_info.get('frontend')}\n"
+                               f"Backend Type: {site_info.get('backend')}\n"
+                               f"SSL: {'Yes' if site_info['ssl'] else 'No'}",
+                               title=f"Headless Site: {site_info['name']}"))
+            return
         console.print(Panel(f"[bold green]Site created successfully![/bold green]\n\n"
                            f"Domain: {site_info['domain']}\n"
                            f"Document Root: {site_info['document_root']}\n"
@@ -172,13 +205,25 @@ def delete(name, remove_database):
     
     doc_root = site_info.get('document_root', '')
     db_name = site_info.get('database', '')
-    
+    paired_site = site_info.get('backend_site') or site_info.get('frontend_site')
+    shared_root = site_info.get('root')
+
+    if site_info.get('headless') and paired_site:
+        console.print(f"[yellow]'{name}' is one half of a headless site pair with '{paired_site}'.[/yellow]")
+        console.print(f"[yellow]Deleting it will also delete '{paired_site}'.[/yellow]")
+
     # Ask about removing files
-    remove_files = click.confirm(
-        f"[bold]Delete the project files at {doc_root}?[/bold]", 
-        default=True
-    )
-    
+    if shared_root:
+        remove_files = click.confirm(
+            f"[bold]Delete the shared project files at {shared_root}?[/bold]",
+            default=True
+        )
+    else:
+        remove_files = click.confirm(
+            f"[bold]Delete the project files at {doc_root}?[/bold]",
+            default=True
+        )
+
     if not click.confirm(f"Are you sure you want to delete site '{name}'?"):
         console.print("[yellow]Cancelled[/yellow]")
         return

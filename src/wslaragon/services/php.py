@@ -115,28 +115,62 @@ class PHPManager:
     
     def switch_version(self, version: str) -> bool:
         """Switch PHP version using update-alternatives"""
+        fpm_service = f'php{version}-fpm'
+        previously_running = []
+        previous_version = self.config.get('php.version')
+        stopped_fpm = False
+        switched_cli = False
         try:
             # Switch CLI
             subprocess.run([
                 'sudo', 'update-alternatives', '--set', 'php',
                 f'/usr/bin/php{version}'
             ], check=True)
+            switched_cli = True
 
-            # Switch FPM if exists
-            fpm_service = f'php{version}-fpm'
-            result = subprocess.run(
-                ['systemctl', 'is-active', fpm_service],
-                capture_output=True, text=True
+            # Remember what was running so we can roll back if the target FPM
+            # fails to start (e.g. its -fpm package isn't installed).
+            previously_running = self._get_php_fpm_services()
+
+            # Stop all currently running PHP-FPM services before switching
+            self._stop_php_fpm()
+            stopped_fpm = True
+
+            # Enable and start the target version unconditionally —
+            # the service may not have been active before (e.g. first switch to 8.4/8.5)
+            subprocess.run(
+                ['sudo', 'systemctl', 'enable', fpm_service],
+                check=False, capture_output=True, text=True
             )
-            if result.stdout.strip() == 'active':
-                # Stop all running PHP-FPM services dynamically
-                self._stop_php_fpm()
-                # Start the target PHP-FPM service
-                subprocess.run(['sudo', 'systemctl', 'start', fpm_service], check=True)
+            subprocess.run(
+                ['sudo', 'systemctl', 'start', fpm_service],
+                check=True, capture_output=True, text=True
+            )
+
+            # Persist the new active version so future nginx configs use the right socket
+            self.config.set('php.version', version)
+            self.config.set('php.ini_file', f'/etc/php/{version}/fpm/php.ini')
 
             return True
         except Exception as e:
             logger.debug(f"switch_version failed: {e}")
+            if stopped_fpm:
+                # Roll back: bring back whatever FPM services were running
+                # before we stopped them, so the box isn't left without FPM.
+                for service in previously_running:
+                    if service == fpm_service:
+                        continue
+                    subprocess.run(
+                        ['sudo', 'systemctl', 'start', service],
+                        check=False, capture_output=True, text=True
+                    )
+            if switched_cli and previous_version and previous_version != version:
+                # Revert the CLI switch too, so a failed switch doesn't leave
+                # `php` on the CLI pointing at a version whose FPM isn't running.
+                subprocess.run(
+                    ['sudo', 'update-alternatives', '--set', 'php', f'/usr/bin/php{previous_version}'],
+                    check=False, capture_output=True, text=True
+                )
             return False
     
     def read_ini(self) -> Dict[str, str]:
@@ -154,17 +188,18 @@ class PHPManager:
             pass
         return config
     
-    def write_ini(self, config: Dict[str, str]) -> bool:
-        """Write PHP configuration to php.ini"""
+    def write_ini(self, config: Dict[str, str], ini_path: Optional[Path] = None) -> bool:
+        """Write PHP configuration to a php.ini file (defaults to self.php_ini_path)"""
+        ini_path = ini_path or self.php_ini_path
         try:
             # Read current file
-            with open(self.php_ini_path, 'r') as f:
+            with open(ini_path, 'r') as f:
                 lines = f.readlines()
-            
+
             # Update configuration in memory
             updated_lines = []
             config_keys = set(config.keys())
-            
+
             for line in lines:
                 stripped = line.strip()
                 # Match strict key=value pairs, ignoring comments
@@ -177,24 +212,24 @@ class PHPManager:
                         updated_lines.append(line)
                 else:
                     updated_lines.append(line)
-            
+
             # Add new configurations that weren't found
             if config_keys:
                 updated_lines.append("\n; Added by WSLaragon\n")
                 for key in config_keys:
                     updated_lines.append(f"{key} = {config[key]}\n")
-            
+
             # Write back using sudo tee
-            process = subprocess.Popen(['sudo', 'tee', str(self.php_ini_path)],
+            process = subprocess.Popen(['sudo', 'tee', str(ini_path)],
                                      stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE,
                                      text=True)
             process.communicate(input=''.join(updated_lines))
-            
+
             return process.returncode == 0
         except Exception as e:
-            logger.debug(f"write_ini failed: {e}")
+            logger.debug(f"write_ini failed for {ini_path}: {e}")
             return False
 
     def update_config(self, key: str, value: str) -> bool:
@@ -272,6 +307,57 @@ class PHPManager:
             logger.debug(f"disable_extension failed: {e}")
             return False
     
+    def _get_all_php_ini_paths(self) -> List[Path]:
+        """Find php.ini paths for ALL installed PHP versions (FPM + CLI).
+
+        Returns list of paths like ['/etc/php/8.1/fpm/php.ini', '/etc/php/8.1/cli/php.ini', ...]
+        """
+        versions = self.get_installed_versions()
+        paths = []
+        for v in versions:
+            for sapi in ('fpm', 'cli'):
+                p = Path(f'/etc/php/{v}/{sapi}/php.ini')
+                if p.exists():
+                    paths.append(p)
+        return paths
+
+    def update_config_all_versions(self, key: str, value: str) -> Dict[str, bool]:
+        """Update a PHP config directive across ALL installed PHP versions.
+
+        Returns a dict mapping each ini path to success/failure.
+        """
+        results = {}
+        for ini_path in self._get_all_php_ini_paths():
+            results[str(ini_path)] = self.write_ini({key: value}, ini_path)
+        self._restart_php_fpm()
+        return results
+
+    def set_upload_limits(self, size: str) -> Dict[str, bool]:
+        """Set upload-related limits across ALL installed PHP versions.
+
+        Sets: upload_max_filesize, post_max_size, memory_limit,
+              max_execution_time, max_input_time
+
+        Args:
+            size: Human-readable size like '512M', '1G', etc.
+
+        Returns a dict mapping each ini path to success/failure.
+        """
+        directives = {
+            'upload_max_filesize': size,
+            'post_max_size': size,
+            'memory_limit': size,
+            'max_execution_time': '600',
+            'max_input_time': '600',
+        }
+
+        results = {}
+        for ini_path in self._get_all_php_ini_paths():
+            results[str(ini_path)] = self.write_ini(directives, ini_path)
+
+        self._restart_php_fpm()
+        return results
+
     def get_ini_directives(self) -> Dict[str, str]:
         """Get current PHP runtime configuration"""
         try:

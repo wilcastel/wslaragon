@@ -38,6 +38,28 @@ class TestSiteCreateCommand:
                     'proxy_port': None,
                 }
             }
+            mock_site_mgr_instance.create_headless_site.return_value = {
+                'success': True,
+                'site': {
+                    'name': 'misitio',
+                    'domain': 'misitio.test',
+                    'document_root': '/test/web/misitio/front',
+                    'web_root': '/test/web/misitio/front/dist',
+                    'php': False,
+                    'mysql': False,
+                    'ssl': True,
+                    'proxy_port': None,
+                    'headless': True,
+                    'frontend': 'astro',
+                    'backend': 'wordpress',
+                },
+                'backend_site': {
+                    'name': 'api.misitio',
+                    'domain': 'api.misitio.test',
+                    'document_root': '/test/web/misitio/back',
+                    'web_root': '/test/web/misitio/back',
+                }
+            }
             mock_site_mgr.return_value = mock_site_mgr_instance
 
             # Mock sudo check
@@ -209,6 +231,119 @@ class TestSiteCreateCommand:
         result = runner.invoke(site, ['create', 'testsite', '--wordpress'])
 
         assert result.exit_code == 0
+
+    def test_site_create_headless_calls_headless_manager(self, runner, mock_deps):
+        """Test headless site creation dispatches to create_headless_site."""
+        from wslaragon.cli.site_commands import site
+
+        result = runner.invoke(site, [
+            'create', '--headless', '--backend=wordpress', '--frontend=astro', '--url=misitio'
+        ])
+
+        assert result.exit_code == 0
+        mock_deps['site_mgr'].create_headless_site.assert_called_once_with(
+            'misitio', backend='wordpress', frontend='astro', ssl=True,
+            database_name=None, recreate=False
+        )
+
+    def test_site_create_headless_requires_url(self, runner, mock_deps):
+        """Test headless site creation requires --url."""
+        from wslaragon.cli.site_commands import site
+
+        result = runner.invoke(site, [
+            'create', '--headless', '--backend=wordpress', '--frontend=astro'
+        ])
+
+        assert result.exit_code == 0
+        assert '--url is required' in result.output
+        mock_deps['site_mgr'].create_headless_site.assert_not_called()
+
+    def test_site_create_headless_requires_backend_and_frontend(self, runner, mock_deps):
+        """Test headless site creation requires both --backend and --frontend."""
+        from wslaragon.cli.site_commands import site
+
+        result = runner.invoke(site, ['create', '--headless', '--url=misitio'])
+
+        assert result.exit_code == 0
+        assert '--backend and --frontend are required' in result.output
+        mock_deps['site_mgr'].create_headless_site.assert_not_called()
+
+    def test_site_create_missing_name_for_non_headless(self, runner, mock_deps):
+        """Test that a non-headless create without NAME reports a friendly error."""
+        from wslaragon.cli.site_commands import site
+
+        result = runner.invoke(site, ['create'])
+
+        assert result.exit_code == 0
+        assert "Missing argument 'NAME'" in result.output
+        mock_deps['site_mgr'].create_site.assert_not_called()
+
+    def test_site_create_astro_forces_php_off(self, runner, mock_deps):
+        """Test that --astro overrides --php to disable PHP (SSG sites serve dist/ directly)."""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].create_site.return_value = {
+            'success': True,
+            'site': {
+                'name': 'testsite', 'domain': 'testsite.test', 'document_root': '/test/web/testsite',
+                'php': False, 'mysql': False, 'ssl': True, 'proxy_port': None,
+            }
+        }
+
+        result = runner.invoke(site, ['create', 'testsite', '--astro', '--php'])
+
+        assert result.exit_code == 0
+        assert mock_deps['site_mgr'].create_site.call_args.kwargs['php'] is False
+
+    def test_site_create_phpmyadmin_disables_mysql_by_default(self, runner, mock_deps):
+        """Test that --phpmyadmin defaults mysql to False since it manages existing DBs."""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].create_site.return_value = {
+            'success': True,
+            'site': {
+                'name': 'testsite', 'domain': 'testsite.test', 'document_root': '/test/web/testsite',
+                'php': True, 'mysql': False, 'ssl': True, 'proxy_port': None,
+            }
+        }
+
+        result = runner.invoke(site, ['create', 'testsite', '--phpmyadmin'])
+
+        assert result.exit_code == 0
+        assert mock_deps['site_mgr'].create_site.call_args.kwargs['mysql'] is False
+
+    def test_site_create_headless_accepts_sveltkit_alias(self, runner, mock_deps):
+        """Test headless site creation accepts the common sveltkit spelling alias."""
+        from wslaragon.cli.site_commands import site
+
+        result = runner.invoke(site, [
+            'create', '--headless', '--backend=wordpress', '--frontend=sveltkit', '--url=misitio'
+        ])
+
+        assert result.exit_code == 0
+        mock_deps['site_mgr'].create_headless_site.assert_called_once_with(
+            'misitio', backend='wordpress', frontend='sveltekit', ssl=True,
+            database_name=None, recreate=False
+        )
+
+    def test_site_create_literal_name_headless_creates_normal_site(self, runner, mock_deps):
+        """A site literally named 'headless' (no --headless flag) must not be hijacked."""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].create_site.return_value = {
+            'success': True,
+            'site': {
+                'name': 'headless', 'domain': 'headless.test', 'document_root': '/var/www/headless',
+                'php': True, 'proxy_port': None, 'mysql': False, 'ssl': True,
+            }
+        }
+
+        result = runner.invoke(site, ['create', 'headless', '--no-mysql'])
+
+        assert result.exit_code == 0
+        mock_deps['site_mgr'].create_site.assert_called_once()
+        assert mock_deps['site_mgr'].create_site.call_args[0][0] == 'headless'
+        mock_deps['site_mgr'].create_headless_site.assert_not_called()
 
     def test_site_create_laravel_type(self, runner, mock_deps):
         """Test site creation with --laravel flag"""
@@ -474,8 +609,8 @@ class TestSiteDeleteCommand:
         mock_deps['site_mgr'].get_site.return_value = {'name': 'testsite'}
         mock_deps['site_mgr'].delete_site.return_value = {'success': True}
 
-        # Provide 'y' for confirmation
-        result = runner.invoke(site, ['delete', 'testsite'], input='y\n')
+        # 'delete' asks two questions: remove files?, then confirm delete?
+        result = runner.invoke(site, ['delete', 'testsite'], input='y\ny\n')
 
         assert result.exit_code == 0
 
@@ -490,15 +625,16 @@ class TestSiteDeleteCommand:
         assert 'not found' in result.output.lower()
 
     def test_site_delete_with_remove_files(self, runner, mock_deps):
-        """Test site delete with --remove-files option"""
+        """Test site delete answering 'yes' to the remove-files prompt"""
         from wslaragon.cli.site_commands import site
 
         mock_deps['site_mgr'].get_site.return_value = {'name': 'testsite'}
         mock_deps['site_mgr'].delete_site.return_value = {'success': True}
 
-        result = runner.invoke(site, ['delete', 'testsite', '--remove-files'], input='y\n')
+        result = runner.invoke(site, ['delete', 'testsite'], input='y\ny\n')
 
         assert result.exit_code == 0
+        mock_deps['site_mgr'].delete_site.assert_called_once_with('testsite', True, False)
 
     def test_site_delete_with_remove_database(self, runner, mock_deps):
         """Test site delete with --remove-database option"""
@@ -507,9 +643,25 @@ class TestSiteDeleteCommand:
         mock_deps['site_mgr'].get_site.return_value = {'name': 'testsite', 'database': 'testsite_db'}
         mock_deps['site_mgr'].delete_site.return_value = {'success': True}
 
-        result = runner.invoke(site, ['delete', 'testsite', '--remove-database'], input='y\n')
+        result = runner.invoke(site, ['delete', 'testsite', '--remove-database'], input='y\ny\n')
 
         assert result.exit_code == 0
+
+    def test_site_delete_headless_warns_about_paired_site(self, runner, mock_deps):
+        """Deleting one half of a headless pair warns the user and offers to remove the shared root."""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].get_site.return_value = {
+            'name': 'misitio', 'headless': True, 'backend_site': 'api.misitio',
+            'root': '/test/web/misitio', 'document_root': '/test/web/misitio/front',
+        }
+        mock_deps['site_mgr'].delete_site.return_value = {'success': True}
+
+        result = runner.invoke(site, ['delete', 'misitio'], input='y\ny\n')
+
+        assert result.exit_code == 0
+        assert 'api.misitio' in result.output
+        assert '/test/web/misitio' in result.output
 
     def test_site_delete_failure_path(self, runner, mock_deps):
         """Test site delete when deletion fails"""
@@ -518,9 +670,37 @@ class TestSiteDeleteCommand:
         mock_deps['site_mgr'].get_site.return_value = {'name': 'testsite'}
         mock_deps['site_mgr'].delete_site.return_value = {'success': False, 'error': 'Database error'}
 
-        result = runner.invoke(site, ['delete', 'testsite'], input='y\n')
+        result = runner.invoke(site, ['delete', 'testsite'], input='y\ny\n')
 
         assert 'failed' in result.output.lower() or 'error' in result.output.lower()
+
+    def test_site_delete_cancelled_at_final_confirmation(self, runner, mock_deps):
+        """Test that declining the final 'are you sure' prompt cancels without deleting."""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].get_site.return_value = {'name': 'testsite'}
+
+        # Answer 'y' to remove-files prompt, then 'n' to the final confirmation
+        result = runner.invoke(site, ['delete', 'testsite'], input='y\nn\n')
+
+        assert result.exit_code == 0
+        assert 'Cancelled' in result.output
+        mock_deps['site_mgr'].delete_site.assert_not_called()
+
+    def test_site_delete_keeps_files_when_declined(self, runner, mock_deps):
+        """Test that answering 'no' to the remove-files prompt keeps files on disk."""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].get_site.return_value = {
+            'name': 'testsite', 'document_root': '/test/web/testsite'
+        }
+        mock_deps['site_mgr'].delete_site.return_value = {'success': True}
+
+        result = runner.invoke(site, ['delete', 'testsite'], input='n\ny\n')
+
+        assert result.exit_code == 0
+        assert 'Files kept at: /test/web/testsite' in result.output
+        mock_deps['site_mgr'].delete_site.assert_called_once_with('testsite', False, False)
 
     def test_site_delete_requires_sudo(self, runner, mock_deps):
         """Test site delete checks sudo permissions"""
@@ -1030,6 +1210,149 @@ class TestSiteSSLCommand:
         assert result.exit_code == 0 or 'failed' in result.output.lower()
 
 
+class TestSiteApiCommands:
+    """Test suite for the 'site api add/remove/list' command group"""
+
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    @pytest.fixture
+    def mock_deps(self):
+        """Mock site api dependencies"""
+        with patch('wslaragon.cli.site_commands.Config') as mock_config, \
+             patch('wslaragon.cli.site_commands.NginxManager') as mock_nginx, \
+             patch('wslaragon.cli.site_commands.MySQLManager') as mock_mysql, \
+             patch('wslaragon.cli.site_commands.SiteManager') as mock_site_mgr, \
+             patch('wslaragon.cli.site_commands.subprocess.run') as mock_run:
+
+            mock_config_instance = MagicMock()
+            mock_config.return_value = mock_config_instance
+
+            mock_site_mgr_instance = MagicMock()
+            mock_site_mgr.return_value = mock_site_mgr_instance
+
+            mock_run.return_value = MagicMock(returncode=0)
+
+            yield {
+                'config': mock_config_instance,
+                'site_mgr': mock_site_mgr_instance,
+                'run': mock_run,
+            }
+
+    def test_api_add_success(self, runner, mock_deps):
+        """Test api add reports success and reload message"""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].add_api_proxy.return_value = {
+            'success': True, 'path': '/api', 'backend': 'https://api.dash.test'
+        }
+
+        result = runner.invoke(site, ['api', 'add', 'dash', '/api', 'https://api.dash.test'])
+
+        assert result.exit_code == 0
+        assert 'API proxy added: /api -> https://api.dash.test' in result.output
+        mock_deps['site_mgr'].add_api_proxy.assert_called_once_with('dash', '/api', 'https://api.dash.test')
+
+    def test_api_add_failure(self, runner, mock_deps):
+        """Test api add reports the error message on failure"""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].add_api_proxy.return_value = {'success': False, 'error': 'Site not found'}
+
+        result = runner.invoke(site, ['api', 'add', 'dash', '/api', 'https://api.dash.test'])
+
+        assert result.exit_code == 0
+        assert 'Failed to add API proxy: Site not found' in result.output
+
+    def test_api_add_requires_sudo(self, runner, mock_deps):
+        """Test api add checks sudo permissions before proceeding"""
+        from wslaragon.cli.site_commands import site
+        import subprocess
+
+        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
+
+        result = runner.invoke(site, ['api', 'add', 'dash', '/api', 'https://api.dash.test'])
+
+        assert 'sudo' in result.output.lower() or result.exit_code != 0
+        mock_deps['site_mgr'].add_api_proxy.assert_not_called()
+
+    def test_api_remove_success(self, runner, mock_deps):
+        """Test api remove reports success and reload message"""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].remove_api_proxy.return_value = {
+            'success': True, 'removed_path': '/api', 'removed_backend': 'https://api.dash.test'
+        }
+
+        result = runner.invoke(site, ['api', 'remove', 'dash', '/api'])
+
+        assert result.exit_code == 0
+        assert 'API proxy removed: /api (was -> https://api.dash.test)' in result.output
+        mock_deps['site_mgr'].remove_api_proxy.assert_called_once_with('dash', '/api')
+
+    def test_api_remove_failure(self, runner, mock_deps):
+        """Test api remove reports the error message on failure"""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].remove_api_proxy.return_value = {'success': False, 'error': 'Path not found'}
+
+        result = runner.invoke(site, ['api', 'remove', 'dash', '/api'])
+
+        assert result.exit_code == 0
+        assert 'Failed to remove API proxy: Path not found' in result.output
+
+    def test_api_remove_requires_sudo(self, runner, mock_deps):
+        """Test api remove checks sudo permissions before proceeding"""
+        from wslaragon.cli.site_commands import site
+        import subprocess
+
+        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
+
+        result = runner.invoke(site, ['api', 'remove', 'dash', '/api'])
+
+        assert 'sudo' in result.output.lower() or result.exit_code != 0
+        mock_deps['site_mgr'].remove_api_proxy.assert_not_called()
+
+    def test_api_list_with_proxies(self, runner, mock_deps):
+        """Test api list renders a table of configured proxies"""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].list_api_proxies.return_value = {
+            'success': True,
+            'proxies': {'/api': 'https://api.dash.test', '/auth': 'https://auth.dash.test'}
+        }
+
+        result = runner.invoke(site, ['api', 'list', 'dash'])
+
+        assert result.exit_code == 0
+        assert 'API Proxies: dash' in result.output
+        assert '/api' in result.output
+        assert 'https://api.dash.test' in result.output
+
+    def test_api_list_no_proxies(self, runner, mock_deps):
+        """Test api list reports when no proxies are configured"""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].list_api_proxies.return_value = {'success': True, 'proxies': {}}
+
+        result = runner.invoke(site, ['api', 'list', 'dash'])
+
+        assert result.exit_code == 0
+        assert 'No API proxies configured' in result.output
+
+    def test_api_list_failure(self, runner, mock_deps):
+        """Test api list reports the error message when the site lookup fails"""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].list_api_proxies.return_value = {'success': False, 'error': 'Site not found'}
+
+        result = runner.invoke(site, ['api', 'list', 'dash'])
+
+        assert result.exit_code == 0
+        assert 'Site not found' in result.output
+
+
 class TestSiteGroupCommand:
     """Test suite for site group command"""
 
@@ -1079,7 +1402,7 @@ class TestSiteGroupCommand:
         result = runner.invoke(site, ['delete', '--help'])
 
         assert result.exit_code == 0
-        assert '--remove-files' in result.output
+        # File removal is an interactive confirm prompt, not a flag
         assert '--remove-database' in result.output
 
     def test_site_public_help(self, runner):

@@ -17,6 +17,10 @@ from wslaragon.services.site_creators import (
     NodeSiteCreator,
     PythonSiteCreator,
     ViteSiteCreator,
+    SvelteKitSiteCreator,
+    AstroSiteCreator,
+    AstroHeadlessSiteCreator,
+    PhpMyAdminSiteCreator,
     DefaultSiteCreator,
     get_site_creator,
 )
@@ -1242,7 +1246,7 @@ class TestViteEdgeCases:
                         creator.create()
 
     def test_vite_creator_npm_fallback_exception(self, tmp_path, mock_config):
-        """Test ViteSiteCreator handles runuser exception gracefully"""
+        """Test ViteSiteCreator wraps a raw runuser exception into a clear scaffolding error"""
         site_base_dir = tmp_path / "sites" / "vitesite"
         site_base_dir.mkdir(parents=True, exist_ok=True)
         (site_base_dir / "package.json").write_text('{"name": "test", "scripts": {"dev": "vite"}}')
@@ -1267,7 +1271,8 @@ class TestViteEdgeCases:
             with patch('os.geteuid', return_value=0):
                 with patch.dict(os.environ, {'SUDO_USER': 'testuser'}):
                     with patch('shutil.which', return_value=None):
-                        creator.create()
+                        with pytest.raises(Exception, match="Vite scaffolding failed"):
+                            creator.create()
 
     def test_vite_creator_modifies_vite_config_js(self, tmp_path, mock_config):
         """Test ViteSiteCreator modifies vite.config.js with allowedHosts"""
@@ -1507,7 +1512,7 @@ class TestSiteCreatorEdgeCases:
         """Test that all creator classes inherit from SiteCreator"""
         from wslaragon.services.site_creators import (
             HtmlSiteCreator, WordPressSiteCreator, LaravelSiteCreator,
-            NodeSiteCreator, PythonSiteCreator, ViteSiteCreator, DefaultSiteCreator
+            NodeSiteCreator, PythonSiteCreator, ViteSiteCreator, SvelteKitSiteCreator, DefaultSiteCreator
         )
 
         # Check inheritance
@@ -1517,4 +1522,709 @@ class TestSiteCreatorEdgeCases:
         assert issubclass(NodeSiteCreator, SiteCreator)
         assert issubclass(PythonSiteCreator, SiteCreator)
         assert issubclass(ViteSiteCreator, SiteCreator)
+        assert issubclass(SvelteKitSiteCreator, SiteCreator)
         assert issubclass(DefaultSiteCreator, SiteCreator)
+
+    def test_sveltekit_factory_returns_creator(self, tmp_path, mock_config):
+        """Test factory returns SvelteKit creator for headless frontend."""
+        creator = get_site_creator(
+            'sveltekit', None, False, mock_config, 'mysite',
+            tmp_path / 'web' / 'mysite' / 'front',
+            tmp_path / 'web' / 'mysite' / 'front',
+            '.test', 3000
+        )
+
+        assert isinstance(creator, SvelteKitSiteCreator)
+
+    def test_wp_creator_uses_sanitized_custom_database_name(self, tmp_path, mock_config):
+        """Test WordPress creator uses injected DB name for subdomain-safe headless DBs."""
+        web_root = tmp_path / "web" / "mysite" / "back"
+        web_root.mkdir(parents=True, exist_ok=True)
+        creator = WordPressSiteCreator(
+            config=mock_config,
+            site_name="api.mysite",
+            web_root=web_root,
+            site_base_dir=web_root,
+            tld=".test",
+            database_name="api_mysite_db"
+        )
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            creator.create()
+
+        content = (web_root / "wp-config.php").read_text()
+        assert "api_mysite_db" in content
+        assert "api.mysite_db" not in content
+
+
+class TestSvelteKitSiteCreator:
+    """Test suite for SvelteKitSiteCreator"""
+
+    @pytest.fixture
+    def sveltekit_creator(self, tmp_path, mock_config):
+        site_base_dir = tmp_path / "sites" / "sveltekitsite"
+        web_root = tmp_path / "web" / "sveltekitsite"
+        return SvelteKitSiteCreator(
+            config=mock_config,
+            site_name="sveltekitsite",
+            web_root=web_root,
+            site_base_dir=site_base_dir,
+            tld=".test",
+            proxy_port=5174,
+        )
+
+    def test_sveltekit_creator_success_path(self, sveltekit_creator, tmp_path):
+        """Test SvelteKitSiteCreator full success path with sv create."""
+        site_base_dir = tmp_path / "sites" / "sveltekitsite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        (site_base_dir / "package.json").write_text(json.dumps({"name": "sveltekitsite"}))
+        (site_base_dir / "vite.config.ts").write_text(
+            "import { defineConfig } from 'vite'\n\nexport default defineConfig({\n  plugins: []\n})"
+        )
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+                messages = sveltekit_creator.create()
+
+        assert any("SvelteKit" in msg for msg in messages)
+        pkg = json.loads((site_base_dir / "package.json").read_text())
+        assert "5174" in pkg["scripts"]["dev"]
+        assert "5174" in pkg["scripts"]["start"]
+        assert pkg["scripts"]["build"] == "vite build"
+
+        vite_config_content = (site_base_dir / "vite.config.ts").read_text()
+        assert "allowedHosts" in vite_config_content
+        assert "sveltekitsite.test" in vite_config_content
+
+    def test_sveltekit_creator_falls_back_to_npm_create_svelte(self, sveltekit_creator, tmp_path):
+        """Test SvelteKitSiteCreator falls back when 'npx sv create' fails."""
+        site_base_dir = tmp_path / "sites" / "sveltekitsite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                mock_run.side_effect = [
+                    MagicMock(returncode=0),  # chown from _prepare_run_as_user
+                    MagicMock(returncode=1, stdout="", stderr="sv create not found"),  # primary scaffold
+                    MagicMock(returncode=0, stdout="", stderr=""),  # fallback scaffold
+                    MagicMock(returncode=0, stdout="", stderr=""),  # npm install
+                ]
+
+                messages = sveltekit_creator.create()
+
+        assert mock_run.call_count == 4
+        assert any("SvelteKit" in msg for msg in messages)
+
+    def test_sveltekit_creator_raises_when_both_scaffolds_fail(self, sveltekit_creator, tmp_path):
+        """Test SvelteKitSiteCreator raises when both scaffold commands fail."""
+        site_base_dir = tmp_path / "sites" / "sveltekitsite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                mock_run.side_effect = [
+                    MagicMock(returncode=0),  # chown
+                    MagicMock(returncode=1, stdout="", stderr="primary fail"),
+                    MagicMock(returncode=1, stdout="", stderr="fallback fail"),
+                ]
+
+                with pytest.raises(Exception, match="SvelteKit scaffolding failed"):
+                    sveltekit_creator.create()
+
+    def test_sveltekit_creator_raises_on_npm_install_failure(self, sveltekit_creator, tmp_path):
+        """Test SvelteKitSiteCreator raises when npm install fails."""
+        site_base_dir = tmp_path / "sites" / "sveltekitsite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                mock_run.side_effect = [
+                    MagicMock(returncode=0),  # chown
+                    MagicMock(returncode=0, stdout="", stderr=""),  # scaffold ok
+                    MagicMock(returncode=1, stdout="", stderr="install boom"),  # npm install
+                ]
+
+                with pytest.raises(Exception, match="SvelteKit npm install failed"):
+                    sveltekit_creator.create()
+
+    def test_sveltekit_creator_skips_vite_config_if_allowed_hosts_present(self, sveltekit_creator, tmp_path):
+        """Test SvelteKitSiteCreator does not double-modify vite.config.ts."""
+        site_base_dir = tmp_path / "sites" / "sveltekitsite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        original_content = (
+            "import { defineConfig } from 'vite'\n\n"
+            "export default defineConfig({\n  server: {\n    allowedHosts: ['x']\n  },\n  plugins: []\n})"
+        )
+        (site_base_dir / "vite.config.ts").write_text(original_content)
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+                sveltekit_creator.create()
+
+        assert (site_base_dir / "vite.config.ts").read_text() == original_content
+
+    def test_sveltekit_creator_handles_package_json_without_scripts_key(self, sveltekit_creator, tmp_path):
+        """Test SvelteKitSiteCreator adds a scripts dict when missing."""
+        site_base_dir = tmp_path / "sites" / "sveltekitsite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        (site_base_dir / "package.json").write_text(json.dumps({"name": "sveltekitsite"}))
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+                sveltekit_creator.create()
+
+        pkg = json.loads((site_base_dir / "package.json").read_text())
+        assert "scripts" in pkg
+        assert "dev" in pkg["scripts"]
+
+    def test_sveltekit_creator_wraps_calledprocesserror(self, sveltekit_creator, tmp_path):
+        """Test SvelteKitSiteCreator wraps a raw CalledProcessError."""
+        site_base_dir = tmp_path / "sites" / "sveltekitsite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+
+        def side_effect(*args, **kwargs):
+            if 'sv create' in str(args):
+                raise subprocess.CalledProcessError(1, 'npx sv create')
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch('subprocess.run', side_effect=side_effect):
+            with patch('os.geteuid', return_value=1000):
+                with pytest.raises(Exception, match="SvelteKit project creation failed"):
+                    sveltekit_creator.create()
+
+
+class TestAstroSiteCreator:
+    """Test suite for AstroSiteCreator"""
+
+    @pytest.fixture
+    def astro_creator(self, tmp_path, mock_config):
+        site_base_dir = tmp_path / "sites" / "astrosite"
+        web_root = tmp_path / "web" / "astrosite"
+        return AstroSiteCreator(
+            config=mock_config,
+            site_name="astrosite",
+            web_root=web_root,
+            site_base_dir=site_base_dir,
+            tld=".test",
+            proxy_port=4321,
+            astro_template="basics",
+        )
+
+    def test_astro_creator_success_path(self, astro_creator, tmp_path):
+        """Test AstroSiteCreator full success path."""
+        site_base_dir = tmp_path / "sites" / "astrosite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        (site_base_dir / "package.json").write_text(json.dumps({"name": "astrosite"}))
+        (site_base_dir / "dist").mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+                messages = astro_creator.create()
+
+        assert any("Astro" in msg for msg in messages)
+        assert any("basics" in msg for msg in messages)
+        pkg = json.loads((site_base_dir / "package.json").read_text())
+        assert pkg["scripts"]["dev"] == "astro dev --host"
+        assert pkg["scripts"]["build"] == "astro build"
+        assert pkg["scripts"]["preview"] == "astro preview --host"
+
+    def test_astro_creator_delegates_to_headless_for_headless_template(self, tmp_path, mock_config):
+        """Test AstroSiteCreator delegates to AstroHeadlessSiteCreator for 'headless' template."""
+        site_base_dir = tmp_path / "sites" / "astrosite"
+        web_root = tmp_path / "web" / "astrosite"
+
+        creator = AstroSiteCreator(
+            config=mock_config,
+            site_name="astrosite",
+            web_root=web_root,
+            site_base_dir=site_base_dir,
+            tld=".test",
+            proxy_port=4321,
+            astro_template="headless",
+        )
+
+        with patch('wslaragon.services.site_creators.AstroHeadlessSiteCreator') as MockHeadless:
+            MockHeadless.return_value.create.return_value = ["[green]headless ok[/green]"]
+
+            messages = creator.create()
+
+        MockHeadless.assert_called_once_with(
+            mock_config, "astrosite", web_root, site_base_dir, ".test", 4321
+        )
+        assert messages == ["[green]headless ok[/green]"]
+
+    def test_astro_creator_falls_back_to_interactive_scaffold(self, astro_creator, tmp_path):
+        """Test AstroSiteCreator retries with interactive scaffold on failure."""
+        site_base_dir = tmp_path / "sites" / "astrosite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        (site_base_dir / "dist").mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                mock_run.side_effect = [
+                    MagicMock(returncode=0),  # chown
+                    MagicMock(returncode=1, stdout="", stderr="template flag unsupported"),  # primary scaffold
+                    MagicMock(returncode=0, stdout="", stderr=""),  # interactive fallback scaffold
+                    MagicMock(returncode=0, stdout="", stderr=""),  # npm install
+                    MagicMock(returncode=0, stdout="", stderr=""),  # npm run build
+                ]
+
+                messages = astro_creator.create()
+
+        assert mock_run.call_count == 5
+        assert any("Astro" in msg for msg in messages)
+
+    def test_astro_creator_raises_when_both_scaffolds_fail(self, astro_creator, tmp_path):
+        """Test AstroSiteCreator raises when both scaffold attempts fail."""
+        site_base_dir = tmp_path / "sites" / "astrosite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                mock_run.side_effect = [
+                    MagicMock(returncode=0),  # chown
+                    MagicMock(returncode=1, stdout="", stderr="primary fail"),
+                    MagicMock(returncode=1, stdout="", stderr="fallback fail too"),
+                ]
+
+                with pytest.raises(Exception, match="Astro scaffolding failed"):
+                    astro_creator.create()
+
+    def test_astro_creator_raises_on_npm_install_failure(self, astro_creator, tmp_path):
+        """Test AstroSiteCreator raises when npm install fails."""
+        site_base_dir = tmp_path / "sites" / "astrosite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                mock_run.side_effect = [
+                    MagicMock(returncode=0),  # chown
+                    MagicMock(returncode=0, stdout="", stderr=""),  # scaffold ok
+                    MagicMock(returncode=1, stdout="", stderr="install boom"),  # npm install
+                ]
+
+                with pytest.raises(Exception, match="Astro npm install failed"):
+                    astro_creator.create()
+
+    def test_astro_creator_raises_on_build_failure(self, astro_creator, tmp_path):
+        """Test AstroSiteCreator raises when npm run build fails."""
+        site_base_dir = tmp_path / "sites" / "astrosite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                mock_run.side_effect = [
+                    MagicMock(returncode=0),  # chown
+                    MagicMock(returncode=0, stdout="", stderr=""),  # scaffold ok
+                    MagicMock(returncode=0, stdout="", stderr=""),  # npm install ok
+                    MagicMock(returncode=1, stdout="", stderr="build boom"),  # npm run build
+                ]
+
+                with pytest.raises(Exception, match="Astro build failed"):
+                    astro_creator.create()
+
+    def test_astro_creator_raises_when_dist_missing(self, astro_creator, tmp_path):
+        """Test AstroSiteCreator raises when dist/ was not produced by the build."""
+        site_base_dir = tmp_path / "sites" / "astrosite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+                with pytest.raises(Exception, match="Astro build did not produce dist/ directory"):
+                    astro_creator.create()
+
+    def test_astro_creator_wraps_calledprocesserror(self, astro_creator, tmp_path):
+        """Test AstroSiteCreator wraps a raw CalledProcessError."""
+        site_base_dir = tmp_path / "sites" / "astrosite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+
+        def side_effect(*args, **kwargs):
+            if 'npm create astro' in str(args):
+                raise subprocess.CalledProcessError(1, 'npm create astro')
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch('subprocess.run', side_effect=side_effect):
+            with patch('os.geteuid', return_value=1000):
+                with pytest.raises(Exception, match="Astro project creation failed"):
+                    astro_creator.create()
+
+
+class TestAstroHeadlessSiteCreator:
+    """Test suite for AstroHeadlessSiteCreator"""
+
+    @pytest.fixture
+    def headless_creator(self, tmp_path, mock_config):
+        site_base_dir = tmp_path / "sites" / "headlesssite"
+        web_root = tmp_path / "web" / "headlesssite"
+        return AstroHeadlessSiteCreator(
+            config=mock_config,
+            site_name="headlesssite",
+            web_root=web_root,
+            site_base_dir=site_base_dir,
+            tld=".test",
+            proxy_port=4322,
+        )
+
+    @staticmethod
+    def _build_side_effect(site_base_dir, install_rc=0, build_rc=0, create_dist=True):
+        def side_effect(*args, **kwargs):
+            cmd_str = str(args) + str(kwargs)
+            if 'rm' in cmd_str and '-rf' in cmd_str:
+                return MagicMock(returncode=0)
+            if 'build' in cmd_str:
+                if create_dist:
+                    (site_base_dir / "dist").mkdir(parents=True, exist_ok=True)
+                return MagicMock(returncode=build_rc, stdout="", stderr="build failed")
+            if 'install' in cmd_str:
+                return MagicMock(returncode=install_rc, stdout="", stderr="install failed")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        return side_effect
+
+    def test_headless_creator_success_path_writes_all_files(self, headless_creator, tmp_path):
+        """Test AstroHeadlessSiteCreator writes the full project scaffold on success."""
+        site_base_dir = tmp_path / "sites" / "headlesssite"
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                with patch.dict(os.environ, {'USER': 'testuser'}):
+                    mock_run.side_effect = self._build_side_effect(site_base_dir)
+
+                    messages = headless_creator.create()
+
+        assert (site_base_dir / ".env").exists()
+        assert (site_base_dir / ".env.example").exists()
+        assert (site_base_dir / "package.json").exists()
+        assert (site_base_dir / "astro.config.mjs").exists()
+        assert (site_base_dir / "tsconfig.json").exists()
+        assert (site_base_dir / "src" / "utils" / "api.ts").exists()
+        assert (site_base_dir / "src" / "components" / "Island.tsx").exists()
+        assert (site_base_dir / "src" / "layouts" / "BaseLayout.astro").exists()
+        assert (site_base_dir / "src" / "pages" / "index.astro").exists()
+        assert (site_base_dir / "public" / "favicon.svg").exists()
+
+        pkg = json.loads((site_base_dir / "package.json").read_text())
+        assert "4322" in pkg["scripts"]["dev"]
+
+        env_content = (site_base_dir / ".env").read_text()
+        assert "SITE_NAME=headlesssite" in env_content
+        assert "headlesssite.test" in env_content
+
+        assert any("Astro Headless project created successfully!" in msg for msg in messages)
+        assert any("Static site built" in msg for msg in messages)
+
+    def test_headless_creator_root_user_uses_runuser(self, headless_creator, tmp_path):
+        """Test AstroHeadlessSiteCreator uses runuser for install/build when running as root."""
+        site_base_dir = tmp_path / "sites" / "headlesssite"
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=0):
+                with patch.dict(os.environ, {'SUDO_USER': 'testuser'}):
+                    mock_run.side_effect = self._build_side_effect(site_base_dir)
+
+                    headless_creator.create()
+
+        calls = [str(c) for c in mock_run.call_args_list]
+        assert any('runuser' in c and 'npm install' in c for c in calls)
+        assert any('runuser' in c and 'npm run build' in c for c in calls)
+
+    def test_headless_creator_non_root_uses_plain_npm(self, headless_creator, tmp_path):
+        """Test AstroHeadlessSiteCreator calls plain npm when not root."""
+        site_base_dir = tmp_path / "sites" / "headlesssite"
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                with patch.dict(os.environ, {'USER': 'testuser'}):
+                    mock_run.side_effect = self._build_side_effect(site_base_dir)
+
+                    headless_creator.create()
+
+        calls = [c.args[0] for c in mock_run.call_args_list if c.args]
+        assert any(c == ['npm', 'install'] for c in calls)
+        assert any(c == ['npm', 'run', 'build'] for c in calls)
+
+    def test_headless_creator_removes_existing_site_base_dir(self, headless_creator, tmp_path):
+        """Test AstroHeadlessSiteCreator removes an existing site_base_dir first."""
+        site_base_dir = tmp_path / "sites" / "headlesssite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        (site_base_dir / "stale.txt").write_text("old")
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                with patch.dict(os.environ, {'USER': 'testuser'}):
+                    mock_run.side_effect = self._build_side_effect(site_base_dir)
+
+                    headless_creator.create()
+
+        calls = [str(c) for c in mock_run.call_args_list]
+        assert any('rm' in c and '-rf' in c and 'headlesssite' in c for c in calls)
+
+    def test_headless_creator_npm_install_warning_message(self, headless_creator, tmp_path):
+        """Test AstroHeadlessSiteCreator reports a warning when npm install fails."""
+        site_base_dir = tmp_path / "sites" / "headlesssite"
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                with patch.dict(os.environ, {'USER': 'testuser'}):
+                    mock_run.side_effect = self._build_side_effect(site_base_dir, install_rc=1)
+
+                    messages = headless_creator.create()
+
+        assert any("npm install had warnings" in msg for msg in messages)
+
+    def test_headless_creator_build_failure_message(self, headless_creator, tmp_path):
+        """Test AstroHeadlessSiteCreator reports a manual-build message when build fails."""
+        site_base_dir = tmp_path / "sites" / "headlesssite"
+
+        with patch('subprocess.run') as mock_run:
+            with patch('os.geteuid', return_value=1000):
+                with patch.dict(os.environ, {'USER': 'testuser'}):
+                    mock_run.side_effect = self._build_side_effect(site_base_dir, build_rc=1, create_dist=False)
+
+                    messages = headless_creator.create()
+
+        assert any("Build failed" in msg for msg in messages)
+        assert not (site_base_dir / "dist").exists()
+
+    def test_headless_creator_wraps_calledprocesserror(self, headless_creator, tmp_path):
+        """Test AstroHeadlessSiteCreator wraps a raw CalledProcessError from the initial cleanup."""
+        site_base_dir = tmp_path / "sites" / "headlesssite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+
+        def side_effect(*args, **kwargs):
+            cmd_str = str(args)
+            if 'rm' in cmd_str and '-rf' in cmd_str:
+                raise subprocess.CalledProcessError(1, 'sudo rm -rf')
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch('subprocess.run', side_effect=side_effect):
+            with patch('os.geteuid', return_value=1000):
+                with patch.dict(os.environ, {'USER': 'testuser'}):
+                    with pytest.raises(Exception, match="Astro Headless project creation failed"):
+                        headless_creator.create()
+
+
+class TestPhpMyAdminSiteCreator:
+    """Test suite for PhpMyAdminSiteCreator"""
+
+    PMA_HARDCODED_DIR = Path('/tmp/phpMyAdmin-5.2.2-all-languages')
+
+    @pytest.fixture
+    def pma_creator(self, tmp_path, mock_config):
+        web_root = tmp_path / "web" / "pmasite"
+        site_base_dir = tmp_path / "sites" / "pmasite"
+        return PhpMyAdminSiteCreator(
+            config=mock_config,
+            site_name="pmasite",
+            web_root=web_root,
+            site_base_dir=site_base_dir,
+            tld=".test",
+        )
+
+    def _cleanup_extracted_dirs(self):
+        for p in Path('/tmp').glob('phpMyAdmin-*-all-languages'):
+            shutil.rmtree(str(p), ignore_errors=True)
+
+    @staticmethod
+    def _cp_recreates_web_root_side_effect(web_root):
+        """subprocess.run is fully mocked, so the real `cp -r` never runs.
+        Recreate web_root (which the production code just rmtree'd) so the
+        subsequent real `open(web_root / "config.inc.php", 'w')` succeeds."""
+        def side_effect(*args, **kwargs):
+            cmd_str = str(args)
+            if 'cp' in cmd_str and '-r' in cmd_str:
+                web_root.mkdir(parents=True, exist_ok=True)
+            return MagicMock(returncode=0, stdout="", stderr="")
+        return side_effect
+
+    def test_pma_creator_success_installs_from_extracted_dir(self, pma_creator, tmp_path):
+        """Test PhpMyAdminSiteCreator full success path using the primary extracted dir."""
+        web_root = tmp_path / "web" / "pmasite"
+        web_root.mkdir(parents=True, exist_ok=True)
+
+        self._cleanup_extracted_dirs()
+        self.PMA_HARDCODED_DIR.mkdir(parents=True, exist_ok=True)
+        (self.PMA_HARDCODED_DIR / "index.php").write_text("<?php // pma")
+
+        try:
+            with patch('subprocess.run') as mock_run:
+                mock_run.side_effect = self._cp_recreates_web_root_side_effect(web_root)
+
+                messages = pma_creator.create()
+
+            config_path = web_root / "config.inc.php"
+            assert config_path.exists()
+            content = config_path.read_text()
+            assert "blowfish_secret" in content
+            assert "auth_type" in content
+
+            assert (web_root / "tmp").exists()
+            assert any("phpMyAdmin 5.2.2 installed successfully!" in msg for msg in messages)
+            assert any("pmasite.test" in msg for msg in messages)
+        finally:
+            self._cleanup_extracted_dirs()
+
+    def test_pma_creator_falls_back_to_gz_when_xz_download_fails(self, pma_creator, tmp_path):
+        """Test PhpMyAdminSiteCreator retries with .tar.gz when the .tar.xz download fails."""
+        web_root = tmp_path / "web" / "pmasite"
+        web_root.mkdir(parents=True, exist_ok=True)
+
+        self._cleanup_extracted_dirs()
+        self.PMA_HARDCODED_DIR.mkdir(parents=True, exist_ok=True)
+        (self.PMA_HARDCODED_DIR / "index.php").write_text("<?php // pma")
+
+        try:
+            with patch('subprocess.run') as mock_run:
+                call_count = [0]
+
+                def side_effect(*args, **kwargs):
+                    call_count[0] += 1
+                    cmd_str = str(args)
+                    if call_count[0] == 1 and '.tar.xz' in cmd_str:
+                        return MagicMock(returncode=1, stdout="", stderr="xz download failed")
+                    if 'cp' in cmd_str and '-r' in cmd_str:
+                        web_root.mkdir(parents=True, exist_ok=True)
+                    return MagicMock(returncode=0, stdout="", stderr="")
+
+                mock_run.side_effect = side_effect
+
+                messages = pma_creator.create()
+
+            assert mock_run.call_count >= 2
+            assert any("installed successfully" in msg for msg in messages)
+        finally:
+            self._cleanup_extracted_dirs()
+
+    def test_pma_creator_raises_when_both_downloads_fail(self, pma_creator, tmp_path):
+        """Test PhpMyAdminSiteCreator raises when both xz and gz downloads fail."""
+        web_root = tmp_path / "web" / "pmasite"
+        web_root.mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=1, stdout="", stderr="xz failed"),
+                MagicMock(returncode=1, stdout="", stderr="gz failed too"),
+            ]
+
+            with pytest.raises(Exception, match="Failed to download phpMyAdmin"):
+                pma_creator.create()
+
+    def test_pma_creator_raises_when_extraction_fails(self, pma_creator, tmp_path):
+        """Test PhpMyAdminSiteCreator raises when tar extraction fails."""
+        web_root = tmp_path / "web" / "pmasite"
+        web_root.mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="", stderr=""),  # wget xz ok
+                MagicMock(returncode=1, stdout="", stderr="corrupt archive"),  # tar extract fails
+            ]
+
+            with pytest.raises(Exception, match="Failed to extract phpMyAdmin"):
+                pma_creator.create()
+
+    def test_pma_creator_raises_when_extracted_dir_not_found(self, pma_creator, tmp_path):
+        """Test PhpMyAdminSiteCreator raises when no extracted directory can be located."""
+        web_root = tmp_path / "web" / "pmasite"
+        web_root.mkdir(parents=True, exist_ok=True)
+
+        self._cleanup_extracted_dirs()
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+            with pytest.raises(Exception, match="Could not find extracted phpMyAdmin directory"):
+                pma_creator.create()
+
+    def test_pma_creator_finds_extracted_dir_via_glob_fallback(self, pma_creator, tmp_path):
+        """Test PhpMyAdminSiteCreator falls back to glob when the exact version dir is absent."""
+        web_root = tmp_path / "web" / "pmasite"
+        web_root.mkdir(parents=True, exist_ok=True)
+
+        self._cleanup_extracted_dirs()
+        alt_dir = Path('/tmp/phpMyAdmin-9.9.9-all-languages')
+        alt_dir.mkdir(parents=True, exist_ok=True)
+        (alt_dir / "index.php").write_text("<?php // pma alt")
+
+        try:
+            with patch('subprocess.run') as mock_run:
+                mock_run.side_effect = self._cp_recreates_web_root_side_effect(web_root)
+
+                messages = pma_creator.create()
+
+            calls = [str(c) for c in mock_run.call_args_list]
+            assert any('9.9.9' in c for c in calls)
+            assert any("installed successfully" in msg for msg in messages)
+        finally:
+            self._cleanup_extracted_dirs()
+
+    def test_pma_creator_removes_existing_web_root(self, pma_creator, tmp_path):
+        """Test PhpMyAdminSiteCreator removes an existing web_root before install."""
+        web_root = tmp_path / "web" / "pmasite"
+        web_root.mkdir(parents=True, exist_ok=True)
+        (web_root / "old_file.txt").write_text("stale")
+
+        self._cleanup_extracted_dirs()
+        self.PMA_HARDCODED_DIR.mkdir(parents=True, exist_ok=True)
+        (self.PMA_HARDCODED_DIR / "index.php").write_text("<?php // pma")
+
+        try:
+            with patch('subprocess.run') as mock_run:
+                mock_run.side_effect = self._cp_recreates_web_root_side_effect(web_root)
+
+                pma_creator.create()
+
+            assert not (web_root / "old_file.txt").exists()
+        finally:
+            self._cleanup_extracted_dirs()
+
+
+class TestGetSiteCreatorAstroAndPhpMyAdmin:
+    """Additional factory coverage for Astro and phpMyAdmin site types"""
+
+    @pytest.fixture
+    def setup_paths(self, tmp_path):
+        return {
+            'web_root': tmp_path / "web" / "testsite",
+            'site_base_dir': tmp_path / "sites" / "testsite",
+        }
+
+    def test_get_astro_creator(self, setup_paths, mock_config):
+        """Test that get_site_creator returns AstroSiteCreator when astro_template is set"""
+        creator = get_site_creator(
+            site_type=None,
+            vite_template=None,
+            php=False,
+            config=mock_config,
+            site_name='testsite',
+            web_root=setup_paths['web_root'],
+            site_base_dir=setup_paths['site_base_dir'],
+            tld='.test',
+            astro_template='basics',
+        )
+        assert isinstance(creator, AstroSiteCreator)
+        assert creator.astro_template == 'basics'
+
+    def test_get_phpmyadmin_creator(self, setup_paths, mock_config):
+        """Test that get_site_creator returns PhpMyAdminSiteCreator for phpmyadmin type"""
+        creator = get_site_creator(
+            site_type='phpmyadmin',
+            vite_template=None,
+            php=False,
+            config=mock_config,
+            site_name='testsite',
+            web_root=setup_paths['web_root'],
+            site_base_dir=setup_paths['site_base_dir'],
+            tld='.test',
+        )
+        assert isinstance(creator, PhpMyAdminSiteCreator)
