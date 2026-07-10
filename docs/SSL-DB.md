@@ -134,6 +134,48 @@ Accedé a `https://pma.test` para gestionar todas tus bases de datos MySQL visua
 
 > **Nota**: phpMyAdmin no crea su propia base de datos — se conecta a MySQL usando las credenciales configuradas en tu `.env`.
 
+## 4. PostgreSQL y Supabase
+
+Además de MariaDB, WSLaragon soporta PostgreSQL y Supabase de forma nativa en la CLI para sitios Laravel, mediante los flags `--postgres` y `--supabase` de `site create` (combinados con `--laravel=N`):
+
+```bash
+# Laravel con PostgreSQL directo
+wslaragon site create mi-app --laravel=12 --postgres
+
+# Laravel con Supabase (PostgreSQL + API gateway estilo Supabase)
+wslaragon site create mi-app --laravel=12 --supabase
+```
+
+Esto es manejado por `LaravelSiteCreator` (`src/wslaragon/services/site_creators.py`), que genera automáticamente el `.env` de Laravel con la conexión correcta en vez de MySQL:
+
+```env
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5433
+DB_DATABASE=mi-app_db
+DB_USERNAME=postgres
+DB_PASSWORD=postgres
+```
+
+Cuando usás `--supabase`, además se agregan las variables de Supabase al `.env`:
+
+```env
+SUPABASE_URL=http://localhost:8081
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+```
+
+### Puertos por defecto
+
+| Servicio | Puerto | Config key |
+|----------|--------|------------|
+| PostgreSQL directo | 5433 | `supabase.postgres_port` |
+| Supabase API Gateway | 8081 | `supabase.api_port` |
+
+Estos valores se leen de tu `config.yaml` (con esos fallbacks si no están definidos) — no son gestionados automáticamente por WSLaragon, así que si corrés tu propio stack de Supabase/Postgres en Docker (por ejemplo con un `docker-compose.yml` propio, donde Supabase Studio suele quedar en el puerto 8080), asegurate de que los puertos coincidan con tu configuración.
+
+> **Nota**: WSLaragon no crea ni administra contenedores de Supabase/PostgreSQL — solo genera la configuración de conexión (`.env`) para que tu sitio Laravel apunte a la instancia que vos levantes por tu cuenta.
+
 ---
 
 > [!TIP]

@@ -4,38 +4,7 @@ This document contains internal development notes for WSLaragon.
 
 ## Architecture Overview
 
-### Core Components
-
-```
-wslaragon/
-├── src/wslaragon/
-│   ├── cli/              # Click-based CLI interface
-│   │   ├── main.py       # Main CLI entry point
-│   │   ├── site_commands.py   # Site management commands
-│   │   ├── service_commands.py  # Service management commands
-│   │   ├── php_commands.py   # PHP commands
-│   │   ├── mysql_commands.py # MySQL commands
-│   │   ├── ssl_commands.py   # SSL commands
-│   │   ├── node_commands.py  # Node.js/PM2 commands
-│   │   ├── nginx_commands.py  # Nginx config commands
-│   │   ├── doctor.py     # Diagnostic commands
-│   │   └── agent.py      # AI agent integration
-│   │
-│   ├── core/             # Core functionality
-│   │   ├── config.py     # Configuration management (YAML + .env)
-│   │   └── services.py   # Systemd service management
-│   │
-│   └── services/         # Service managers
-│       ├── php.py        # PHP version/extension management
-│       ├── nginx.py      # Nginx site configuration
-│       ├── mysql.py      # MySQL database management
-│       ├── sites.py      # Site lifecycle management (delegates to creators)
-│       ├── site_creators.py  # Strategy pattern: PHP/Node/Python/WordPress creators
-│       ├── ssl.py        # SSL certificate management (mkcert)
-│       ├── backup.py     # Site backup/restore
-│       └── node/
-│           └── pm2.py    # Node.js process management
-```
+Ver [docs/STRUCTURE.md](STRUCTURE.md) para el árbol de archivos completo del proyecto (incluye `services/agent/agent_manager.py` y `mcp/server.py`). Esta sección se enfoca en el flujo del patrón Strategy y notas de desarrollo.
 
 ### Configuration Flow
 
@@ -45,18 +14,26 @@ wslaragon/
 
 ### Site Creation Flow (Strategy Pattern)
 
+Las clases creadoras viven en `src/wslaragon/services/site_creators.py` (11 en total, todas heredan de `SiteCreator`):
+
 ```
 wslaragon site create <name>
   ├── Validate name (alphanumeric + hyphens/underscores)
-  ├── Select appropriate SiteCreator:
-  │   ├── PHPCreator (PHP/Laravel sites)
-  │   ├── NodeCreator (Node.js apps)
-  │   ├── PythonCreator (FastAPI/Django)
-  │   ├── WordPressCreator (auto-install WP)
-  │   └── StaticCreator (plain HTML)
-  ├── Creator.execute():
+  ├── Select appropriate SiteCreator (get_site_creator() factory):
+  │   ├── HtmlSiteCreator          — sitio HTML estático con carpetas styles/ y js/
+  │   ├── WordPressSiteCreator     — instalación automática de WordPress + MySQL
+  │   ├── LaravelSiteCreator       — Laravel (MySQL, PostgreSQL o Supabase vía --db-type)
+  │   ├── NodeSiteCreator          — app Node.js mínima para PM2
+  │   ├── PythonSiteCreator        — script Python con http.server
+  │   ├── ViteSiteCreator          — proyectos Vite (React, Vue, Svelte, etc.)
+  │   ├── SvelteKitSiteCreator     — proyecto SvelteKit preparado para PM2/Node
+  │   ├── AstroSiteCreator         — proyecto Astro (build a dist/, servido directo por Nginx)
+  │   ├── AstroHeadlessSiteCreator — frontend Astro headless/API-driven (islas Preact)
+  │   ├── PhpMyAdminSiteCreator    — instalación de phpMyAdmin
+  │   └── DefaultSiteCreator       — sitio PHP o HTML estático simple (fallback)
+  ├── Creator.create():
   │   ├── Create directory structure
-  │   ├── Generate index file (PHP/HTML/Node/Python)
+  │   ├── Generate index file / scaffold project
   │   ├── Setup database (if requested)
   │   ├── Generate SSL certificates (mkcert)
   │   ├── Create Nginx config
@@ -64,11 +41,13 @@ wslaragon site create <name>
   └── Save to sites.json
 ```
 
+`wslaragon site create --headless --backend=wordpress|laravel --frontend=sveltekit|astro --url=<name>` crea un par de sitios enlazados: frontend `<name>.test` + backend `api.<name>.test`, compartiendo un directorio raíz. Borrar cualquiera de los dos borra el par completo.
+
 ## Testing Strategy
 
 ### Test Stats
-- **Total tests**: 1,114+ (1,083 unit + 31 integration)
-- **Coverage**: 99.85%
+- **Total tests**: 1,259 (1,226 unit + 33 integration)
+- **Coverage**: 100% on unit tests
 - **Threshold**: 90% minimum to pass CI
 
 ### Unit Tests
@@ -174,7 +153,3 @@ Check that all external dependencies are mocked in tests. Common issues:
 - `subprocess.run` not mocked
 - `systemctl` commands not mocked
 - File operations not mocked
-
----
-
-*Last updated: 2026*

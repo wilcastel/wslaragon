@@ -17,8 +17,11 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 ### 🛠️ Infraestructura y Configuración
 - [x] **Gestión Dinámica de Configuración PHP**: Modificar `php.ini` desde el CLI (`memory_limit`, `upload_max_filesize`).
 - [x] **Configuración Nginx Avanzada**: Aumento del límite de subida (`client_max_body_size`) para soportar archivos grandes (50MB+).
+- [x] **Límite de Subida Global (`php upload-limit`)**: Un solo comando actualiza `upload_max_filesize`, `post_max_size`, `memory_limit` y tiempos de ejecución en TODAS las versiones de PHP instaladas (FPM + CLI) y `client_max_body_size` en Nginx (global y por sitio).
 - [x] **Correcciones de CSP y Alpine.js**: Solución de problemas de `Content Security Policy` para permitir la correcta ejecución de Alpine.js y otros scripts en la interfaz.
 - [x] **Reparación de Permisos**: Comando `fix-permissions` para solucionar problemas de escritura.
+- [x] **Rollback Automático**: Si falla la creación de un sitio a mitad de camino, se revierten los cambios parciales (Nginx, SSL, archivos) en lugar de dejar el entorno en un estado inconsistente.
+- [x] **Resolución de Home Dir bajo `sudo`**: `Config` resuelve el home real del usuario (`$SUDO_USER`) en vez del de `root` al ejecutar comandos con `sudo`, evitando rutas incorrectas como `/root/web`.
 
 ### 💻 CLI y Experiencia de Desarrollador (DX)
 - [x] **Gestión intuitiva**: Comandos simplificados para crear/eliminar sitios y servicios.
@@ -60,6 +63,10 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 
 ### Fase 5: Herramientas Frontend (En Progreso)
 - [x] **Advanced Scaffolding**: Integración con Vite para crear proyectos React, Vue, Svelte, etc. (`--vite <template>`) con configuración automática de puertos y SSL.
+- [x] **Astro SSG**: Sitios Astro estáticos compilados a `dist/` y servidos directamente por Nginx, sin proxy ni proceso corriendo (`--astro`, con templates `basics`/`blog`/`minimal`).
+- [x] **Astro Headless (Islands)**: Template `--astro=headless` para sitios API-driven con island architecture, combinado con `site api add/remove/list` para gestionar los proxies reversos hacia APIs externas.
+- [x] **Gestión de API Proxies**: Comando `site api` (add/remove/list) para configurar proxies reversos Nginx por sitio, con persistencia en `sites.json` y regeneración automática de la configuración.
+- [x] **Sitios Headless Pareados**: Flag `--headless --backend=<wordpress|laravel> --frontend=<sveltekit|astro> --url=<name>` crea un frontend y un backend/API vinculados, compartiendo una raíz de proyecto (`~/web/<name>/front` y `~/web/<name>/back`). Borrar cualquiera de las dos mitades elimina ambas (con aviso previo) y la raíz compartida.
 - [ ] **Project Templates**: Plantillas personalizadas para arrancar proyectos rápidos.
 
 ### Fase 6: Calidad y CI/CD (Completado)

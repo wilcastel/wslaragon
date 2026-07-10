@@ -53,9 +53,16 @@ wslaragon site create mi-minimal --astro=minimal
 wslaragon site create dash --astro=headless
 # Luego agregar APIs dinámicamente:
 wslaragon site api add dash /api https://api.dash.test/api
+
+# Sitio headless PAREADO (frontend + backend/API vinculados)
+wslaragon site create --headless --backend=wordpress --frontend=sveltekit --url=misitio
 ```
 
 > **Astro SSG**: El sitio se compila a HTML estático (`npm run build` → `dist/`). Nginx sirve los archivos directamente, sin proxy ni proceso corriendo. Para desarrollo con HMR, ejecutá `npm run dev` manualmente desde la carpeta del proyecto.
+
+> **⚠️ No confundir `--astro=headless` con `--headless`**: son dos features distintas.
+> - `--astro=headless` es un template de Astro: UN solo sitio con "islas" que consumen APIs externas vía `site api add` (documentado arriba).
+> - `--headless` (ver subsección siguiente) crea DOS sitios vinculados — un frontend y un backend/API completos — compartiendo una raíz de proyecto.
 
 **Opciones:**
 - `--php / --no-php`: Habilitar o deshabilitar PHP-FPM.
@@ -71,9 +78,33 @@ wslaragon site api add dash /api https://api.dash.test/api
 - `--python`: Crear sitio para Python (asigna puerto libre automáticamente iniciando en 8000, deshabilita PHP/MySQL).
 - `--vite <template>`: Crear sitio Vite usando una plantilla (react, vue, svelte, vanilla, etc). Asigna puerto Node.
 - `--astro`: Crear sitio Astro SSG. Usa template `basics` por defecto. Especificar template: `--astro=blog`, `--astro=minimal`, `--astro=headless`. Compila a estáticos en `dist/`, nginx sirve directamente sin proxy.
+- `--headless --backend=<wordpress|laravel> --frontend=<sveltekit|astro> --url=<nombre>`: Crear un par de sitios vinculados (frontend + backend/API), ver [sección 1.1](#11-sitios-headless-pareados---headless).
 - `--proxy [PORT]`: Configurar como Proxy Inverso para Apps manuales en el puerto especificado.
 - `--public`: Apuntar document root a directorio `public/`.
 - `--database`: Nombre personalizado para la base de datos.
+
+### 1.1 Sitios Headless Pareados (`--headless`)
+
+Crea un **par** de sitios vinculados: un frontend y un backend/API, cada uno con su propio dominio `.test`, compartiendo una única carpeta raíz de proyecto.
+
+```bash
+# Frontend SvelteKit + backend WordPress (API)
+wslaragon site create --headless --backend=wordpress --frontend=sveltekit --url=misitio
+
+# Frontend Astro + backend Laravel (API)
+wslaragon site create --headless --backend=laravel --frontend=astro --url=tienda
+```
+
+Esto genera:
+- **Frontend**: `misitio.test` → `~/web/misitio/front`
+- **Backend/API**: `api.misitio.test` → `~/web/misitio/back`
+
+**Opciones (requeridas para `--headless`):**
+- `--url <nombre>`: Nombre base del sitio (define ambos dominios).
+- `--backend <wordpress|laravel>`: Tecnología del backend/API.
+- `--frontend <sveltekit|astro>`: Tecnología del frontend.
+
+> **Nota**: Al usar `--headless`, no se pasa el argumento posicional `<name>` — el nombre base se define con `--url`.
 
 ### 2. Listar Sitios
 Muestra todos los sitios creados y su estado actual.
@@ -97,6 +128,8 @@ wslaragon site delete mi-web
 ```
 
 > **Nota**: El comando pregunta interactivamente si deseás eliminar los archivos del proyecto. La base de datos se elimina solo con `--remove-database`.
+
+> **⚠️ Sitios headless**: Si `<name>` es una mitad de un par headless (`--headless`), el comando avisa cuál es el sitio pareado y, al confirmar, **elimina ambas mitades** junto con la carpeta raíz compartida.
 
 ### 4. Habilitar / Deshabilitar
 Activa o desactiva un sitio en Nginx sin borrarlo.
@@ -196,7 +229,18 @@ wslaragon php config set memory_limit 512M
 wslaragon php config get post_max_size
 ```
 
-### 2. Versiones y Extensiones
+### 2. Límite de Subida Global (`upload-limit`)
+Ajusta de una sola vez `upload_max_filesize`, `post_max_size`, `memory_limit`, `max_execution_time` y `max_input_time` (600s) en **todas** las versiones de PHP instaladas (FPM y CLI), y además actualiza `client_max_body_size` en Nginx (global y en el bloque `fastcgi` de cada sitio).
+
+```bash
+# Default: 512M
+wslaragon php upload-limit
+
+# Subir el límite a 1G en todas las versiones de PHP + Nginx
+wslaragon php upload-limit 1G
+```
+
+### 3. Versiones y Extensiones
 ```bash
 # Listar versiones instaladas
 wslaragon php versions
@@ -205,8 +249,8 @@ wslaragon php versions
 wslaragon php switch 8.2
 
 # Gestionar extensiones
-wslaragon php enable_ext mbstring
-wslaragon php disable_ext xdebug
+wslaragon php enable-ext mbstring
+wslaragon php disable-ext xdebug
 ```
 
 ---
@@ -216,6 +260,9 @@ wslaragon php disable_ext xdebug
 Administra los certificados y la Autoridad de Certificación (CA).
 
 ```bash
+# Setup inicial: genera la CA raíz (rootCA.pem) si no existe
+wslaragon ssl setup
+
 # Listar certificados instalados
 wslaragon ssl list
 
@@ -225,6 +272,11 @@ wslaragon ssl generate midominio.test
 # Eliminar un certificado y limpiar hosts de Windows
 wslaragon ssl delete midominio.test
 ```
+
+> **Habilitar SSL en un sitio ya creado**: si un sitio se creó con `--no-ssl`, podés activarlo después sin recrearlo:
+> ```bash
+> wslaragon site ssl mi-web
+> ```
 
 ---
 

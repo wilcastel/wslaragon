@@ -54,8 +54,8 @@ pre-commit install
 ## Testing
 
 ### Test Statistics
-- **1,114+ tests** total (1,083 unit + 31 integration)
-- **99.85% coverage**
+- **1,259 tests** total (1,226 unit + 33 integration)
+- **100% coverage** on unit tests
 - **90% minimum** threshold to pass CI
 
 ### Running Tests
@@ -111,40 +111,7 @@ make test-cov         # With coverage (90% threshold)
 
 ## Directory Structure
 
-```
-wslaragon/
-├── src/wslaragon/      # Main source code
-│   ├── cli/           # CLI commands
-│   │   ├── main.py    # Entry point
-│   │   ├── site_commands.py
-│   │   ├── service_commands.py
-│   │   ├── php_commands.py
-│   │   ├── mysql_commands.py
-│   │   ├── ssl_commands.py
-│   │   ├── node_commands.py
-│   │   ├── nginx_commands.py
-│   │   ├── doctor.py
-│   │   └── agent.py
-│   ├── core/          # Core functionality
-│   │   ├── config.py
-│   │   └── services.py
-│   └── services/      # Service managers
-│       ├── php.py
-│       ├── nginx.py
-│       ├── mysql.py
-│       ├── sites.py
-│       ├── site_creators.py  # Strategy pattern
-│       ├── ssl.py
-│       ├── backup.py
-│       └── node/pm2.py
-├── tests/             # Test suite
-│   ├── conftest.py    # Shared fixtures
-│   ├── unit/          # Unit tests (27 files)
-│   └── integration/   # Integration tests (3 files)
-├── docs/              # Documentation
-├── scripts/           # Setup scripts
-└── .github/           # GitHub workflows
-```
+Ver [docs/STRUCTURE.md](STRUCTURE.md) para la estructura completa del proyecto.
 
 ## Getting Help
 

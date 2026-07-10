@@ -22,11 +22,11 @@ El error 502 típicamente significa que Nginx está funcionando pero el backend 
 
 ```bash
 # Verificar si hay procesos en el puerto esperado
-sudo lsof -i :8000  # Para voice.test
+sudo lsof -i :8000  # Para apps Python (ejemplo)
 sudo lsof -i :3000  # Para apps Node
 
 # Si no hay nada, iniciar la aplicación
-cd /home/wil/web/mi-proyecto
+cd ~/web/mi-proyecto
 ./start.sh
 # O
 python app.py &
@@ -47,35 +47,35 @@ sudo systemctl enable mysql
 
 ### Queue Worker de Laravel No Funciona
 
-Si usas `QUEUE_CONNECTION=database` y los jobs no se procesan:
+Si usas `QUEUE_CONNECTION=database` y los jobs no se procesan, lo más práctico es correr el queue worker como un servicio systemd propio (WSLaragon no gestiona esto automáticamente). Reemplazá `<mi-app>` por el nombre de tu sitio y `<usuario>` por tu usuario del sistema:
 
 ```bash
 # Verificar estado del servicio de queue
-sudo systemctl status readernews-worker.service
+sudo systemctl status mi-app-worker.service
 
 # Reiniciar si está fallido
-sudo systemctl restart readernews-worker.service
+sudo systemctl restart mi-app-worker.service
 
 # Ver logs del servicio
-sudo journalctl -u readernews-worker.service -f
+sudo journalctl -u mi-app-worker.service -f
 
 # Ver logs de Laravel
-tail -f /home/wil/web/readernews/storage/logs/laravel.log
+tail -f ~/web/<mi-app>/storage/logs/laravel.log
 
 # Si el servicio no existe, crear uno:
-sudo nano /etc/systemd/system/readernews-worker.service
+sudo nano /etc/systemd/system/mi-app-worker.service
 ```
 
 **Contenido típico del servicio:**
 ```ini
 [Unit]
-Description=Laravel Queue Worker (readernews)
+Description=Laravel Queue Worker (<mi-app>)
 After=network.target mysql.service
 
 [Service]
 Type=simple
-User=wil
-WorkingDirectory=/home/wil/web/readernews
+User=<usuario>
+WorkingDirectory=/home/<usuario>/web/<mi-app>
 ExecStart=/usr/bin/php artisan queue:work --daemon --sleep=3 --tries=3
 Restart=always
 RestartSec=10
@@ -87,8 +87,8 @@ WantedBy=multi-user.target
 ```bash
 # Activar el servicio
 sudo systemctl daemon-reload
-sudo systemctl enable readernews-worker
-sudo systemctl start readernews-worker
+sudo systemctl enable mi-app-worker
+sudo systemctl start mi-app-worker
 ```
 
 ---
@@ -100,7 +100,7 @@ sudo systemctl start readernews-worker
 | 502 Bad Gateway | Backend no corriendo | Iniciar la app o verificar el puerto |
 | 502 en Astro SSG | No aplica — SSG no usa backend | Verificar que `dist/` existe y nginx apunta ahí |
 | "Connection refused" (MySQL) | MySQL detenido | `sudo service mysql start` |
-| Jobs no se procesan | Queue worker detenido | `sudo systemctl restart readernews-worker` |
+| Jobs no se procesan | Queue worker detenido | `sudo systemctl restart mi-app-worker` |
 | SSL no funciona | Puerto 443 ocupado | Verificar que no haya otro nginx |
 | "Permission denied" en Nginx | Home directory sin permisos | `chmod 755 $HOME` o `wslaragon site fix-permissions mi-sitio` |
 | WordPress no puede subir archivos | Permisos incorrectos | `sudo wslaragon site fix-permissions mi-sitio` |
@@ -122,10 +122,10 @@ tail -f /var/log/nginx/error.log
 tail -f /var/log/nginx/mi-sitio.test.error.log
 
 # Logs de Laravel
-tail -f /home/wil/web/readernews/storage/logs/laravel.log
+tail -f ~/web/<mi-app>/storage/logs/laravel.log
 
 # Logs de aplicaciones Python/Node
-tail -f /home/wil/web/voice/voice.log
+tail -f ~/web/<mi-app>/<mi-app>.log
 ```
 
 ---
@@ -139,5 +139,5 @@ sudo service mysql restart
 sudo systemctl restart php8.3-fpm
 
 # Reiniciar queue workers
-sudo systemctl restart readernews-worker.service
+sudo systemctl restart mi-app-worker.service
 ```

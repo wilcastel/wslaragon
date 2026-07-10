@@ -5,7 +5,7 @@ Entender cómo se organiza WSLaragon te ayudará a personalizarlo y solucionar p
 ## 📁 Directorios del Proyecto
 
 ```text
-/home/wil/baselog/wslaragon/
+/home/<usuario>/wslaragon/
 ├── src/wslaragon/       # Código fuente principal (Python)
 │   ├── cli/             # Comandos de la terminal (Click)
 │   │   ├── main.py      # Entry point + comandos globales (completion, glossary)
@@ -36,17 +36,17 @@ Entender cómo se organiza WSLaragon te ayudará a personalizarlo y solucionar p
 │   ├── mcp/             # Model Context Protocol server
 │   │   └── server.py
 │   └── __init__.py
-├── tests/               # Test suite (1,114+ tests, 99.85% coverage)
+├── tests/               # Test suite (1,259 tests, 100% coverage en unitarios)
 │   ├── conftest.py      # Fixtures compartidos (mock_config, temp_dir, etc.)
-│   ├── unit/            # Tests unitarios (27 archivos, ~1,083 tests)
+│   ├── unit/            # Tests unitarios (25 archivos, 1,226 tests)
 │   │   ├── test_config.py
 │   │   ├── test_sites.py
 │   │   ├── test_site_creators.py
 │   │   ├── test_backup.py
 │   │   ├── test_nginx_commands.py
 │   │   ├── test_node_commands.py
-│   │   └── ...          # 21 archivos más
-│   └── integration/     # Tests de integración (3 archivos, ~31 tests)
+│   │   └── ...          # 19 archivos más
+│   └── integration/     # Tests de integración (1 archivo, 33 tests)
 │       └── test_integration.py
 ├── scripts/             # Scripts de instalación y setup
 │   └── vars.sh          # Variables compartidas entre scripts
@@ -64,14 +64,17 @@ El componente `site_creators.py` implementa el patrón Strategy para la creació
 SiteManager.create_site()
     ├── Valida el nombre del sitio
     ├── Selecciona el creador apropiado:
-    │   ├── HtmlCreator (sitios HTML estáticos con estilos y js)
-    │   ├── WordPressCreator (instalación automática WP + MySQL)
-    │   ├── PhpMyAdminCreator (gestión visual de bases de datos)
-    │   ├── LaravelCreator (Laravel con MySQL/PostgreSQL/Supabase)
-    │   ├── NodeCreator (aplicaciones Node.js)
-    │   ├── PythonCreator (aplicaciones Python/FastAPI)
-    │   ├── ViteCreator (proyectos Vite: React, Vue, Svelte, etc.)
-    │   └── DefaultCreator (sitios PHP o estáticos simples)
+    │   ├── HtmlSiteCreator (sitios HTML estáticos con estilos y js)
+    │   ├── WordPressSiteCreator (instalación automática WP + MySQL)
+    │   ├── PhpMyAdminSiteCreator (gestión visual de bases de datos)
+    │   ├── LaravelSiteCreator (Laravel con MySQL/PostgreSQL/Supabase)
+    │   ├── NodeSiteCreator (aplicaciones Node.js)
+    │   ├── PythonSiteCreator (aplicaciones Python/FastAPI)
+    │   ├── ViteSiteCreator (proyectos Vite: React, Vue, Svelte, etc.)
+    │   ├── SvelteKitSiteCreator (proyectos SvelteKit preparados para PM2/Node)
+    │   ├── AstroSiteCreator (proyectos Astro, servidos como sitio estático desde dist/)
+    │   ├── AstroHeadlessSiteCreator (frontend Astro headless/API-driven con islas Preact)
+    │   └── DefaultSiteCreator (sitios PHP o estáticos simples)
     └── El creador ejecuta los pasos específicos
 ```
 
@@ -101,4 +104,4 @@ WSLaragon guarda la persistencia y configuraciones específicas del usuario en:
 ---
 
 > [!NOTE]
-> Tus webs se crean por defecto en `~/web/` para facilitar el acceso desde Windows mediante la ruta de red `\\wsl.localhost\Ubuntu\home\wil\web`.
+> Tus webs se crean por defecto en `~/web/` para facilitar el acceso desde Windows mediante la ruta de red `\\wsl.localhost\Ubuntu\home\<usuario>\web`.

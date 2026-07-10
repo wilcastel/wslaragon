@@ -2,13 +2,14 @@
 
 🚀 **Laragon-style development environment manager for WSL2**
 
-WSLaragon es una herramienta de gestión de entorno de desarrollo estilo Laragon diseñada específicamente para WSL2. Permite gestionar fácilmente servicios web como PHP, Nginx y MySQL, con soporte para múltiples sitios, SSL con mkcert y configuración automática del archivo hosts de Windows.
+WSLaragon es una herramienta de gestión de entorno de desarrollo estilo Laragon diseñada específicamente para WSL2. Permite gestionar fácilmente servicios web como PHP, Nginx y MySQL, con soporte para múltiples sitios (WordPress, Laravel, Vite, Astro, SvelteKit, sitios headless pareados, Node.js/Python), SSL con mkcert y configuración automática del archivo hosts de Windows.
 
 ## ✨ Características
 
 ### 🐘 Gestión de PHP
 - **Múltiples versiones**: Soporta cambio entre diferentes versiones de PHP
-- **Configuración INI**: Modificación directa de php.ini
+- **Configuración INI**: Modificación directa de php.ini (`php config`)
+- **Límite de subida global**: `php upload-limit` ajusta `upload_max_filesize`, `post_max_size`, `memory_limit` y tiempos de ejecución en TODAS las versiones de PHP instaladas y en Nginx, en un solo comando
 - **Extensiones**: Activar/desactivar extensiones PHP fácilmente
 - **PHP-FPM**: Gestión del servicio PHP-FPM
 
@@ -16,39 +17,37 @@ WSLaragon es una herramienta de gestión de entorno de desarrollo estilo Laragon
 - **Virtual Hosts**: Creación y gestión automática de sitios
 - **Configuración SSL**: Soporte HTTPS con certificados válidos
 - **Recarga automática**: Aplicación de configuraciones sin reiniciar
-- **Optimización**: Configuraciones optimizadas para desarrollo
+- **Configuración global**: `nginx config` para ajustar valores como `client_max_body_size`
 
 ### 🗄️ Gestión de MySQL
-- **Base de datos**: Crear, eliminar y listar bases de datos
-- **Usuarios**: Gestión de usuarios y permisos
-- **Backup/Restore**: Copias de seguridad automáticas
-- **Optimización**: Configuraciones para desarrollo
+- **Base de datos**: Crear, eliminar y listar bases de datos (`mysql create-db`, `mysql drop-db`, `mysql databases`)
 
 ### 🌍 Gestión de Sitios
 - **Dominios .test**: Configuración automática de dominios locales
-- **Plantillas**: Soporte para diferentes tipos de proyectos
+- **Plantillas**: WordPress, Laravel, Vite, Astro (SSG o con islas API/headless), phpMyAdmin, HTML estático, Node.js, Python
+- **Sitios headless pareados**: `--headless` crea un frontend y un backend/API vinculados (ej. SvelteKit + WordPress) compartiendo una raíz de proyecto
+- **API Proxies**: `site api` gestiona proxies reversos por sitio
 - **SSL/TLS**: Certificados válidos con mkcert
 - **Windows Hosts**: Integración con el archivo hosts de Windows
+- **Backup/Restore**: Exportar e importar sitios completos (`site export` / `site import`)
 
 ### 🔐 SSL con mkcert
 - **Certificados locales**: Certificados SSL válidos para desarrollo
-- **CA local**: Autoridad certificadora local automática
+- **CA local**: Autoridad certificadora local automática (`ssl setup`)
 - **Múltiples dominios**: Soporte para certificados SAN
 - **Windows Integration**: Instalación automática en Windows
 
-### 🖥️ Interfaces
-- **CLI completa**: Interfaz de línea de comandos potente
-- **Web UI**: Panel de control web opcional
-- **API REST**: API para integración con otras herramientas
-- **Autocompletado**: Soporte para bash/zsh
+### 🩺 Diagnóstico
+- **`doctor`**: Chequeo de servicios, puertos, certificados SSL y configuraciones críticas
 
 ### 🤖 Agentes de IA
-- **Estructura estandarizada**: `.agent/` con skills, memoria y especificaciones
-- **Integración**: Comandos para inicializar e importar habilidades
+- **Estructura estandarizada**: `.agent/` con skills, memoria y especificaciones (`agent init`)
+- **Integración**: Comandos para inicializar e importar habilidades (`agent import`)
 - **Productividad**: Skills listos para usar (UI Designer, Librarian)
+- **Servidor MCP**: Usá WSLaragon desde Claude en lenguaje humano — ver [docs/MCP.md](docs/MCP.md)
 
 ### 🚀 Ecosistema Node.js
-- **Gestión de Procesos**: Integración nativa con PM2
+- **Gestión de Procesos**: Integración nativa con PM2 (`node start`, `node stop`, `node restart`, `node list`)
 - **Scaffolding**: Configuración automática de Proxy y puertos
 - **Soporte Fullstack**: Listo para Next.js, Nuxt, Python, etc.
 
@@ -60,16 +59,14 @@ WSLaragon es una herramienta de gestión de entorno de desarrollo estilo Laragon
 - **Python 3.9+** instalado
 - **Permisos sudo** para configuración de servicios
 
-### Software (Configurado para tu entorno)
-```bash
-# Tu entorno actual:
-- PHP 8.3 ✅
-- MariaDB ✅  
-- Nginx ✅
-- mkcert ✅
-- Proyectos en: /home/wil/web ✅
+### Software
+- PHP (FPM + CLI)
+- MariaDB/MySQL
+- Nginx
+- mkcert (para SSL local)
 
-# Si faltara alguna dependencia:
+Si te falta alguna dependencia:
+```bash
 sudo apt update
 sudo apt install -y python3 python3-pip python3-venv nginx mariadb-server php8.3 php8.3-fpm
 
@@ -78,54 +75,37 @@ curl -L https://dl.filippo.io/mkcert/latest?for=linux/amd64 -o mkcert
 chmod +x mkcert && sudo mv mkcert /usr/local/bin/
 ```
 
-## 🚀 Instalación para tu Entorno
+## 🚀 Instalación
 
-### Método 1: Script para tu Setup Específico
+Ver **[docs/INSTALL.md](docs/INSTALL.md)** para la guía completa (setup automático con `scripts/setup-env.sh`, instalación manual con `pip install -e .`, y verificación con `scripts/test-setup.sh`).
 
+Resumen rápido:
 ```bash
-# En tu directorio wslaragon:
-cd /home/wil/baselog/wslaragon
-chmod +x scripts/setup-env.sh
-./scripts/setup-env.sh
-```
+git clone <url-del-repo>
+cd wslaragon
 
-### Método 2: Instalación Paso a Paso
-
-```bash
-# 1. Ir al directorio del proyecto
-cd /home/wil/baselog/wslaragon
-
-# 2. Crear entorno virtual
 python3 -m venv venv
 source venv/bin/activate
-
-# 3. Instalar WSLaragon
 pip install -e .
 
-# 4. Crear configuración personalizada
 ./scripts/setup-env.sh
-
-# 5. Iniciar interfaz web
-sudo systemctl start wslaragon-web
-```
-
-### Método 3: Verificar Instalación
-
-```bash
-# Ejecutar test completo
-./scripts/test-setup.sh
 ```
 
 ## 🎖️ Uso Rápido
-
-### CLI Commands
 
 ```bash
 # Verificar instalación
 wslaragon --version
 
-# Crear un sitio
+# Crear un sitio PHP + MySQL + SSL
 wslaragon site create myproject --php --mysql --ssl
+
+# Crear un sitio WordPress (la base de datos se crea automáticamente)
+wslaragon site create mi-blog --wordpress
+
+# Crear un sitio headless pareado: frontend SvelteKit + backend WordPress
+# Genera misitio.test (frontend) y api.misitio.test (backend), raíz compartida
+wslaragon site create --headless --backend=wordpress --frontend=sveltekit --url=misitio
 
 # Listar sitios
 wslaragon site list
@@ -137,8 +117,11 @@ wslaragon service restart mysql
 
 # Gestionar PHP
 wslaragon php versions
-wslaragon php switch 8.0
+wslaragon php switch 8.2
 wslaragon php extensions
+
+# Subir el límite de tamaño de archivos en TODAS las versiones de PHP + Nginx de una vez
+wslaragon php upload-limit 1G
 
 # Gestionar MySQL
 wslaragon mysql databases
@@ -148,6 +131,9 @@ wslaragon mysql create-db myapp_db
 wslaragon ssl setup
 wslaragon ssl generate myproject.test
 
+# Diagnóstico
+wslaragon doctor
+
 # Gestionar Agentes
 wslaragon agent init
 wslaragon agent import https://url-to-skill.md
@@ -155,83 +141,6 @@ wslaragon agent import https://url-to-skill.md
 # Gestionar Node (PM2)
 wslaragon node start my-app
 wslaragon node list
-```
-
-### Web Interface
-
-Accede al panel web en **http://localhost:8080**
-
-- Dashboard con estado de servicios
-- Gestión visual de sitios
-- Configuración de PHP y MySQL
-- Logs y monitoreo
-
-## 📚 Ejemplos de Uso
-
-### Crear Sitios con Diferentes Configuraciones
-
-```bash
-# Sitio PHP simple
-wslaragon site create blog --php
-
-# Sitio Laravel con MySQL y SSL
-wslaragon site create laravel-app --php --mysql --ssl --database laravel_db
-
-# Sitio estático
-wslaragon site create portfolio --no-php --ssl
-
-# Sitio Node.js (con PM2 y puerto automático)
-wslaragon site create api-node --node
-
-# Sitio Python (con PM2 y puerto automático)
-wslaragon site create api-python --python
-```
-
-### Gestión de PHP
-
-```bash
-# Ver versiones instaladas
-wslaragon php versions
-
-# Cambiar versión
-wslaragon php switch 8.2
-
-# Configurar php.ini
-wslaragon php config set memory_limit 512M
-wslaragon php config set max_execution_time 300
-
-# Gestionar extensiones
-wslaragon php enable-ext redis
-wslaragon php disable-ext xdebug
-```
-
-### Configuración SSL
-
-```bash
-# Setup inicial de SSL
-wslaragon ssl setup
-
-# Generar certificado
-wslaragon ssl generate mysite.test
-
-# Ver certificados
-wslaragon ssl list
-```
-
-### MySQL Management
-
-```bash
-# Listar bases de datos
-wslaragon mysql databases
-
-# Crear base de datos
-wslaragon mysql create-db myapp --user myuser --password mypass
-
-# Backup
-wslaragon mysql backup myapp --path /backups/
-
-# Crear usuario
-wslaragon mysql create-user myuser --password mypass --grant "ALL PRIVILEGES ON myapp.*"
 ```
 
 ## ⚙️ Configuración
@@ -248,10 +157,11 @@ nginx:
   config_dir: "/etc/nginx"
   sites_available: "/etc/nginx/sites-available"
   sites_enabled: "/etc/nginx/sites-enabled"
+  client_max_body_size: "512M"
 
 mysql:
   data_dir: "/var/lib/mysql"
-  config_file: "/etc/mysql/my.cnf"
+  config_file: "/etc/mysql/mariadb.conf.d/50-server.cnf"
 
 ssl:
   ca_file: "~/.wslaragon/ssl/rootCA.pem"
@@ -259,173 +169,80 @@ ssl:
 
 sites:
   tld: ".test"
-  document_root: "/var/www"
+  document_root: "~/web"
 
 windows:
   hosts_file: "/mnt/c/Windows/System32/drivers/etc/hosts"
 ```
+
+> Bajo `sudo`, WSLaragon resuelve automáticamente el `document_root` al home del usuario real (`$SUDO_USER`), no al de `root`.
 
 ## 📂 Estructura de Directorios
 
 ```
 ~/.wslaragon/
 ├── config.yaml          # Configuración principal
-├── sites/               # Configuraciones de sitios
-│   └── sites.json     # Base de datos de sitios
-├── ssl/                 # Certificados SSL
-│   ├── rootCA.pem     # Certificado CA
-│   └── rootCA-key.pem # Clave CA
-└── logs/               # Logs de WSLaragon
+├── sites/                # Configuraciones de sitios
+│   └── sites.json        # Base de datos de sitios
+├── ssl/                   # Certificados SSL
+│   ├── rootCA.pem         # Certificado CA
+│   └── rootCA-key.pem     # Clave CA
+└── logs/                  # Logs de WSLaragon
 
-/var/www/
-├── myproject.test/      # Raíz del sitio
-│   └── index.php      # Archivo inicial
-├── blog.test/
-└── portfolio.test/
+~/web/
+├── myproject/             # Raíz del sitio (dominio: myproject.test)
+│   └── index.php
+├── mi-blog/
+└── misitio/               # Raíz compartida de un sitio headless
+    ├── front/              # misitio.test
+    └── back/               # api.misitio.test
 ```
 
-## 🐛 Troubleshooting
+## 🧪 Tests
 
-### Problemas Comunes
-
-#### 1. Permisos de sudo
-```bash
-# Agregar usuario a sudoers sin contraseña
-echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/nginx, /usr/sbin/service" | sudo tee /etc/sudoers.d/wslaragon
-```
-
-#### 2. Problemas con hosts de Windows
-```bash
-# Verificar si hosts es accesible
-ls -la /mnt/c/Windows/System32/drivers/etc/hosts
-
-# Si no funciona, editar manualmente en Windows
-# Ejecutar como administrador y agregar:
-# 127.0.0.1 myproject.test
-```
-
-#### 3. SSL no funciona
-```bash
-# Reinstalar CA
-mkcert -uninstall
-mkcert -install
-
-# Verificar instalación
-mkcert -CAROOT
-```
-
-#### 4. PHP-FPM no inicia
-```bash
-# Verificar configuración
-sudo nginx -t
-
-# Ver logs
-sudo journalctl -u php8.3-fpm -f
-```
-
-### Logs Importantes
+**1,259 tests** (1,226 unitarios en 25 archivos + 33 de integración) | 100% de cobertura | 90% mínimo requerido
 
 ```bash
-# Nginx
-sudo tail -f /var/log/nginx/error.log
-
-# PHP-FPM
-sudo journalctl -u php8.3-fpm -f
-
-# MySQL
-sudo journalctl -u mysql -f
-
-# WSLaragon
-tail -f ~/.wslaragon/logs/wslaragon.log
+make test              # Todos los tests
+make test-unit         # Solo unitarios
+make test-integration  # Solo integración (usa --run-slow)
+make test-cov          # Con cobertura (falla si < 90%)
 ```
 
-## 🔧 Desarrollo
+Ver **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** para más detalles del flujo de desarrollo.
 
-### Configurar para Desarrollo
+## 📚 Documentación
 
+Este README es solo la puerta de entrada. La referencia completa vive en `docs/`:
+
+- **[docs/README.md](docs/README.md)** — índice general de la documentación
+- **[docs/CLI.md](docs/CLI.md)** — manual completo de todos los comandos del CLI, con ejemplos
+- **[docs/INSTALL.md](docs/INSTALL.md)** — guía de instalación paso a paso
+- **[docs/STRUCTURE.md](docs/STRUCTURE.md)** — estructura del código y arquitectura
+- **[docs/MCP.md](docs/MCP.md)** — servidor MCP: usá WSLaragon desde Claude en lenguaje humano
+- **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** — solución de problemas comunes
+- **[docs/SSL-DB.md](docs/SSL-DB.md)** — detalles de SSL y bases de datos
+- **[docs/ROADMAP.md](docs/ROADMAP.md)** — funciones implementadas y planificadas
+- **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** — cómo contribuir al proyecto
+- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** — flujo de desarrollo, tests, linters
+- **[docs/glosario.md](docs/glosario.md)** — glosario de comandos (también disponible en vivo vía `wslaragon --glossary`)
+
+También podés consultar la ayuda interactiva en cualquier momento:
 ```bash
-# Clonar repositorio
-git clone https://github.com/your-username/wslaragon.git
-cd wslaragon
-
-# Entorno de desarrollo
-python3 -m venv venv
-source venv/bin/activate
-pip install -e ".[dev]"
-
-# O usar Makefile para tareas comunes
-make install-dev   # Instalar dependencias
-make test          # Ejecutar tests
-make lint          # Ejecutar linters
-make format        # Formatear código
-make check         # Verificar todo (lint + types + test)
-```
-
-### Pre-commit Hooks
-
-```bash
-# Instalar pre-commit para checks automáticos
-pip install pre-commit
-pre-commit install
-```
-
-### Tests
-
-**1,114+ tests** | 99.85% coverage | 90% minimum threshold
-
-```bash
-# Todos los tests
-make test
-
-# Tests unitarios
-make test-unit
-
-# Tests de integración
-make test-integration
-
-# Tests con coverage (falla si <90%)
-make test-cov
-```
-
-### Estructura del Código
-
-```
-src/wslaragon/
-├── core/               # Módulos centrales
-│   ├── config.py       # Gestión de configuración
-│   └── services.py     # Gestión de servicios systemd
-├── services/           # Gestión de servicios específicos
-│   ├── php.py          # Gestión de PHP
-│   ├── nginx.py        # Gestión de Nginx
-│   ├── mysql.py        # Gestión de MySQL
-│   ├── sites.py        # Gestión de sitios (delega a site_creators)
-│   ├── site_creators.py # Strategy pattern: creadores de sitios
-│   ├── ssl.py          # Gestión de SSL
-│   ├── backup.py       # Backup/restore de sitios
-│   └── node/           # Gestión de Node.js/PM2
-│       └── pm2.py
-├── cli/                # Interfaz CLI (Click)
-│   ├── main.py         # Entry point + comandos globales
-│   ├── site_commands.py
-│   ├── service_commands.py
-│   ├── php_commands.py
-│   ├── mysql_commands.py
-│   ├── ssl_commands.py
-│   ├── node_commands.py
-│   ├── nginx_commands.py
-│   ├── doctor.py
-│   └── agent.py
-└── mcp/                # Model Context Protocol server
-    └── server.py
+wslaragon --help
+wslaragon --glossary       # o wslaragon -g
+wslaragon glossary php     # filtrar por término
 ```
 
 ## 🤝 Contribuir
 
 1. Fork del proyecto
 2. Crear feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit cambios (`git commit -m 'Add amazing feature'`)
+3. Commit cambios (`git commit -m 'feat: add amazing feature'`)
 4. Push al branch (`git push origin feature/amazing-feature`)
 5. Abrir Pull Request
+
+Ver **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)** para más detalles.
 
 ## 📄 Licencia
 
@@ -436,14 +253,12 @@ Este proyecto está licenciado bajo la MIT License - ver el archivo [LICENSE](LI
 - **Laragon** - Inspiración inicial y concepto
 - **mkcert** - Certificados SSL locales válidos
 - **Click** - Framework CLI para Python
-- **Flask** - Framework web para el panel
 - **Rich** - CLI hermosa y moderna
 
 ## 📞 Soporte
 
 - **Issues**: [GitHub Issues](https://github.com/your-username/wslaragon/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/your-username/wslaragon/discussions)
-- **Wiki**: [Documentación extendida](https://github.com/your-username/wslaragon/wiki)
 
 ---
 
