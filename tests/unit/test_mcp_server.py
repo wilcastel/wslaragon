@@ -997,50 +997,29 @@ class TestAgentInit:
     def test_agent_init_uses_default_preset(self, mock_run, mock_mcp_module):
         """Test agent_init uses default preset"""
         from wslaragon.mcp.server import agent_init
-        
+
         mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        
+
         result = agent_init("/home/user/project")
-        
+
         assert "default" in result
-        mock_run.assert_called_once_with(["wslaragon", "agent", "init", "default", "--path", "/home/user/project"])
+        mock_run.assert_called_once_with(
+            ["wslaragon", "agent", "init", "--preset", "default", "--path", "/home/user/project"]
+        )
 
     @patch("wslaragon.mcp.server._run")
-    @patch("subprocess.run")
-    def test_agent_init_fallback_on_failure(self, mock_subprocess, mock_run, mock_mcp_module):
-        """Test agent_init falls back to cwd-based approach"""
+    def test_agent_init_returns_failure(self, mock_run, mock_mcp_module):
+        """Test agent_init reports failure from the CLI without a broken positional fallback"""
         from wslaragon.mcp.server import agent_init
-        
-        mock_run.return_value = {"success": False, "stdout": "", "stderr": ""}
-        
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stderr = ""
-        mock_result.stdout = ""
-        mock_subprocess.return_value = mock_result
-        
-        result = agent_init("/home/user/project", preset="wordpress")
-        
-        assert ".agent structure initialised" in result
-        mock_subprocess.assert_called_once()
 
-    @patch("wslaragon.mcp.server._run")
-    @patch("subprocess.run")
-    def test_agent_init_complete_failure(self, mock_subprocess, mock_run, mock_mcp_module):
-        """Test agent_init returns failure after both attempts"""
-        from wslaragon.mcp.server import agent_init
-        
-        mock_run.return_value = {"success": False, "stdout": "", "stderr": ""}
-        
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stderr = "Agent init failed"
-        mock_result.stdout = ""
-        mock_subprocess.return_value = mock_result
-        
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "Agent init failed"}
+
         result = agent_init("/home/user/project")
-        
+
         assert "agent init failed" in result
+        mock_run.assert_called_once_with(
+            ["wslaragon", "agent", "init", "--preset", "default", "--path", "/home/user/project"]
+        )
 
 
 class TestRunDoctor:
@@ -1140,8 +1119,1029 @@ class TestNewProjectPrompt:
     def test_new_project_includes_next_steps(self, mock_mcp_module):
         """Test new_project includes next steps guidance"""
         from wslaragon.mcp.server import new_project
-        
+
         result = new_project("myapp", stack="laravel")
-        
+
         assert "composer install" in result
         assert "npm install" in result
+
+
+class TestRunInteractive:
+    """Test suite for _run_interactive helper"""
+
+    @patch("subprocess.run")
+    def test_run_interactive_returns_success(self, mock_run, mock_mcp_module):
+        """Test _run_interactive returns successful result and forwards input"""
+        from wslaragon.mcp.server import _run_interactive
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "done\n"
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        result = _run_interactive(["wslaragon", "site", "delete", "foo"], "y\ny\n")
+
+        assert result["success"] is True
+        assert result["stdout"] == "done"
+        mock_run.assert_called_once_with(
+            ["wslaragon", "site", "delete", "foo"],
+            input="y\ny\n",
+            capture_output=True,
+            text=True,
+        )
+
+    @patch("subprocess.run")
+    def test_run_interactive_returns_failure(self, mock_run, mock_mcp_module):
+        """Test _run_interactive returns failed result"""
+        from wslaragon.mcp.server import _run_interactive
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        mock_result.stderr = "error\n"
+        mock_run.return_value = mock_result
+
+        result = _run_interactive(["wslaragon", "mysql", "drop-db", "foo"], "y\n")
+
+        assert result["success"] is False
+        assert result["stderr"] == "error"
+
+
+class TestCreateSiteExtras:
+    """Test suite for create_site's phpmyadmin and astro_template support"""
+
+    @patch("wslaragon.mcp.server._run")
+    @patch("wslaragon.mcp.server._load_sites")
+    def test_create_site_phpmyadmin_type(self, mock_load, mock_run, mock_mcp_module):
+        """Test create_site with --phpmyadmin flag"""
+        from wslaragon.mcp.server import create_site
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+        mock_load.return_value = {"testsite": {}}
+
+        create_site("testsite", site_type="phpmyadmin")
+
+        call_args = mock_run.call_args[0][0]
+        assert "--phpmyadmin" in call_args
+
+    @patch("wslaragon.mcp.server._run")
+    @patch("wslaragon.mcp.server._load_sites")
+    def test_create_site_with_astro_template(self, mock_load, mock_run, mock_mcp_module):
+        """Test create_site with --astro=<template> flag"""
+        from wslaragon.mcp.server import create_site
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+        mock_load.return_value = {"testsite": {}}
+
+        create_site("testsite", astro_template="blog")
+
+        call_args = mock_run.call_args[0][0]
+        assert "--astro=blog" in call_args
+
+    @patch("wslaragon.mcp.server._run")
+    @patch("wslaragon.mcp.server._load_sites")
+    def test_create_site_without_astro_template(self, mock_load, mock_run, mock_mcp_module):
+        """Test create_site omits --astro when astro_template is not given"""
+        from wslaragon.mcp.server import create_site
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+        mock_load.return_value = {"testsite": {}}
+
+        create_site("testsite")
+
+        call_args = mock_run.call_args[0][0]
+        assert not any(arg.startswith("--astro") for arg in call_args)
+
+
+class TestCreateHeadlessSite:
+    """Test suite for create_headless_site tool"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_create_headless_site_success(self, mock_run, mock_mcp_module):
+        """Test create_headless_site returns success message with both URLs"""
+        from wslaragon.mcp.server import create_headless_site
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = create_headless_site("misitio", backend="wordpress", frontend="astro")
+
+        assert "created successfully" in result
+        assert "https://misitio.test" in result
+        assert "https://api.misitio.test" in result
+        call_args = mock_run.call_args[0][0]
+        assert call_args == [
+            "wslaragon", "site", "create",
+            "--headless", "--backend=wordpress", "--frontend=astro", "--url=misitio",
+        ]
+
+    @patch("wslaragon.mcp.server._run")
+    def test_create_headless_site_failure(self, mock_run, mock_mcp_module):
+        """Test create_headless_site returns failure message"""
+        from wslaragon.mcp.server import create_headless_site
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "already exists"}
+
+        result = create_headless_site("misitio", backend="laravel", frontend="sveltekit")
+
+        assert "Failed to create headless site" in result
+        assert "already exists" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_create_headless_site_no_ssl(self, mock_run, mock_mcp_module):
+        """Test create_headless_site with ssl=False adds --no-ssl"""
+        from wslaragon.mcp.server import create_headless_site
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        create_headless_site("misitio", backend="wordpress", frontend="astro", ssl=False)
+
+        call_args = mock_run.call_args[0][0]
+        assert "--no-ssl" in call_args
+
+    @patch("wslaragon.mcp.server._run")
+    def test_create_headless_site_with_database(self, mock_run, mock_mcp_module):
+        """Test create_headless_site with custom database name"""
+        from wslaragon.mcp.server import create_headless_site
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        create_headless_site("misitio", backend="wordpress", frontend="astro", database="customdb")
+
+        call_args = mock_run.call_args[0][0]
+        assert "--database" in call_args
+        assert "customdb" in call_args
+
+    @patch("wslaragon.mcp.server._run")
+    def test_create_headless_site_with_force(self, mock_run, mock_mcp_module):
+        """Test create_headless_site with force=True adds --force"""
+        from wslaragon.mcp.server import create_headless_site
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        create_headless_site("misitio", backend="wordpress", frontend="astro", force=True)
+
+        call_args = mock_run.call_args[0][0]
+        assert "--force" in call_args
+
+
+class TestDeleteSite:
+    """Test suite for delete_site tool"""
+
+    @patch("wslaragon.mcp.server._run_interactive")
+    def test_delete_site_success_remove_files(self, mock_run_interactive, mock_mcp_module):
+        """Test delete_site with remove_files=True confirms both prompts"""
+        from wslaragon.mcp.server import delete_site
+
+        mock_run_interactive.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = delete_site("oldsite")
+
+        assert "deleted successfully" in result
+        mock_run_interactive.assert_called_once_with(
+            ["wslaragon", "site", "delete", "oldsite", "--keep-database"],
+            "y\ny\n",
+        )
+
+    @patch("wslaragon.mcp.server._run_interactive")
+    def test_delete_site_keep_files(self, mock_run_interactive, mock_mcp_module):
+        """Test delete_site with remove_files=False sends 'n' for the files prompt"""
+        from wslaragon.mcp.server import delete_site
+
+        mock_run_interactive.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        delete_site("oldsite", remove_files=False)
+
+        call_args = mock_run_interactive.call_args[0]
+        assert call_args[1] == "n\ny\n"
+
+    @patch("wslaragon.mcp.server._run_interactive")
+    def test_delete_site_remove_database(self, mock_run_interactive, mock_mcp_module):
+        """Test delete_site with remove_database=True passes --remove-database"""
+        from wslaragon.mcp.server import delete_site
+
+        mock_run_interactive.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        delete_site("oldsite", remove_database=True)
+
+        call_args = mock_run_interactive.call_args[0][0]
+        assert "--remove-database" in call_args
+
+    @patch("wslaragon.mcp.server._run_interactive")
+    def test_delete_site_failure(self, mock_run_interactive, mock_mcp_module):
+        """Test delete_site returns failure message"""
+        from wslaragon.mcp.server import delete_site
+
+        mock_run_interactive.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = delete_site("missing")
+
+        assert "Failed to delete site" in result
+        assert "not found" in result
+
+
+class TestEnableDisableSite:
+    """Test suite for enable_site and disable_site tools"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_enable_site_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import enable_site
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = enable_site("mysite")
+
+        assert "enabled" in result
+        mock_run.assert_called_once_with(["wslaragon", "site", "enable", "mysite"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_enable_site_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import enable_site
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = enable_site("mysite")
+
+        assert "Failed to enable site" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_disable_site_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import disable_site
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = disable_site("mysite")
+
+        assert "disabled" in result
+        mock_run.assert_called_once_with(["wslaragon", "site", "disable", "mysite"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_disable_site_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import disable_site
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = disable_site("mysite")
+
+        assert "Failed to disable site" in result
+
+
+class TestSetSitePublic:
+    """Test suite for set_site_public tool"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_set_site_public_enable(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import set_site_public
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = set_site_public("mysite")
+
+        assert "public/" in result
+        mock_run.assert_called_once_with(["wslaragon", "site", "public", "mysite", "--enable"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_set_site_public_disable(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import set_site_public
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = set_site_public("mysite", enable=False)
+
+        assert "./" in result
+        mock_run.assert_called_once_with(["wslaragon", "site", "public", "mysite", "--disable"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_set_site_public_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import set_site_public
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = set_site_public("mysite")
+
+        assert "Failed to update site" in result
+
+
+class TestFixSitePermissions:
+    """Test suite for fix_site_permissions tool"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_fix_site_permissions_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import fix_site_permissions
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = fix_site_permissions("mysite")
+
+        assert "Permissions fixed" in result
+        mock_run.assert_called_once_with(["wslaragon", "site", "fix-permissions", "mysite"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_fix_site_permissions_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import fix_site_permissions
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "denied"}
+
+        result = fix_site_permissions("mysite")
+
+        assert "Failed to fix permissions" in result
+
+
+class TestExportImportSite:
+    """Test suite for export_site and import_site tools"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_export_site_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import export_site
+
+        mock_run.return_value = {"success": True, "stdout": "File: backup.tar.gz", "stderr": ""}
+
+        result = export_site("mysite")
+
+        assert "exported successfully" in result
+        mock_run.assert_called_once_with(["wslaragon", "site", "export", "mysite"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_export_site_with_output(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import export_site
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        export_site("mysite", output="/tmp/backup.tar.gz")
+
+        call_args = mock_run.call_args[0][0]
+        assert "--output" in call_args
+        assert "/tmp/backup.tar.gz" in call_args
+
+    @patch("wslaragon.mcp.server._run")
+    def test_export_site_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import export_site
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = export_site("missing")
+
+        assert "Failed to export site" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_import_site_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import import_site
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = import_site("backup.tar.gz")
+
+        assert "imported successfully" in result
+        mock_run.assert_called_once_with(["wslaragon", "site", "import", "backup.tar.gz"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_import_site_with_name(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import import_site
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        import_site("backup.tar.gz", name="newsite")
+
+        call_args = mock_run.call_args[0][0]
+        assert "--name" in call_args
+        assert "newsite" in call_args
+
+    @patch("wslaragon.mcp.server._run")
+    def test_import_site_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import import_site
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "corrupt archive"}
+
+        result = import_site("bad.tar.gz")
+
+        assert "Failed to import site" in result
+
+
+class TestEnableSiteSsl:
+    """Test suite for enable_site_ssl tool"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_enable_site_ssl_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import enable_site_ssl
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = enable_site_ssl("mysite")
+
+        assert "SSL enabled" in result
+        mock_run.assert_called_once_with(["wslaragon", "site", "ssl", "mysite"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_enable_site_ssl_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import enable_site_ssl
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "already enabled"}
+
+        result = enable_site_ssl("mysite")
+
+        assert "Failed to enable SSL" in result
+
+
+class TestApiProxies:
+    """Test suite for add_api_proxy, remove_api_proxy and list_api_proxies tools"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_add_api_proxy_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import add_api_proxy
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = add_api_proxy("dash", "/api", "https://api.dash.test")
+
+        assert "API proxy added" in result
+        mock_run.assert_called_once_with(
+            ["wslaragon", "site", "api", "add", "dash", "/api", "https://api.dash.test"]
+        )
+
+    @patch("wslaragon.mcp.server._run")
+    def test_add_api_proxy_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import add_api_proxy
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = add_api_proxy("dash", "/api", "https://api.dash.test")
+
+        assert "Failed to add API proxy" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_remove_api_proxy_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import remove_api_proxy
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = remove_api_proxy("dash", "/api")
+
+        assert "API proxy removed" in result
+        mock_run.assert_called_once_with(["wslaragon", "site", "api", "remove", "dash", "/api"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_remove_api_proxy_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import remove_api_proxy
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = remove_api_proxy("dash", "/api")
+
+        assert "Failed to remove API proxy" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_api_proxies_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_api_proxies
+
+        mock_run.return_value = {"success": True, "stdout": "/api -> https://api.dash.test", "stderr": ""}
+
+        result = list_api_proxies("dash")
+
+        assert "https://api.dash.test" in result
+        mock_run.assert_called_once_with(["wslaragon", "site", "api", "list", "dash"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_api_proxies_empty(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_api_proxies
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = list_api_proxies("dash")
+
+        assert "No API proxies configured" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_api_proxies_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_api_proxies
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "site not found"}
+
+        result = list_api_proxies("missing")
+
+        assert "Failed to list API proxies" in result
+
+
+class TestPhpTools:
+    """Test suite for PHP management tools"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_php_versions_stdout(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_php_versions
+
+        mock_run.return_value = {"success": True, "stdout": "8.3\n8.1", "stderr": ""}
+
+        result = list_php_versions()
+
+        assert "8.3" in result
+        mock_run.assert_called_once_with(["wslaragon", "php", "versions"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_php_versions_fallback(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_php_versions
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = list_php_versions()
+
+        assert "No PHP versions found" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_switch_php_version_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import switch_php_version
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = switch_php_version("8.3")
+
+        assert "Switched to PHP 8.3" in result
+        mock_run.assert_called_once_with(["wslaragon", "php", "switch", "8.3"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_switch_php_version_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import switch_php_version
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "not installed"}
+
+        result = switch_php_version("9.9")
+
+        assert "Failed to switch to PHP 9.9" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_php_extensions_stdout(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_php_extensions
+
+        mock_run.return_value = {"success": True, "stdout": "gd\nredis", "stderr": ""}
+
+        result = list_php_extensions()
+
+        assert "gd" in result
+        mock_run.assert_called_once_with(["wslaragon", "php", "extensions"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_php_extensions_fallback(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_php_extensions
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = list_php_extensions()
+
+        assert "No PHP extensions found" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_enable_php_extension_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import enable_php_extension
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = enable_php_extension("gd")
+
+        assert "enabled" in result
+        mock_run.assert_called_once_with(["wslaragon", "php", "enable-ext", "gd"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_enable_php_extension_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import enable_php_extension
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = enable_php_extension("bogus")
+
+        assert "Failed to enable PHP extension" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_disable_php_extension_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import disable_php_extension
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = disable_php_extension("gd")
+
+        assert "disabled" in result
+        mock_run.assert_called_once_with(["wslaragon", "php", "disable-ext", "gd"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_disable_php_extension_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import disable_php_extension
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = disable_php_extension("bogus")
+
+        assert "Failed to disable PHP extension" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_php_config_stdout(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_php_config
+
+        mock_run.return_value = {"success": True, "stdout": "memory_limit = 256M", "stderr": ""}
+
+        result = list_php_config()
+
+        assert "memory_limit" in result
+        mock_run.assert_called_once_with(["wslaragon", "php", "config", "list"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_php_config_fallback(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_php_config
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = list_php_config()
+
+        assert "No PHP configuration found" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_get_php_config_stdout(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import get_php_config
+
+        mock_run.return_value = {"success": True, "stdout": "memory_limit = 256M", "stderr": ""}
+
+        result = get_php_config("memory_limit")
+
+        assert "256M" in result
+        mock_run.assert_called_once_with(["wslaragon", "php", "config", "get", "memory_limit"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_get_php_config_fallback(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import get_php_config
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = get_php_config("bogus_key")
+
+        assert "not found" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_set_php_config_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import set_php_config
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = set_php_config("memory_limit", "256M")
+
+        assert "updated to '256M'" in result
+        mock_run.assert_called_once_with(["wslaragon", "php", "config", "set", "memory_limit", "256M"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_set_php_config_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import set_php_config
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "denied"}
+
+        result = set_php_config("memory_limit", "256M")
+
+        assert "Failed to update PHP setting" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_set_php_upload_limit_default(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import set_php_upload_limit
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = set_php_upload_limit()
+
+        assert "512M" in result
+        mock_run.assert_called_once_with(["wslaragon", "php", "upload-limit", "512M"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_set_php_upload_limit_custom(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import set_php_upload_limit
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = set_php_upload_limit("1G")
+
+        assert "1G" in result
+        mock_run.assert_called_once_with(["wslaragon", "php", "upload-limit", "1G"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_set_php_upload_limit_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import set_php_upload_limit
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "no php installed"}
+
+        result = set_php_upload_limit()
+
+        assert "Failed to set upload limits" in result
+
+
+class TestMysqlTools:
+    """Test suite for MySQL management tools"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_mysql_databases_stdout(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_mysql_databases
+
+        mock_run.return_value = {"success": True, "stdout": "site1\nsite2", "stderr": ""}
+
+        result = list_mysql_databases()
+
+        assert "site1" in result
+        mock_run.assert_called_once_with(["wslaragon", "mysql", "databases"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_mysql_databases_fallback(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_mysql_databases
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = list_mysql_databases()
+
+        assert "No MySQL databases found" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_create_mysql_database_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import create_mysql_database
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = create_mysql_database("mydb")
+
+        assert "created" in result
+        mock_run.assert_called_once_with(["wslaragon", "mysql", "create-db", "mydb"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_create_mysql_database_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import create_mysql_database
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "already exists"}
+
+        result = create_mysql_database("mydb")
+
+        assert "Failed to create MySQL database" in result
+
+    @patch("wslaragon.mcp.server._run_interactive")
+    def test_drop_mysql_database_success(self, mock_run_interactive, mock_mcp_module):
+        from wslaragon.mcp.server import drop_mysql_database
+
+        mock_run_interactive.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = drop_mysql_database("mydb")
+
+        assert "dropped" in result
+        mock_run_interactive.assert_called_once_with(
+            ["wslaragon", "mysql", "drop-db", "mydb"], "y\n"
+        )
+
+    @patch("wslaragon.mcp.server._run_interactive")
+    def test_drop_mysql_database_failure(self, mock_run_interactive, mock_mcp_module):
+        from wslaragon.mcp.server import drop_mysql_database
+
+        mock_run_interactive.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = drop_mysql_database("missing")
+
+        assert "Failed to drop MySQL database" in result
+
+
+class TestNginxConfigTools:
+    """Test suite for Nginx configuration tools"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_nginx_config_stdout(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_nginx_config
+
+        mock_run.return_value = {"success": True, "stdout": "client_max_body_size = 128M", "stderr": ""}
+
+        result = list_nginx_config()
+
+        assert "client_max_body_size" in result
+        mock_run.assert_called_once_with(["wslaragon", "nginx", "config", "list"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_nginx_config_fallback(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_nginx_config
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = list_nginx_config()
+
+        assert "No Nginx configuration found" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_set_nginx_config_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import set_nginx_config
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = set_nginx_config("client_max_body_size", "256M")
+
+        assert "updated to '256M'" in result
+        mock_run.assert_called_once_with(
+            ["wslaragon", "nginx", "config", "set", "client_max_body_size", "256M"]
+        )
+
+    @patch("wslaragon.mcp.server._run")
+    def test_set_nginx_config_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import set_nginx_config
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "invalid key"}
+
+        result = set_nginx_config("bogus", "1")
+
+        assert "Failed to update Nginx setting" in result
+
+
+class TestSslManagementTools:
+    """Test suite for setup_ssl, delete_ssl_cert and list_ssl_certs tools"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_setup_ssl_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import setup_ssl
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = setup_ssl()
+
+        assert "root CA created" in result
+        mock_run.assert_called_once_with(["wslaragon", "ssl", "setup"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_setup_ssl_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import setup_ssl
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "permission denied"}
+
+        result = setup_ssl()
+
+        assert "Failed to create SSL root CA" in result
+
+    @patch("wslaragon.mcp.server._run_interactive")
+    def test_delete_ssl_cert_success(self, mock_run_interactive, mock_mcp_module):
+        from wslaragon.mcp.server import delete_ssl_cert
+
+        mock_run_interactive.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = delete_ssl_cert("myproject.test")
+
+        assert "deleted" in result
+        mock_run_interactive.assert_called_once_with(
+            ["wslaragon", "ssl", "delete", "myproject.test"], "y\n"
+        )
+
+    @patch("wslaragon.mcp.server._run_interactive")
+    def test_delete_ssl_cert_failure(self, mock_run_interactive, mock_mcp_module):
+        from wslaragon.mcp.server import delete_ssl_cert
+
+        mock_run_interactive.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = delete_ssl_cert("missing.test")
+
+        assert "Failed to delete SSL certificate" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_ssl_certs_stdout(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_ssl_certs
+
+        mock_run.return_value = {"success": True, "stdout": "myproject.test", "stderr": ""}
+
+        result = list_ssl_certs()
+
+        assert "myproject.test" in result
+        mock_run.assert_called_once_with(["wslaragon", "ssl", "list"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_ssl_certs_fallback(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_ssl_certs
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = list_ssl_certs()
+
+        assert "No SSL certificates found" in result
+
+
+class TestNodeProcessTools:
+    """Test suite for Node.js/PM2 process management tools"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_node_processes_stdout(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_node_processes
+
+        mock_run.return_value = {"success": True, "stdout": "myapp online", "stderr": ""}
+
+        result = list_node_processes()
+
+        assert "myapp" in result
+        mock_run.assert_called_once_with(["wslaragon", "node", "list"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_list_node_processes_fallback(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import list_node_processes
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = list_node_processes()
+
+        assert "No running Node processes found" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_start_node_process_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import start_node_process
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = start_node_process("myapp")
+
+        assert "started" in result
+        mock_run.assert_called_once_with(["wslaragon", "node", "start", "myapp"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_start_node_process_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import start_node_process
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "no entry point"}
+
+        result = start_node_process("myapp")
+
+        assert "Failed to start process" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_stop_node_process_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import stop_node_process
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = stop_node_process("myapp")
+
+        assert "stopped" in result
+        mock_run.assert_called_once_with(["wslaragon", "node", "stop", "myapp"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_stop_node_process_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import stop_node_process
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "not running"}
+
+        result = stop_node_process("myapp")
+
+        assert "Failed to stop process" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_restart_node_process_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import restart_node_process
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = restart_node_process("myapp")
+
+        assert "restarted" in result
+        mock_run.assert_called_once_with(["wslaragon", "node", "restart", "myapp"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_restart_node_process_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import restart_node_process
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = restart_node_process("myapp")
+
+        assert "Failed to restart process" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_delete_node_process_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import delete_node_process
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = delete_node_process("myapp")
+
+        assert "deleted" in result
+        mock_run.assert_called_once_with(["wslaragon", "node", "delete", "myapp"])
+
+    @patch("wslaragon.mcp.server._run")
+    def test_delete_node_process_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import delete_node_process
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "not found"}
+
+        result = delete_node_process("myapp")
+
+        assert "Failed to delete process" in result
+
+
+class TestImportSkill:
+    """Test suite for import_skill tool"""
+
+    @patch("wslaragon.mcp.server._run")
+    def test_import_skill_success(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import import_skill
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = import_skill("https://example.com/skill.zip")
+
+        assert "imported successfully" in result
+        mock_run.assert_called_once_with(
+            ["wslaragon", "agent", "import", "https://example.com/skill.zip"]
+        )
+
+    @patch("wslaragon.mcp.server._run")
+    def test_import_skill_failure(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import import_skill
+
+        mock_run.return_value = {"success": False, "stdout": "", "stderr": "404 not found"}
+
+        result = import_skill("https://example.com/bad.zip")
+
+        assert "Failed to import skill" in result
