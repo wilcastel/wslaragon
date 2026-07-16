@@ -3,7 +3,10 @@
 These tests verify that modules work together correctly -focusig on orchestration
 and interactions between components, NOT individual function behavior.
 
-Run with: pytest tests/integration/ -v --run-slow
+Run with: pytest tests/integration/ -v --run-slow --tb=short --no-cov
+
+Use --no-cov so the project-wide --cov-fail-under=90 threshold required for
+unit tests does not fail the integration suite.
 """
 import json
 import tarfile

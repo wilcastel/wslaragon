@@ -3,6 +3,7 @@ import logging
 import subprocess
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
@@ -11,6 +12,44 @@ from ..services.ssl import SSLManager
 from .site_creators import get_site_creator
 
 logger = logging.getLogger(__name__)
+
+
+class SudoKeepAlive:
+    """Context manager that keeps sudo credentials alive in a daemon thread.
+
+    Runs `sudo -n -v` at a configurable interval while the context is active.
+    This prevents long-running site creation operations from timing out due to
+    sudo credential expiration.
+    """
+
+    def __init__(self, interval: float = 15):
+        self.interval = interval
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def _refresh(self) -> None:
+        """Refresh sudo credentials without prompting for a password."""
+        try:
+            subprocess.run(['sudo', '-n', '-v'], capture_output=True, check=False)
+        except Exception as exc:
+            logger.debug(f"SudoKeepAlive refresh failed: {exc}")
+
+    def _loop(self) -> None:
+        """Loop until stopped, refreshing sudo credentials each interval."""
+        while not self._stop_event.is_set():
+            self._refresh()
+            self._stop_event.wait(self.interval)
+
+    def __enter__(self) -> "SudoKeepAlive":
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1)
 
 
 class SiteManager:
@@ -693,29 +732,32 @@ class SiteManager:
             site_name = self._normalize_site_name(site_name)
             if site_name not in self.sites:
                 return {'success': False, 'error': 'Site not found'}
-            
+
             site_info = self.sites[site_name]
             doc_root = site_info['document_root']
-            
+
             # Get current user
             current_user = os.getenv('SUDO_USER') or os.getenv('USER')
-            
+
             # Set owner to current_user:www-data
             cmd_chown = ['sudo', 'chown', '-R', f'{current_user}:www-data', doc_root]
             subprocess.run(cmd_chown, check=True, capture_output=True)
-            
-            # Set permissions to 775 (rwxrwxr-x)
-            # User: rwx (Full)
-            # Group (Web Server): rwx (Full) - Needed for writing logs, caching, storage
-            # Others: r-x (Read/Execute)
-            cmd_chmod = ['sudo', 'chmod', '-R', '775', doc_root]
-            subprocess.run(cmd_chmod, check=True, capture_output=True)
-            
+
+            # Prefer POSIX ACLs for fine-grained www-data read access on Ubuntu.
+            # Fall back to chmod when setfacl is unavailable.
+            setfacl_path = shutil.which('setfacl')
+            if setfacl_path:
+                cmd_setfacl = ['sudo', 'setfacl', '-R', '-m', 'u:www-data:rx', doc_root]
+                subprocess.run(cmd_setfacl, check=True, capture_output=True)
+            else:
+                cmd_chmod = ['sudo', 'chmod', '-R', 'o+rx', doc_root]
+                subprocess.run(cmd_chmod, check=True, capture_output=True)
+
             # Additional fix for storage folders commonly used in frameworks (Laravel, etc)
             # This ensures even new files created inherit the group 'www-data'
             cmd_guid = ['sudo', 'find', doc_root, '-type', 'd', '-exec', 'chmod', 'g+s', '{}', '+']
             subprocess.run(cmd_guid, check=True, capture_output=True)
-            
+
             # WordPress specific fix: FS_METHOD direct
             # This prevents WP from asking for FTP credentials
             wp_config = Path(doc_root) / 'wp-config.php'

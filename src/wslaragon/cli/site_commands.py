@@ -15,7 +15,7 @@ from ..core.services import ServiceManager
 from ..services.php import PHPManager
 from ..services.nginx import NginxManager
 from ..services.mysql import MySQLManager
-from ..services.sites import SiteManager
+from ..services.sites import SiteManager, SudoKeepAlive
 from ..services.ssl import SSLManager
 from ..services.backup import BackupManager
 
@@ -97,7 +97,7 @@ def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astr
         if frontend == 'sveltkit':
             frontend = 'sveltekit'
 
-        with console.status(f"[bold green]Creating headless site {headless_url}..."):
+        with SudoKeepAlive(), console.status(f"[bold green]Creating headless site {headless_url}..."):
             result = site_mgr.create_headless_site(
                 headless_url, backend=backend, frontend=frontend, ssl=ssl,
                 database_name=database, recreate=recreate
@@ -106,7 +106,7 @@ def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astr
         if not name:
             console.print("[red]✗ Missing argument 'NAME'[/red]")
             return
-        with console.status(f"[bold green]Creating site {name}..."):
+        with SudoKeepAlive(), console.status(f"[bold green]Creating site {name}..."):
             result = site_mgr.create_site(name, php=php, mysql=mysql, ssl=ssl,
                                         database_name=database, public_dir=public,
                                         proxy_port=proxy, site_type=site_type, db_type=db_type,

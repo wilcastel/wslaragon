@@ -27,6 +27,25 @@ mcp = FastMCP(
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _get_config():
+    """Lazy-load the wslaragon Config instance so tests can mock it."""
+    from wslaragon.core.config import Config
+    return Config()
+
+
+def _runtime_context(config=None) -> dict:
+    """Return runtime values an agent needs for Ubuntu operations."""
+    if config is None:
+        config = _get_config()
+    php_version = config.get("php.version", "8.3")
+    return {
+        "hosts_file": str(config.get("hosts.hosts_file", "/etc/hosts")),
+        "php_version": php_version,
+        "fpm_socket": f"/run/php/php{php_version}-fpm.sock",
+        "db_user": config.get("mysql.user", "root"),
+    }
+
+
 def _sites_file() -> Path:
     return Path.home() / ".wslaragon" / "sites" / "sites.json"
 
@@ -95,9 +114,11 @@ def resource_sites() -> str:
 @mcp.resource("wslaragon://services")
 def resource_services() -> str:
     """Current status of Nginx, PHP-FPM, MariaDB and Redis."""
+    config = _get_config()
+    php_version = config.get("php.version", "8.3")
     checks = {
         "nginx":       "nginx",
-        "php-fpm":     "php8.3-fpm",
+        "php-fpm":     f"php{php_version}-fpm",
         "mariadb":     "mariadb",
         "redis":       "redis-server",
     }
@@ -323,7 +344,14 @@ def generate_ssl(domain: str) -> str:
 
 
 @mcp.tool()
-def agent_init(project_path: str, preset: str = "default") -> str:
+def agent_init(
+    project_path: str,
+    preset: str = "default",
+    hosts_file: Optional[str] = None,
+    php_version: Optional[str] = None,
+    fpm_socket: Optional[str] = None,
+    db_user: Optional[str] = None,
+) -> str:
     """
     Initialize the .agent/skills structure inside an existing project.
 
@@ -333,10 +361,36 @@ def agent_init(project_path: str, preset: str = "default") -> str:
         Absolute path to the project directory.
     preset : str
         Skill preset. Options: 'default', 'laravel', 'wordpress', 'javascript', 'python', 'meta'.
+    hosts_file : str, optional
+        Path to the system hosts file (defaults to platform config).
+    php_version : str, optional
+        Active PHP version (defaults to config).
+    fpm_socket : str, optional
+        PHP-FPM socket path (defaults to config/php_version).
+    db_user : str, optional
+        MariaDB/MySQL user (defaults to config).
     """
+    config = _get_config()
+    context = _runtime_context(config)
+    if hosts_file:
+        context["hosts_file"] = hosts_file
+    if php_version:
+        context["php_version"] = php_version
+        context["fpm_socket"] = f"/run/php/php{php_version}-fpm.sock"
+    if fpm_socket:
+        context["fpm_socket"] = fpm_socket
+    if db_user:
+        context["db_user"] = db_user
+
     r = _run(["wslaragon", "agent", "init", "--preset", preset, "--path", project_path])
     if r["success"]:
-        return f".agent structure initialised in {project_path} with preset '{preset}'."
+        return (
+            f".agent structure initialised in {project_path} with preset '{preset}'.\n"
+            f"Runtime context: hosts_file={context['hosts_file']}, "
+            f"php_version={context['php_version']}, "
+            f"fpm_socket={context['fpm_socket']}, "
+            f"db_user={context['db_user']}"
+        )
     return f"agent init failed:\n{r['stderr'] or r['stdout']}"
 
 

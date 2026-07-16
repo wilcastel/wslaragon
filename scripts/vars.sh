@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2034
 
 # WSLaragon Shared Variables
 # Source this file in other scripts: source "$(dirname "$0")/vars.sh"
@@ -42,6 +43,9 @@ NGINX_HTTPS_PORT="443"
 MARIADB_PORT="3306"
 WEBSERVICE_PORT="8080"
 REDIS_PORT="6379"
+
+# Hosts file (native Ubuntu default; WSL2 uses windows.hosts_file)
+HOSTS_FILE="/etc/hosts"
 
 # Windows paths
 WINDOWS_HOSTS_FILE="/mnt/c/Windows/System32/drivers/etc/hosts"

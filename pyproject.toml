@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wslaragon"
 version = "1.0.0"
-description = "Laragon-style development environment manager for WSL2"
+description = "Laragon-style development environment manager for Ubuntu and WSL2"
 authors = [{name = "WSLaragon Team"}]
 license = {text = "MIT"}
 readme = "README.md"

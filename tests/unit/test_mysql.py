@@ -111,6 +111,13 @@ class TestMySQLManagerInit:
         """Test that init sets default_password from config"""
         assert mysql_manager.default_password == "test_password"
 
+    def test_init_uses_configured_mysql_user(self, mock_config_ubuntu):
+        """Test that init uses mysql.user from config when set"""
+        from wslaragon.services.mysql import MySQLManager
+        manager = MySQLManager(mock_config_ubuntu)
+        assert manager.default_user == "wslaragon"
+        assert manager.default_password == "wslaragon_pass"
+
 
 class TestMySQLManagerIsRunning:
     """Test suite for is_running method"""

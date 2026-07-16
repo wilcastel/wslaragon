@@ -19,8 +19,8 @@ check_not_root
 print_status "Updating system packages..."
 sudo apt update && sudo apt upgrade -y
 
-# Install dependencies
-print_status "Installing dependencies..."
+# Install base dependencies
+print_status "Installing base dependencies..."
 sudo apt install -y \
     curl \
     wget \
@@ -30,20 +30,71 @@ sudo apt install -y \
     python3-venv \
     nginx \
     mariadb-server \
-    "php${PHP_VERSION}" \
-    "php${PHP_VERSION}-fpm" \
-    "php${PHP_VERSION}-mysql" \
-    "php${PHP_VERSION}-curl" \
-    "php${PHP_VERSION}-gd" \
-    "php${PHP_VERSION}-mbstring" \
-    "php${PHP_VERSION}-xml" \
-    "php${PHP_VERSION}-zip" \
-    "php${PHP_VERSION}-bcmath" \
-    "php${PHP_VERSION}-intl" \
-    "php${PHP_VERSION}-soap" \
-    "php${PHP_VERSION}-xsl" \
-    "php${PHP_VERSION}-opcache" \
+    software-properties-common \
+    apt-transport-https \
+    ca-certificates \
+    gnupg \
     supervisor
+
+# Install PHP 8.5 with PPA fallback
+install_php() {
+    local pkg="php${PHP_VERSION}-fpm"
+    if apt-cache show "$pkg" &>/dev/null; then
+        print_status "PHP ${PHP_VERSION} available in default repositories."
+    else
+        print_warning "PHP ${PHP_VERSION} not found in default repositories; adding Ondrej PHP PPA..."
+        sudo add-apt-repository -y ppa:ondrej/php
+        sudo apt update
+        if ! apt-cache show "$pkg" &>/dev/null; then
+            print_error "PHP ${PHP_VERSION} could not be resolved after adding PPA."
+            print_error "Install a supported PHP version manually or use a newer Ubuntu release."
+            exit 1
+        fi
+    fi
+
+    sudo apt install -y \
+        "php${PHP_VERSION}" \
+        "php${PHP_VERSION}-fpm" \
+        "php${PHP_VERSION}-mysql" \
+        "php${PHP_VERSION}-curl" \
+        "php${PHP_VERSION}-gd" \
+        "php${PHP_VERSION}-mbstring" \
+        "php${PHP_VERSION}-xml" \
+        "php${PHP_VERSION}-zip" \
+        "php${PHP_VERSION}-bcmath" \
+        "php${PHP_VERSION}-intl" \
+        "php${PHP_VERSION}-soap" \
+        "php${PHP_VERSION}-xsl" \
+        "php${PHP_VERSION}-opcache" \
+        "php${PHP_VERSION}-sqlite3"
+}
+
+install_php
+
+# Install Composer
+print_status "Installing Composer..."
+php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+php composer-setup.php --quiet --install-dir=/tmp
+sudo mv /tmp/composer.phar /usr/local/bin/composer
+rm -f composer-setup.php
+
+# Install NVM and Node LTS
+print_status "Installing NVM and Node.js LTS..."
+export NVM_DIR="${HOME}/.nvm"
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+# shellcheck source=/dev/null
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm install --lts
+nvm use --lts
+
+# Install pnpm
+print_status "Installing pnpm..."
+corepack enable
+corepack prepare pnpm@latest --activate
+
+# Install phpMyAdmin
+print_status "Installing phpMyAdmin..."
+sudo apt install -y phpmyadmin
 
 # Install mkcert for SSL
 print_status "Installing mkcert for SSL certificates..."
@@ -103,6 +154,14 @@ print_status "Configuring MariaDB..."
 sudo systemctl enable "$MARIADB_SERVICE"
 sudo systemctl start "$MARIADB_SERVICE"
 
+# Create wslaragon database user
+print_status "Creating wslaragon MariaDB user..."
+sudo mariadb -u root <<EOF
+CREATE USER IF NOT EXISTS 'wslaragon'@'localhost' IDENTIFIED BY 'wslaragon';
+GRANT ALL PRIVILEGES ON *.* TO 'wslaragon'@'localhost' WITH GRANT OPTION;
+FLUSH PRIVILEGES;
+EOF
+
 # Secure MySQL installation
 print_warning "Please secure your MySQL installation:"
 echo "Run: sudo mysql_secure_installation"
@@ -127,9 +186,12 @@ echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/nginx, /usr/sbin/service, /bin/systemc
 print_status "Installing shell completion..."
 # Add to .bashrc
 if ! grep -q 'wslaragon completion' ~/.bashrc; then
-    echo "" >> ~/.bashrc
-    echo "# WSLaragon completion" >> ~/.bashrc
-    echo 'eval "$(_WSLARAGON_COMPLETE=bash_source wslaragon)"' >> ~/.bashrc
+    {
+        echo ""
+        echo "# WSLaragon completion"
+        # shellcheck disable=SC2016
+        echo 'eval "$(_WSLARAGON_COMPLETE=bash_source wslaragon)"'
+    } >> ~/.bashrc
 fi
 
 # Start services
@@ -161,6 +223,7 @@ echo ""
 
 # Verify installation
 print_status "Verifying installation..."
+# shellcheck source=/dev/null
 source ~/.bashrc
 wslaragon --version
 nginx -t

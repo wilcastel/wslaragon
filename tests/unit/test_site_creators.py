@@ -222,6 +222,29 @@ class TestWordPressSiteCreator:
         content = (web_root / "wp-config.php").read_text()
         assert "test_password" in content
 
+    def test_site_creator_uses_configured_db_user(self, tmp_path, mock_config_ubuntu):
+        """Test that WordPressSiteCreator uses configured DB_USER instead of root"""
+        web_root = tmp_path / "web" / "wpsite"
+        web_root.mkdir(parents=True, exist_ok=True)
+        site_base_dir = tmp_path / "sites" / "wpsite"
+
+        creator = WordPressSiteCreator(
+            config=mock_config_ubuntu,
+            site_name="wpsite",
+            web_root=web_root,
+            site_base_dir=site_base_dir,
+            tld=".test"
+        )
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            creator.create()
+
+        content = (web_root / "wp-config.php").read_text()
+        assert "define( 'DB_USER', 'wslaragon' );" in content
+        assert "define( 'DB_USER', 'root' );" not in content
+        assert "wslaragon_pass" in content
+
     def test_wp_creator_creates_index_php(self, wp_creator, tmp_path):
         """Test that WordPressSiteCreator creates index.php"""
         web_root = tmp_path / "web" / "wpsite"
@@ -371,6 +394,29 @@ class TestLaravelSiteCreator:
 
         env_content = (site_base_dir / ".env").read_text()
         assert "DB_CONNECTION=mysql" in env_content
+
+    def test_laravel_creator_uses_configured_db_user(self, tmp_path, mock_config_ubuntu):
+        """Test that LaravelSiteCreator uses configured DB_USER/DB_PASSWORD for MySQL"""
+        site_base_dir = tmp_path / "sites" / "laravelsite"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        web_root = tmp_path / "web" / "laravelsite" / "public"
+
+        creator = LaravelSiteCreator(
+            config=mock_config_ubuntu,
+            site_name="laravelsite",
+            web_root=web_root,
+            site_base_dir=site_base_dir,
+            tld=".test"
+        )
+
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+            creator.create()
+
+        env_content = (site_base_dir / ".env").read_text()
+        assert "DB_USERNAME=wslaragon" in env_content
+        assert "DB_PASSWORD=wslaragon_pass" in env_content
+        assert "DB_USERNAME=root" not in env_content
 
     def test_laravel_creator_with_postgres(self, tmp_path, mock_config):
         """Test that LaravelSiteCreator configures PostgreSQL correctly"""

@@ -29,7 +29,7 @@ console = Console()
 @click.option('--glossary', '-g', is_flag=True, help='Show full command glossary')
 @click.pass_context
 def cli(ctx, glossary):
-    """WSLaragon - Laragon-style development environment manager for WSL2"""
+    """WSLaragon - Laragon-style development environment manager for Ubuntu and WSL2"""
     if glossary:
         from rich.markdown import Markdown
         root_dir = Path(__file__).resolve().parent.parent.parent.parent

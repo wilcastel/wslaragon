@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+from wslaragon.core.platform import Platform
+
 class Config:
     def __init__(self):
         # Load environment variables from .env file in project root
@@ -36,11 +38,20 @@ class Config:
     
     def _load_config(self):
         default_document_root = os.getenv('DOCUMENT_ROOT', str(self.home_dir / "web"))
-        
+
+        # Platform-aware defaults: WSL2 keeps the original values,
+        # native Ubuntu uses PHP 8.5 and a dedicated MariaDB user.
+        if Platform.is_wsl():
+            php_version = "8.3"
+            mysql_user_default = "root"
+        else:
+            php_version = "8.5"
+            mysql_user_default = "wslaragon"
+
         default_config = {
             "php": {
-                "version": "8.3",
-                "ini_file": "/etc/php/8.3/fpm/php.ini",
+                "version": php_version,
+                "ini_file": f"/etc/php/{php_version}/fpm/php.ini",
                 "extensions_dir": "/usr/lib/php/20230831"
             },
             "nginx": {
@@ -52,7 +63,7 @@ class Config:
             "mysql": {
                 "data_dir": "/var/lib/mysql",
                 "config_file": "/etc/mysql/mariadb.conf.d/50-server.cnf",
-                "user": os.getenv('DB_USER', 'root'),
+                "user": os.getenv('DB_USER', mysql_user_default),
                 "password": os.getenv('DB_PASSWORD', '')
             },
             "ssl": {
@@ -63,6 +74,9 @@ class Config:
             "sites": {
                 "tld": ".test",
                 "document_root": default_document_root
+            },
+            "hosts": {
+                "hosts_file": "/etc/hosts"
             },
             "windows": {
                 "hosts_file": "/mnt/c/Windows/System32/drivers/etc/hosts"

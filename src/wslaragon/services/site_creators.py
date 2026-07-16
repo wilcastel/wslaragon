@@ -248,6 +248,7 @@ class WordPressSiteCreator(SiteCreator):
         web_root = self.web_root
         site_name = self.site_name
         database_name = self.database_name or f"{site_name.replace('.', '_')}_db"
+        db_user = self.config.get('mysql.user', 'root')
         db_password = self.config.get('mysql.password')
         current_user = os.getenv('SUDO_USER') or os.getenv('USER')
         
@@ -274,7 +275,7 @@ class WordPressSiteCreator(SiteCreator):
  * The base configuration for WordPress
  */
 define( 'DB_NAME', '{database_name}' );
-define( 'DB_USER', 'root' );
+define( 'DB_USER', '{db_user}' );
 define( 'DB_PASSWORD', '{db_password}' );
 define( 'DB_HOST', 'localhost' );
 define( 'DB_CHARSET', 'utf8mb4' );
@@ -437,6 +438,7 @@ SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 """
         else:
+            db_user = self.config.get('mysql.user', 'root')
             db_password = self.config.get('mysql.password')
             env_content = f"""APP_NAME="{site_name}"
 APP_ENV=local
@@ -451,7 +453,7 @@ DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_DATABASE={database_name}
-DB_USERNAME=root
+DB_USERNAME={db_user}
 DB_PASSWORD={db_password}
 
 BROADCAST_DRIVER=log

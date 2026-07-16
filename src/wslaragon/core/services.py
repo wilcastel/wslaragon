@@ -5,11 +5,15 @@ from typing import Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 class ServiceManager:
-    def __init__(self):
+    def __init__(self, config=None):
+        php_version = '8.3'
+        if config is not None:
+            php_version = config.get('php.version', '8.3')
+
         self.services = {
             'nginx': {'service': 'nginx', 'port': 80},
             'mysql': {'service': 'mariadb', 'port': 3306},
-            'php-fpm': {'service': 'php8.3-fpm', 'port': 9000},
+            'php-fpm': {'service': f'php{php_version}-fpm', 'port': 9000},
             'redis': {'service': 'redis-server', 'port': 6379}
         }
     

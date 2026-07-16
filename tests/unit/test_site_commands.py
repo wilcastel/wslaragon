@@ -232,6 +232,38 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
+    @patch('wslaragon.cli.site_commands.SudoKeepAlive')
+    def test_site_create_uses_sudo_keep_alive(self, mock_keep_alive, runner, mock_deps):
+        """Site create must wrap the operation in SudoKeepAlive context manager."""
+        from wslaragon.cli.site_commands import site
+
+        mock_keep_alive.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_keep_alive.return_value.__exit__ = MagicMock(return_value=False)
+
+        result = runner.invoke(site, ['create', 'testsite'])
+
+        assert result.exit_code == 0
+        mock_keep_alive.assert_called_once()
+        mock_keep_alive.return_value.__enter__.assert_called_once()
+        mock_keep_alive.return_value.__exit__.assert_called_once()
+
+    @patch('wslaragon.cli.site_commands.SudoKeepAlive')
+    def test_site_create_headless_uses_sudo_keep_alive(self, mock_keep_alive, runner, mock_deps):
+        """Headless site create must also wrap the operation in SudoKeepAlive."""
+        from wslaragon.cli.site_commands import site
+
+        mock_keep_alive.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_keep_alive.return_value.__exit__ = MagicMock(return_value=False)
+
+        result = runner.invoke(site, [
+            'create', '--headless', '--backend=wordpress', '--frontend=astro', '--url=misitio'
+        ])
+
+        assert result.exit_code == 0
+        mock_keep_alive.assert_called_once()
+        mock_keep_alive.return_value.__enter__.assert_called_once()
+        mock_keep_alive.return_value.__exit__.assert_called_once()
+
     def test_site_create_headless_calls_headless_manager(self, runner, mock_deps):
         """Test headless site creation dispatches to create_headless_site."""
         from wslaragon.cli.site_commands import site

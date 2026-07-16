@@ -128,17 +128,21 @@ class TestConfigDataStructure:
                 "tld": ".test",
                 "document_root": "~/web"
             },
+            "hosts": {
+                "hosts_file": "/etc/hosts"
+            },
             "windows": {
                 "hosts_file": "/mnt/c/Windows/System32/drivers/etc/hosts"
             }
         }
-        
+
         # Verify structure
         assert 'php' in default_config
         assert 'nginx' in default_config
         assert 'mysql' in default_config
         assert 'ssl' in default_config
         assert 'sites' in default_config
+        assert 'hosts' in default_config
         assert 'windows' in default_config
         
         # Verify key values

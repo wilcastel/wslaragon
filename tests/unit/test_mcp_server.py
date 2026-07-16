@@ -269,6 +269,34 @@ class TestServiceStatus:
         assert result == "active"
 
 
+class TestMcpUbuntuRuntime:
+    """Test suite for Ubuntu-aware MCP runtime behavior"""
+
+    @patch("wslaragon.mcp.server._get_config")
+    @patch("wslaragon.mcp.server._service_status")
+    def test_mcp_uses_ubuntu_service_names(self, mock_status, mock_get_config, mock_mcp_module):
+        """resource_services resolves PHP-FPM service name from config"""
+        from wslaragon.mcp.server import resource_services
+
+        mock_config = Mock()
+        mock_config.get.side_effect = lambda key, default=None: {
+            "php.version": "8.5",
+            "hosts.hosts_file": "/etc/hosts",
+            "mysql.user": "wslaragon",
+        }.get(key, default)
+        mock_get_config.return_value = mock_config
+        mock_status.return_value = "active"
+
+        result = resource_services()
+
+        assert "# Service status" in result
+        assert "✓ php-fpm: active" in result
+        mock_status.assert_any_call("php8.5-fpm")
+        mock_status.assert_any_call("nginx")
+        mock_status.assert_any_call("mariadb")
+        mock_status.assert_any_call("redis-server")
+
+
 class TestResourceSites:
     """Test suite for resource_sites resource"""
 
@@ -384,18 +412,23 @@ class TestResourceServices:
         assert "✓ mariadb: active" in result
         assert "✓ redis: active" in result
 
+    @patch("wslaragon.mcp.server._get_config")
     @patch("wslaragon.mcp.server._service_status")
-    def test_resource_services_mixed_status(self, mock_status, mock_mcp_module):
-        """Test resource_services shows mixed service status"""
+    def test_resource_services_mixed_status(self, mock_status, mock_get_config, mock_mcp_module):
+        """Test resource_services shows mixed service status with config-driven PHP version"""
         from wslaragon.mcp.server import resource_services
-        
+
+        mock_config = Mock()
+        mock_config.get.return_value = "8.3"
+        mock_get_config.return_value = mock_config
+
         def side_effect(service):
             return {"nginx": "active", "php8.3-fpm": "inactive", "mariadb": "active", "redis-server": "failed"}[service]
-        
+
         mock_status.side_effect = side_effect
-        
+
         result = resource_services()
-        
+
         assert "✓ nginx: active" in result
         assert "✗ php-fpm: inactive" in result
         assert "✓ mariadb: active" in result
@@ -1020,6 +1053,49 @@ class TestAgentInit:
         mock_run.assert_called_once_with(
             ["wslaragon", "agent", "init", "--preset", "default", "--path", "/home/user/project"]
         )
+
+    @patch("wslaragon.mcp.server._get_config")
+    @patch("wslaragon.mcp.server._run")
+    def test_agent_init_includes_runtime_context(self, mock_run, mock_get_config, mock_mcp_module):
+        """agent_init returns runtime context derived from config"""
+        from wslaragon.mcp.server import agent_init
+
+        mock_config = Mock()
+        mock_config.get.side_effect = lambda key, default=None: {
+            "php.version": "8.5",
+            "hosts.hosts_file": "/etc/hosts",
+            "mysql.user": "wslaragon",
+        }.get(key, default)
+        mock_get_config.return_value = mock_config
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = agent_init("/home/user/project")
+
+        assert "Runtime context" in result
+        assert "hosts_file=/etc/hosts" in result
+        assert "php_version=8.5" in result
+        assert "fpm_socket=/run/php/php8.5-fpm.sock" in result
+        assert "db_user=wslaragon" in result
+
+    @patch("wslaragon.mcp.server._run")
+    def test_agent_init_accepts_runtime_context_overrides(self, mock_run, mock_mcp_module):
+        """agent_init allows callers to override runtime context values"""
+        from wslaragon.mcp.server import agent_init
+
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+
+        result = agent_init(
+            "/home/user/project",
+            hosts_file="/custom/hosts",
+            php_version="8.1",
+            fpm_socket="/custom.sock",
+            db_user="custom_user",
+        )
+
+        assert "hosts_file=/custom/hosts" in result
+        assert "php_version=8.1" in result
+        assert "fpm_socket=/custom.sock" in result
+        assert "db_user=custom_user" in result
 
 
 class TestRunDoctor:

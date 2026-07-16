@@ -119,6 +119,11 @@ class TestPHPManagerSwitchVersion:
         from wslaragon.services.php import PHPManager
         return PHPManager(mock_config)
 
+    @pytest.fixture(autouse=True)
+    def assume_target_fpm_installed(self, php_manager):
+        """Most switch_version tests exercise the switch path itself."""
+        php_manager._is_fpm_package_installed = MagicMock(return_value=True)
+
     @patch('wslaragon.services.php.subprocess.run')
     def test_switch_version_success(self, mock_run, php_manager):
         """Test switch_version succeeds"""
@@ -302,6 +307,52 @@ class TestPHPManagerSwitchVersion:
         ]
         # Only the original (failed) start attempt — rollback must not retry the target itself
         assert len(target_start_calls) == 1
+
+    def test_switch_version_aborts_when_fpm_missing(self, php_manager):
+        """Test switch_version aborts before stopping FPM if target package is missing"""
+        php_manager._is_fpm_package_installed = MagicMock(return_value=False)
+        php_manager._stop_php_fpm = MagicMock(return_value=True)
+
+        result = php_manager.switch_version("8.5")
+
+        assert result is False
+        php_manager._stop_php_fpm.assert_not_called()
+
+
+class TestPHPManagerIsFpmPackageInstalled:
+    """Test suite for _is_fpm_package_installed helper"""
+
+    @pytest.fixture
+    def php_manager(self, mock_config):
+        from wslaragon.services.php import PHPManager
+        return PHPManager(mock_config)
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_returns_true_when_package_is_installed(self, mock_run, php_manager):
+        """Test _is_fpm_package_installed returns True when dpkg reports 'ii'"""
+        mock_result = MagicMock()
+        mock_result.stdout = "ii  php8.5-fpm 8.5.0 amd64\n"
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+
+        assert php_manager._is_fpm_package_installed("8.5") is True
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_returns_false_when_package_not_installed(self, mock_run, php_manager):
+        """Test _is_fpm_package_installed returns False when dpkg finds no 'ii'"""
+        mock_result = MagicMock()
+        mock_result.stdout = ""  # dpkg -l prints no matching packages
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+
+        assert php_manager._is_fpm_package_installed("8.5") is False
+
+    @patch('wslaragon.services.php.subprocess.run')
+    def test_returns_false_on_dpkg_error(self, mock_run, php_manager):
+        """Test _is_fpm_package_installed returns False when dpkg fails"""
+        mock_run.side_effect = Exception("dpkg failed")
+
+        assert php_manager._is_fpm_package_installed("8.5") is False
 
 
 class TestPHPManagerGetAllPhpIniPaths:

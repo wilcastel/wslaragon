@@ -31,9 +31,8 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_slow)
 
 
-@pytest.fixture
-def mock_config(tmp_path):
-    """Mock configuration for tests using temp directories"""
+def _make_mock_config(tmp_path, mysql_user="root", mysql_password="test_password"):
+    """Helper to build a mock config with optional MySQL credentials."""
     config_dir = tmp_path / ".wslaragon"
     config_dir.mkdir(parents=True, exist_ok=True)
     sites_dir = config_dir / "sites"
@@ -42,14 +41,14 @@ def mock_config(tmp_path):
     ssl_dir.mkdir(exist_ok=True)
     logs_dir = config_dir / "logs"
     logs_dir.mkdir(exist_ok=True)
-    
+
     config = MagicMock()
     config.config_dir = config_dir
     config.config_file = config_dir / "config.yaml"
     config.sites_dir = sites_dir
     config.ssl_dir = ssl_dir
     config.logs_dir = logs_dir
-    
+
     config.get.side_effect = lambda key, default=None: {
         "php.version": "8.3",
         "php.ini_file": "/etc/php/8.3/fpm/php.ini",
@@ -60,8 +59,8 @@ def mock_config(tmp_path):
         "nginx.client_max_body_size": "128M",
         "mysql.data_dir": "/var/lib/mysql",
         "mysql.config_file": "/etc/mysql/mariadb.conf.d/50-server.cnf",
-        "mysql.user": "root",
-        "mysql.password": "test_password",
+        "mysql.user": mysql_user,
+        "mysql.password": mysql_password,
         "ssl.dir": str(ssl_dir),
         "ssl.ca_file": str(ssl_dir / "rootCA.pem"),
         "ssl.ca_key": str(ssl_dir / "rootCA-key.pem"),
@@ -76,6 +75,18 @@ def mock_config(tmp_path):
     config.set = MagicMock()
     config.save = MagicMock()
     return config
+
+
+@pytest.fixture
+def mock_config(tmp_path):
+    """Mock configuration for tests using temp directories (WSL defaults)."""
+    return _make_mock_config(tmp_path)
+
+
+@pytest.fixture
+def mock_config_ubuntu(tmp_path):
+    """Mock configuration with Ubuntu-native MySQL user defaults."""
+    return _make_mock_config(tmp_path, mysql_user="wslaragon", mysql_password="wslaragon_pass")
 
 
 @pytest.fixture

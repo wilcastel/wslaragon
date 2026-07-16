@@ -34,6 +34,26 @@ class TestServiceManager:
         assert service_manager.services['mysql']['service'] == 'mariadb'
         assert service_manager.services['php-fpm']['service'] == 'php8.3-fpm'
 
+    def test_service_manager_uses_configured_php_version(self):
+        """php-fpm service name follows the PHP version from config."""
+        from wslaragon.core.services import ServiceManager
+
+        mock_config = MagicMock()
+        mock_config.get.return_value = '8.5'
+
+        service_manager = ServiceManager(config=mock_config)
+
+        assert service_manager.services['php-fpm']['service'] == 'php8.5-fpm'
+        mock_config.get.assert_called_once_with('php.version', '8.3')
+
+    def test_service_manager_defaults_to_php_83_without_config(self):
+        """php-fpm service name defaults to 8.3 when no config is supplied."""
+        from wslaragon.core.services import ServiceManager
+
+        service_manager = ServiceManager()
+
+        assert service_manager.services['php-fpm']['service'] == 'php8.3-fpm'
+
 
 class TestServiceManagerIsRunning:
     """Test suite for is_running method"""

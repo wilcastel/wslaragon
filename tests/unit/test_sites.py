@@ -846,6 +846,104 @@ class TestSiteManagerApiProxies:
         assert result['proxies'] == {}
 
 
+class TestSudoKeepAlive:
+    """Test suite for the SudoKeepAlive context manager."""
+
+    @patch('wslaragon.services.sites.subprocess.run')
+    def test_sudo_keep_alive_emits_refresh(self, mock_run):
+        """SudoKeepAlive must periodically run `sudo -n -v` while active."""
+        from wslaragon.services.sites import SudoKeepAlive
+
+        keeper = SudoKeepAlive(interval=15)
+        keeper._stop_event.is_set = MagicMock(side_effect=[False, True])
+        keeper._loop()
+
+        mock_run.assert_called_once_with(['sudo', '-n', '-v'], capture_output=True, check=False)
+
+    @patch('wslaragon.services.sites.threading.Thread')
+    @patch('wslaragon.services.sites.subprocess.run')
+    def test_sudo_keep_alive_starts_daemon_thread_in_context(self, mock_run, mock_thread):
+        """Entering the context manager starts a daemon refresh thread."""
+        from wslaragon.services.sites import SudoKeepAlive
+
+        with SudoKeepAlive(interval=15):
+            pass
+
+        mock_thread.assert_called_once()
+        assert mock_thread.call_args.kwargs.get('daemon') is True
+        mock_thread.return_value.start.assert_called_once()
+        mock_thread.return_value.join.assert_called_once()
+
+
+class TestSiteManagerFixPermissions:
+    """Test suite for fix_permissions method"""
+
+    @pytest.fixture
+    def site_manager(self, tmp_path, mock_nginx_manager, mock_mysql_manager):
+        with patch('wslaragon.services.sites.SSLManager'):
+            from wslaragon.services.sites import SiteManager
+
+            config = MagicMock()
+            config.get.side_effect = lambda key, default=None: {
+                "sites.tld": ".test",
+                "sites.document_root": str(tmp_path / "web"),
+                "sites.dir": str(tmp_path / "sites"),
+            }.get(key, default)
+
+            sm = SiteManager(config, mock_nginx_manager, mock_mysql_manager)
+            doc_root = tmp_path / "web" / "mysite"
+            doc_root.mkdir(parents=True)
+            sm.sites = {
+                'mysite': {
+                    'name': 'mysite',
+                    'document_root': str(doc_root),
+                }
+            }
+            return sm
+
+    @patch('wslaragon.services.sites.shutil.which')
+    @patch('wslaragon.services.sites.subprocess.run')
+    def test_apply_permissions_uses_setfacl_when_available(self, mock_run, mock_which, site_manager):
+        """When setfacl is installed, use POSIX ACLs to grant www-data read access."""
+        mock_which.return_value = '/usr/bin/setfacl'
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = site_manager.fix_permissions('mysite')
+
+        assert result['success'] is True
+        setfacl_calls = [c for c in mock_run.call_args_list if 'setfacl' in c[0][0]]
+        assert len(setfacl_calls) == 1
+        assert setfacl_calls[0][0][0] == [
+            'sudo', 'setfacl', '-R', '-m', 'u:www-data:rx',
+            site_manager.sites['mysite']['document_root']
+        ]
+
+    @patch('wslaragon.services.sites.shutil.which')
+    @patch('wslaragon.services.sites.subprocess.run')
+    def test_apply_permissions_chmod_fallback(self, mock_run, mock_which, site_manager):
+        """When setfacl is unavailable, fall back to chmod o+rx."""
+        mock_which.return_value = None
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = site_manager.fix_permissions('mysite')
+
+        assert result['success'] is True
+        chmod_calls = [c for c in mock_run.call_args_list if 'chmod' in c[0][0]]
+        assert any('o+rx' in c[0][0] for c in chmod_calls)
+
+    @patch('wslaragon.services.sites.shutil.which')
+    @patch('wslaragon.services.sites.subprocess.run')
+    def test_apply_permissions_returns_error_on_failure(self, mock_run, mock_which, site_manager):
+        """fix_permissions must surface subprocess failures."""
+        mock_which.return_value = None
+        import subprocess as sp
+        mock_run.side_effect = sp.CalledProcessError(1, 'chmod')
+
+        result = site_manager.fix_permissions('mysite')
+
+        assert result['success'] is False
+
+
 class TestSiteManagerIsValidSiteName:
     """Test suite for _is_valid_site_name edge cases"""
 

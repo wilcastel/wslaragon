@@ -113,9 +113,32 @@ class PHPManager:
             logger.debug(f"get_current_version failed: {e}")
             return None
     
+    def _is_fpm_package_installed(self, version: str) -> bool:
+        """Check whether the php{version}-fpm package is installed.
+
+        Uses dpkg so the check is independent of whether the service is
+        currently running or enabled.
+        """
+        try:
+            result = subprocess.run(
+                ['dpkg', '-l', f'php{version}-fpm'],
+                capture_output=True, text=True
+            )
+            return result.returncode == 0 and 'ii' in result.stdout
+        except Exception as e:
+            logger.debug(f"_is_fpm_package_installed failed: {e}")
+            return False
+
     def switch_version(self, version: str) -> bool:
         """Switch PHP version using update-alternatives"""
         fpm_service = f'php{version}-fpm'
+        if not self._is_fpm_package_installed(version):
+            logger.error(
+                f"PHP-FPM package {fpm_service} is not installed. "
+                "Aborting version switch to keep the current FPM running."
+            )
+            return False
+
         previously_running = []
         previous_version = self.config.get('php.version')
         stopped_fpm = False

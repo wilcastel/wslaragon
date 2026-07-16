@@ -18,7 +18,24 @@ class NginxManager:
         if site_name.endswith(self.tld):
             site_name = site_name[:-len(self.tld)]
         return site_name
-    
+
+    def _get_php_fpm_socket(self) -> str:
+        """Discover the PHP-FPM socket path.
+
+        Prefers the versioned socket for the configured PHP version,
+        then falls back to the generic php-fpm.sock.
+        """
+        version = self.config.get('php.version')
+        versioned = Path(f'/run/php/php{version}-fpm.sock')
+        if versioned.exists():
+            return str(versioned)
+        generic = Path('/run/php/php-fpm.sock')
+        if generic.exists():
+            return str(generic)
+        raise RuntimeError(
+            f"PHP-FPM socket not found at {versioned} or {generic}"
+        )
+
     def test_config(self) -> bool:
         """Test Nginx configuration"""
         try:
@@ -142,7 +159,7 @@ class NginxManager:
                 php_config = f"""
     location ~ \\.php$ {{
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/var/run/php/php{self.config.get('php.version')}-fpm.sock;
+        fastcgi_pass unix:{self._get_php_fpm_socket()};
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         client_max_body_size {self.config.get('nginx.client_max_body_size', '128M')};
     }}"""

@@ -12,17 +12,27 @@ set -e
 echo "🔧 WSLaragon Environment Setup"
 echo "============================="
 
-# Check if we're in WSL
-if ! grep -q Microsoft /proc/version 2>/dev/null; then
-    print_warning "This script is designed for WSL2 environment"
-fi
+# Detect platform
+detect_platform() {
+    if grep -q Microsoft /proc/version 2>/dev/null; then
+        echo "wsl2"
+    elif grep -qE "Ubuntu|Debian" /etc/os-release 2>/dev/null; then
+        echo "ubuntu"
+    else
+        echo "unknown"
+    fi
+}
+
+PLATFORM=$(detect_platform)
+print_status "Detected platform: $PLATFORM"
 
 # Check existing installations
 print_status "Checking your current setup..."
 
 echo "Checking PHP..."
 if command -v php &> /dev/null; then
-    PHP_INSTALLED_VERSION=$(php -v | head -n1 | cut -d' ' -f2 | cut -d'-' -f1)    echo "✓ PHP found: $PHP_INSTALLED_VERSION"
+    PHP_INSTALLED_VERSION=$(php -v | head -n1 | cut -d' ' -f2 | cut -d'-' -f1)
+    echo "✓ PHP found: $PHP_INSTALLED_VERSION"
 else
     echo "✗ PHP not found"
 fi
@@ -62,7 +72,8 @@ if [ ! -f "$CONFIG_FILE" ]; then
     print_status "Creating initial configuration..."
     cat > "$CONFIG_FILE" << EOF
 php:
-  version: "$PHP_VERSION"  ini_file: "$PHP_INI"
+  version: "$PHP_VERSION"
+  ini_file: "$PHP_INI"
   extensions_dir: "$PHP_EXTENSIONS_DIR"
 
 nginx:

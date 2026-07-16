@@ -413,14 +413,14 @@ class TestSSLManagerGenerateCert:
         assert result['success'] is False
         assert 'error' in result
 
-    def test_generate_cert_calls_add_to_windows_hosts(self, ssl_manager):
-        """Test generate_cert calls add_to_windows_hosts"""
+    def test_generate_cert_calls_add_to_hosts(self, ssl_manager):
+        """Test generate_cert calls add_to_hosts"""
         ssl_manager.generate_certificate = MagicMock(return_value=True)
-        ssl_manager.add_to_windows_hosts = MagicMock(return_value=True)
+        ssl_manager.add_to_hosts = MagicMock(return_value=True)
 
         ssl_manager.generate_cert("example.test")
-        
-        ssl_manager.add_to_windows_hosts.assert_called_once_with("example.test")
+
+        ssl_manager.add_to_hosts.assert_called_once_with("example.test")
 
     def test_generate_cert_handles_exception(self, ssl_manager):
         """Test generate_cert handles exceptions"""
@@ -631,35 +631,35 @@ class TestSSLManagerRevokeCertificate:
         assert result is False
 
     def test_revoke_certificate_calls_remove_from_hosts(self, ssl_manager, tmp_path):
-        """Test revoke_certificate calls remove_from_windows_hosts"""
+        """Test revoke_certificate calls remove_from_hosts"""
         ssl_dir = tmp_path / "ssl"
         ssl_manager.ssl_dir = ssl_dir
-        
+
         cert_file = ssl_dir / "example.test.pem"
         key_file = ssl_dir / "example.test-key.pem"
         cert_file.write_text("cert")
         key_file.write_text("key")
-        
-        ssl_manager.remove_from_windows_hosts = MagicMock(return_value=True)
+
+        ssl_manager.remove_from_hosts = MagicMock(return_value=True)
 
         ssl_manager.revoke_certificate("example.test")
-        
-        ssl_manager.remove_from_windows_hosts.assert_called_once_with("example.test")
+
+        ssl_manager.remove_from_hosts.assert_called_once_with("example.test")
 
     def test_revoke_certificate_returns_false_on_exception(self, ssl_manager, tmp_path):
         """Test revoke_certificate returns False on exception"""
         ssl_dir = tmp_path / "ssl"
         ssl_manager.ssl_dir = ssl_dir
-        
+
         cert_file = ssl_dir / "example.test.pem"
         key_file = ssl_dir / "example.test-key.pem"
         cert_file.write_text("cert")
         key_file.write_text("key")
-        
-        ssl_manager.remove_from_windows_hosts = MagicMock(side_effect=Exception("Error"))
+
+        ssl_manager.remove_from_hosts = MagicMock(side_effect=Exception("Error"))
 
         result = ssl_manager.revoke_certificate("example.test")
-        
+
         assert result is False
 
 
@@ -772,6 +772,84 @@ class TestSSLManagerGetCertificateInfo:
         assert result['issuer'] == 'Issuer: CN=mkcert development CA'
         assert 'valid_from' in result
         assert 'valid_until' in result
+
+
+class TestSSLManagerHostsUbuntu:
+    """Test suite for native Ubuntu hosts file management via sudo tee."""
+
+    @pytest.fixture
+    def ssl_manager(self, mock_config, tmp_path):
+        from wslaragon.services.ssl import SSLManager
+        config = mock_config
+        ssl_dir = tmp_path / "ssl"
+        ssl_dir.mkdir(parents=True)
+        config.get.side_effect = lambda key, default=None: {
+            "ssl.dir": str(ssl_dir),
+            "ssl.ca_file": str(ssl_dir / "rootCA.pem"),
+            "ssl.ca_key": str(ssl_dir / "rootCA-key.pem"),
+            "windows.hosts_file": str(tmp_path / "hosts"),
+            "hosts.hosts_file": "/etc/hosts",
+        }.get(key, default)
+        return SSLManager(config)
+
+    @patch('wslaragon.services.ssl.Platform.is_wsl', return_value=False)
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_add_to_hosts_uses_sudo_tee_on_ubuntu(self, mock_run, _mock_is_wsl, ssl_manager):
+        """On native Ubuntu, add_to_hosts must append via `sudo tee -a /etc/hosts`."""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = ssl_manager.add_to_hosts('myproject.test')
+
+        assert result is True
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args
+        assert call_args.args[0][0] == 'sudo'
+        assert 'tee' in call_args.args[0]
+        assert '-a' in call_args.args[0]
+        assert '/etc/hosts' in call_args.args[0]
+        assert call_args.kwargs.get('input') == '127.0.0.1 myproject.test\n'
+
+    @patch('wslaragon.services.ssl.Platform.is_wsl', return_value=False)
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_add_to_hosts_skips_when_entry_exists(self, mock_run, _mock_is_wsl, ssl_manager, tmp_path):
+        """If the entry already exists in /etc/hosts, do not rewrite the file."""
+        hosts_file = tmp_path / "hosts"
+        hosts_file.write_text('127.0.0.1 myproject.test\n')
+        ssl_manager.hosts_file = hosts_file
+
+        result = ssl_manager.add_to_hosts('myproject.test')
+
+        assert result is True
+        mock_run.assert_not_called()
+
+    @patch('wslaragon.services.ssl.Platform.is_wsl', return_value=False)
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_remove_from_hosts_uses_sudo_tee_on_ubuntu(self, mock_run, _mock_is_wsl, ssl_manager):
+        """On native Ubuntu, remove_from_hosts must rewrite via `sudo tee /etc/hosts`."""
+        ssl_manager.hosts_file = Path('/etc/hosts')
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = ssl_manager.remove_from_hosts('myproject.test')
+
+        assert result is True
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args
+        assert call_args.args[0][0] == 'sudo'
+        assert 'tee' in call_args.args[0]
+        assert '/etc/hosts' in call_args.args[0]
+        assert '-a' not in call_args.args[0]
+
+    @patch('wslaragon.services.ssl.Platform.is_wsl', return_value=True)
+    @patch('wslaragon.services.ssl.subprocess.run')
+    def test_add_to_hosts_uses_windows_path_on_wsl(self, mock_run, _mock_is_wsl, ssl_manager):
+        """On WSL, add_to_hosts must keep using the Windows hosts path/PowerShell path."""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = ssl_manager.add_to_hosts('myproject.test')
+
+        assert result is True
+        mock_run.assert_called_once()
+        assert 'powershell.exe' in mock_run.call_args.args[0]
 
 
 class TestSSLManagerSetupSSLForSite:

@@ -1,8 +1,9 @@
 import logging
 import subprocess
-import os
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from ..core.platform import Platform
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,12 @@ class SSLManager:
         if windows_hosts is None:
             windows_hosts = "/mnt/c/Windows/System32/drivers/etc/hosts"
         self.windows_hosts = Path(windows_hosts)
-        
+
+        hosts_file = config.get('hosts.hosts_file')
+        if hosts_file is None:
+            hosts_file = '/etc/hosts'
+        self.hosts_file = Path(hosts_file)
+
         self._ensure_dirs()
     
     def _ensure_dirs(self):
@@ -201,8 +207,8 @@ subjectAltName = {san_string}
         """Wrapper for generate_certificate that returns a DictResult for the CLI"""
         try:
             if self.generate_certificate(domain):
-                # Also attempt to add to windows hosts for convenience
-                self.add_to_windows_hosts(domain)
+                # Also attempt to add to hosts for convenience
+                self.add_to_hosts(domain)
                 return {'success': True}
             else:
                 return {'success': False, 'error': 'Failed to generate certificate (check if mkcert is installed)'}
@@ -260,17 +266,79 @@ Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile", "-ExecutionPoli
             # Base64 encode the script
             import base64
             encoded_script = base64.b64encode(ps_script.encode('utf-16-le')).decode('ascii')
-            
+
             subprocess.run([
-                'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', 
+                'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
                 '-EncodedCommand', encoded_script
             ], check=True)
-            
+
             return True
         except Exception as e:
             logger.debug(f"remove_from_windows_hosts failed: {e}")
             return False
-    
+
+    def add_to_hosts(self, domain: str, ip: str = "127.0.0.1") -> bool:
+        """Add domain to the platform-appropriate hosts file.
+
+        On native Ubuntu this uses `sudo tee -a /etc/hosts`. On WSL it delegates
+        to the Windows hosts file via PowerShell.
+        """
+        try:
+            if Platform.is_wsl():
+                return self.add_to_windows_hosts(domain, ip)
+
+            hosts_file = self.hosts_file
+            if hosts_file.exists():
+                with open(hosts_file, 'r', encoding='utf-8') as f:
+                    if domain in f.read():
+                        return True
+
+            entry = f"{ip} {domain}\n"
+            subprocess.run(
+                ['sudo', 'tee', '-a', str(hosts_file)],
+                input=entry,
+                text=True,
+                check=True,
+                capture_output=True
+            )
+            return True
+        except Exception as e:
+            logger.debug(f"add_to_hosts failed: {e}")
+            return False
+
+    def remove_from_hosts(self, domain: str) -> bool:
+        """Remove domain from the platform-appropriate hosts file.
+
+        On native Ubuntu this rewrites `/etc/hosts` via `sudo tee`. On WSL it
+        delegates to the Windows hosts file via PowerShell.
+        """
+        try:
+            if Platform.is_wsl():
+                return self.remove_from_windows_hosts(domain)
+
+            hosts_file = self.hosts_file
+            if not hosts_file.exists():
+                return True
+
+            with open(hosts_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+
+            filtered = [
+                line for line in lines
+                if domain not in line or not line.strip().startswith(('127.0.0.1', '::1'))
+            ]
+            subprocess.run(
+                ['sudo', 'tee', str(hosts_file)],
+                input=''.join(filtered),
+                text=True,
+                check=True,
+                capture_output=True
+            )
+            return True
+        except Exception as e:
+            logger.debug(f"remove_from_hosts failed: {e}")
+            return False
+
     def get_certificate_info(self, domain: str) -> Optional[Dict]:
         """Get certificate information"""
         try:
@@ -332,8 +400,8 @@ Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile", "-ExecutionPoli
                 removed = True
             
             # Also try to remove from hosts file
-            self.remove_from_windows_hosts(domain)
-            
+            self.remove_from_hosts(domain)
+
             return removed
         except Exception as e:
             logger.debug(f"revoke_certificate failed: {e}")
@@ -351,10 +419,10 @@ Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile", "-ExecutionPoli
             if not self.generate_certificate(domain):
                 return {'success': False, 'error': 'Failed to generate certificate'}
             
-            # Add to Windows hosts (non-fatal if it fails — domain may already exist)
-            hosts_result = self.add_to_windows_hosts(domain)
+            # Add to hosts (non-fatal if it fails — domain may already exist)
+            hosts_result = self.add_to_hosts(domain)
             if not hosts_result:
-                logger.warning(f"Could not add {domain} to Windows hosts (may already exist or permission denied)")
+                logger.warning(f"Could not add {domain} to hosts (may already exist or permission denied)")
             
             # Get certificate info
             cert_info = self.get_certificate_info(domain)

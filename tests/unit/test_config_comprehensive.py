@@ -9,6 +9,13 @@ import pytest
 from wslaragon.core.config import Config
 
 
+@pytest.fixture(autouse=True)
+def mock_wsl_platform():
+    """Existing comprehensive tests assume WSL2 defaults."""
+    with patch('wslaragon.core.config.Platform.is_wsl', return_value=True):
+        yield
+
+
 class TestConfigInit:
     """Test Config initialization."""
 
@@ -631,6 +638,60 @@ class TestConfigDefaultValues:
             config = Config()
         
         assert config.get('windows.hosts_file') == '/mnt/c/Windows/System32/drivers/etc/hosts'
+
+
+class TestConfigUbuntuDefaults:
+    """Test native Ubuntu defaults when not running under WSL."""
+
+    @patch('wslaragon.core.config.Path.home')
+    @patch('wslaragon.core.config.load_dotenv')
+    def test_default_php_config_on_ubuntu(self, mock_load_dotenv, mock_home, tmp_path):
+        """Native Ubuntu defaults PHP to 8.5."""
+        mock_home.return_value = tmp_path
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch('wslaragon.core.config.Platform.is_wsl', return_value=False):
+                config = Config()
+
+        assert config.get('php.version') == '8.5'
+        assert config.get('php.ini_file') == '/etc/php/8.5/fpm/php.ini'
+
+    @patch('wslaragon.core.config.Path.home')
+    @patch('wslaragon.core.config.load_dotenv')
+    def test_default_mysql_config_on_ubuntu(self, mock_load_dotenv, mock_home, tmp_path):
+        """Native Ubuntu defaults MySQL user to wslaragon."""
+        mock_home.return_value = tmp_path
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch('wslaragon.core.config.Platform.is_wsl', return_value=False):
+                config = Config()
+
+        assert config.get('mysql.user') == 'wslaragon'
+        assert config.get('mysql.password') == ''
+
+    @patch('wslaragon.core.config.Path.home')
+    @patch('wslaragon.core.config.load_dotenv')
+    def test_default_hosts_config_on_ubuntu(self, mock_load_dotenv, mock_home, tmp_path):
+        """Native Ubuntu exposes /etc/hosts as the hosts file."""
+        mock_home.return_value = tmp_path
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch('wslaragon.core.config.Platform.is_wsl', return_value=False):
+                config = Config()
+
+        assert config.get('hosts.hosts_file') == '/etc/hosts'
+
+    @patch('wslaragon.core.config.Path.home')
+    @patch('wslaragon.core.config.load_dotenv')
+    def test_env_db_user_overrides_ubuntu_default(self, mock_load_dotenv, mock_home, tmp_path):
+        """DB_USER env var still overrides the Ubuntu default."""
+        mock_home.return_value = tmp_path
+
+        with patch.dict(os.environ, {'DB_USER': 'custom_user'}):
+            with patch('wslaragon.core.config.Platform.is_wsl', return_value=False):
+                config = Config()
+
+        assert config.get('mysql.user') == 'custom_user'
 
 
 class TestConfigPathAttributes:

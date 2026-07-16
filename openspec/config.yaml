@@ -1,0 +1,55 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Python 3.9+ CLI using Click, Rich, PyYAML, psutil, colorama.
+  Architecture: Service-manager pattern under src/wslaragon/services/; Click command modules under src/wslaragon/cli/.
+  Testing: pytest with pytest-cov, pytest-mock, pytest-asyncio; 1,259+ tests (unit + integration); coverage fail-under 90%.
+  Style: black (line-length 100), ruff, isort, mypy; pre-commit hooks enforced.
+  CI: GitHub Actions running lint, type-check, matrix tests (3.9-3.12), coverage upload, and package build.
+
+strict_tdd: true
+
+testing:
+  runner: pytest
+  unit_command: pytest tests/unit/ -v --tb=short
+  integration_command: pytest tests/integration/ -v --run-slow --tb=short
+  all_command: pytest tests/ --tb=short -q --run-slow
+  coverage_command: pytest --cov=src --cov-report=html --cov-report=term-missing --cov-fail-under=90
+  coverage_threshold: 90
+  markers:
+    - slow
+    - integration
+    - unit
+    - requires_sudo
+  layers:
+    unit: true
+    integration: true
+    e2e: false
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Link an approved issue before opening a PR
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+    - Respect the 400-line review budget; escalate to chained-pr on high-risk forecasts
+  apply:
+    guidelines:
+      - Follow existing code patterns
+      - Keep tests with the code they verify
+      - Run work-unit commits through the same change
+    tdd: true
+    test_command: pytest tests/unit/ -v --tb=short
+  verify:
+    test_command: pytest tests/ --tb=short -q --run-slow
+    build_command: python -m build
+    coverage_threshold: 90
+  archive:
+    - Warn before merging destructive deltas

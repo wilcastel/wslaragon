@@ -163,6 +163,41 @@ class TestNginxManagerRestart:
         assert result is False
 
 
+class TestNginxManagerGetPhpFpmSocket:
+    """Test suite for _get_php_fpm_socket helper"""
+
+    @pytest.fixture
+    def nginx_manager(self, mock_config):
+        from wslaragon.services.nginx import NginxManager
+        return NginxManager(mock_config)
+
+    def test_returns_versioned_socket_when_present(self, nginx_manager):
+        """Test _get_php_fpm_socket returns versioned path when it exists"""
+        def exists_side_effect(path):
+            return str(path) == '/run/php/php8.3-fpm.sock'
+
+        with patch.object(Path, 'exists', exists_side_effect):
+            socket = nginx_manager._get_php_fpm_socket()
+
+        assert socket == '/run/php/php8.3-fpm.sock'
+
+    def test_falls_back_to_generic_socket(self, nginx_manager):
+        """Test _get_php_fpm_socket falls back to generic path"""
+        def exists_side_effect(path):
+            return str(path) == '/run/php/php-fpm.sock'
+
+        with patch.object(Path, 'exists', exists_side_effect):
+            socket = nginx_manager._get_php_fpm_socket()
+
+        assert socket == '/run/php/php-fpm.sock'
+
+    def test_raises_when_no_socket_exists(self, nginx_manager):
+        """Test _get_php_fpm_socket raises when neither socket exists"""
+        with patch.object(Path, 'exists', return_value=False):
+            with pytest.raises(RuntimeError):
+                nginx_manager._get_php_fpm_socket()
+
+
 class TestNginxManagerCreateSiteConfig:
     """Test suite for create_site_config method"""
 
@@ -170,6 +205,13 @@ class TestNginxManagerCreateSiteConfig:
     def nginx_manager(self, mock_config):
         from wslaragon.services.nginx import NginxManager
         return NginxManager(mock_config)
+
+    @pytest.fixture(autouse=True)
+    def mock_versioned_fpm_socket(self, nginx_manager):
+        """Make PHP site-config tests see the versioned FPM socket."""
+        nginx_manager._get_php_fpm_socket = MagicMock(
+            return_value='/run/php/php8.3-fpm.sock'
+        )
 
     def test_create_site_config_basic(self, nginx_manager):
         """Test basic site config generation"""
