@@ -920,6 +920,36 @@ class TestSiteManagerFixPermissions:
 
     @patch('wslaragon.services.sites.shutil.which')
     @patch('wslaragon.services.sites.subprocess.run')
+    def test_wordpress_docroot_gets_writable_acl(self, mock_run, mock_which, site_manager):
+        """WordPress core updates write to wp-admin/, wp-includes/ and root
+        files, so the whole docroot must be writable by www-data."""
+        mock_which.return_value = '/usr/bin/setfacl'
+        mock_run.return_value = MagicMock(returncode=0)
+        doc_root = Path(site_manager.sites['mysite']['document_root'])
+        (doc_root / 'wp-config.php').write_text("<?php\ndefine('ABSPATH', __DIR__ . '/');\n")
+
+        result = site_manager.fix_permissions('mysite')
+
+        assert result['success'] is True
+        calls = [c[0][0] for c in mock_run.call_args_list]
+        # Whole docroot gets rwX (not only wp-content)
+        assert [
+            'sudo', 'setfacl', '-R', '-m', 'u:www-data:rwX', str(doc_root)
+        ] in calls
+        # The generic read-only rx pass must not be applied to WordPress
+        assert not any('u:www-data:rx' in call for call in calls)
+        # Default ACLs on docroot dirs so new files inherit write access
+        assert [
+            'sudo', 'find', str(doc_root), '-type', 'd', '-exec',
+            'setfacl', '-m', 'd:u:www-data:rwX', '{}', '+',
+        ] in calls
+        wp_content = doc_root / 'wp-content'
+        assert (wp_content / 'plugins').exists()
+        assert (wp_content / 'uploads').exists()
+        assert (wp_content / 'upgrade').exists()
+
+    @patch('wslaragon.services.sites.shutil.which')
+    @patch('wslaragon.services.sites.subprocess.run')
     def test_apply_permissions_chmod_fallback(self, mock_run, mock_which, site_manager):
         """When setfacl is unavailable, fall back to chmod o+rx."""
         mock_which.return_value = None
@@ -930,6 +960,137 @@ class TestSiteManagerFixPermissions:
         assert result['success'] is True
         chmod_calls = [c for c in mock_run.call_args_list if 'chmod' in c[0][0]]
         assert any('o+rx' in c[0][0] for c in chmod_calls)
+
+    @patch('wslaragon.services.sites.shutil.which')
+    @patch('wslaragon.services.sites.subprocess.run')
+    def test_wordpress_chmod_fallback_is_group_writable_on_docroot(self, mock_run, mock_which, site_manager):
+        """Without setfacl, WordPress uses group-writable modes on the whole
+        docroot and never o+w."""
+        mock_which.return_value = None
+        mock_run.return_value = MagicMock(returncode=0)
+        doc_root = Path(site_manager.sites['mysite']['document_root'])
+        (doc_root / 'wp-config.php').write_text("<?php\n")
+
+        result = site_manager.fix_permissions('mysite')
+
+        assert result['success'] is True
+        calls = [c[0][0] for c in mock_run.call_args_list]
+        assert ['sudo', 'find', str(doc_root), '-type', 'd', '-exec', 'chmod', '2775', '{}', '+'] in calls
+        assert ['sudo', 'find', str(doc_root), '-type', 'f', '-exec', 'chmod', '664', '{}', '+'] in calls
+        # 2775 already grants others r-x on dirs, so the generic o+rx pass
+        # must not run for WordPress
+        assert ['sudo', 'chmod', '-R', 'o+rx', str(doc_root)] not in calls
+        assert not any('o+w' in call for call in calls)
+
+    @patch('wslaragon.services.sites.shutil.which')
+    @patch('wslaragon.services.sites.subprocess.run')
+    def test_laravel_docroot_readonly_but_storage_and_cache_writable(self, mock_run, mock_which, site_manager):
+        """Regression: the recursive rx pass on the docroot must not strip
+        www-data write from storage/ and bootstrap/cache/ — those get rwX
+        applied AFTER the base rx pass."""
+        mock_which.return_value = '/usr/bin/setfacl'
+        mock_run.return_value = MagicMock(returncode=0)
+        doc_root = Path(site_manager.sites['mysite']['document_root'])
+        (doc_root / 'artisan').write_text("#!/usr/bin/env php\n")
+
+        result = site_manager.fix_permissions('mysite')
+
+        assert result['success'] is True
+        calls = [c[0][0] for c in mock_run.call_args_list]
+        storage = str(doc_root / 'storage')
+        cache = str(doc_root / 'bootstrap' / 'cache')
+
+        rx_call = ['sudo', 'setfacl', '-R', '-m', 'u:www-data:rx', str(doc_root)]
+        storage_rwx = ['sudo', 'setfacl', '-R', '-m', 'u:www-data:rwX', storage]
+        cache_rwx = ['sudo', 'setfacl', '-R', '-m', 'u:www-data:rwX', cache]
+        assert rx_call in calls
+        assert storage_rwx in calls
+        assert cache_rwx in calls
+        # Docroot itself must NOT get rwX
+        assert ['sudo', 'setfacl', '-R', '-m', 'u:www-data:rwX', str(doc_root)] not in calls
+        # Escalation happens AFTER the base rx pass so it is not overwritten
+        assert calls.index(storage_rwx) > calls.index(rx_call)
+        assert calls.index(cache_rwx) > calls.index(rx_call)
+        # Default ACLs so new log/cache/session files inherit write access
+        assert ['sudo', 'find', storage, '-type', 'd', '-exec', 'setfacl', '-m', 'd:u:www-data:rwX', '{}', '+'] in calls
+        assert ['sudo', 'find', cache, '-type', 'd', '-exec', 'setfacl', '-m', 'd:u:www-data:rwX', '{}', '+'] in calls
+        # Writable dirs are created with parents when missing
+        assert (doc_root / 'storage').is_dir()
+        assert (doc_root / 'bootstrap' / 'cache').is_dir()
+
+    @patch('wslaragon.services.sites.shutil.which')
+    @patch('wslaragon.services.sites.subprocess.run')
+    def test_laravel_chmod_fallback_scopes_write_to_storage_and_cache(self, mock_run, mock_which, site_manager):
+        """Without setfacl, Laravel gets o+rx on the docroot and group-writable
+        modes only on storage/ and bootstrap/cache/."""
+        mock_which.return_value = None
+        mock_run.return_value = MagicMock(returncode=0)
+        doc_root = Path(site_manager.sites['mysite']['document_root'])
+        (doc_root / 'artisan').write_text("#!/usr/bin/env php\n")
+
+        result = site_manager.fix_permissions('mysite')
+
+        assert result['success'] is True
+        calls = [c[0][0] for c in mock_run.call_args_list]
+        storage = str(doc_root / 'storage')
+        cache = str(doc_root / 'bootstrap' / 'cache')
+        assert ['sudo', 'chmod', '-R', 'o+rx', str(doc_root)] in calls
+        for target in (storage, cache):
+            assert ['sudo', 'find', target, '-type', 'd', '-exec', 'chmod', '2775', '{}', '+'] in calls
+            assert ['sudo', 'find', target, '-type', 'f', '-exec', 'chmod', '664', '{}', '+'] in calls
+        # Group-writable modes must NOT leak onto the whole docroot
+        assert ['sudo', 'find', str(doc_root), '-type', 'd', '-exec', 'chmod', '2775', '{}', '+'] not in calls
+        assert not any('o+w' in call for call in calls)
+
+    @pytest.mark.parametrize('marker,writable_dirs', [
+        ('wp-config.php', ['wp-content/plugins', 'wp-content/uploads', 'wp-content/upgrade']),
+        ('artisan', ['storage', 'bootstrap/cache']),
+    ])
+    @patch('wslaragon.services.sites.shutil.which')
+    @patch('wslaragon.services.sites.subprocess.run')
+    def test_writable_dirs_exist_before_chown(self, mock_run, mock_which, site_manager, marker, writable_dirs):
+        """Regression: directories created by fix_permissions itself must exist
+        BEFORE the recursive chown runs, otherwise they keep the invoking
+        user's primary group and the chmod fallback grants group-write to the
+        wrong group — www-data stays read-only while the command reports
+        success."""
+        mock_which.return_value = None
+        doc_root = Path(site_manager.sites['mysite']['document_root'])
+        (doc_root / marker).write_text("<?php\n")
+
+        missing_at_chown = []
+
+        def spy(cmd, **kwargs):
+            if 'chown' in cmd:
+                for rel in writable_dirs:
+                    if not (doc_root / rel).exists():
+                        missing_at_chown.append(rel)
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = spy
+
+        result = site_manager.fix_permissions('mysite')
+
+        assert result['success'] is True
+        assert any('chown' in c[0][0] for c in mock_run.call_args_list)
+        assert missing_at_chown == []
+
+    @patch('wslaragon.services.sites.shutil.which')
+    @patch('wslaragon.services.sites.subprocess.run')
+    def test_generic_site_gets_no_write_acl_anywhere(self, mock_run, mock_which, site_manager):
+        """Static/Node/Python/phpMyAdmin sites keep read-only www-data access:
+        no rwX and no default ACLs may leak onto any path."""
+        mock_which.return_value = '/usr/bin/setfacl'
+        mock_run.return_value = MagicMock(returncode=0)
+        doc_root = Path(site_manager.sites['mysite']['document_root'])
+
+        result = site_manager.fix_permissions('mysite')
+
+        assert result['success'] is True
+        calls = [c[0][0] for c in mock_run.call_args_list]
+        assert ['sudo', 'setfacl', '-R', '-m', 'u:www-data:rx', str(doc_root)] in calls
+        assert not any('u:www-data:rwX' in call for call in calls)
+        assert not any('d:u:www-data:rwX' in call for call in calls)
 
     @patch('wslaragon.services.sites.shutil.which')
     @patch('wslaragon.services.sites.subprocess.run')

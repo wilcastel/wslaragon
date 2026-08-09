@@ -726,6 +726,47 @@ class SiteManager:
             return f"{protocol}://{site_name}{self.tld}"
         return None
 
+    def _grant_www_data_access(self, path: str, write: bool, setfacl_path: Optional[str]) -> None:
+        """Grant www-data access on a path via POSIX ACLs, with chmod fallback.
+
+        write=False grants read-only access (rx / o+rx). write=True grants
+        rwX recursively plus default ACLs on directories, so files created
+        later inherit write access. The chmod fallback uses group-writable
+        modes (2775 on dirs, 664 on files) for write=True and o+rx for
+        write=False; world-write is never granted.
+        """
+        if setfacl_path:
+            mode = 'u:www-data:rwX' if write else 'u:www-data:rx'
+            subprocess.run(
+                ['sudo', 'setfacl', '-R', '-m', mode, path],
+                check=True,
+                capture_output=True,
+            )
+            if write:
+                # Default ACLs so new files inherit www-data write access
+                subprocess.run(
+                    ['sudo', 'find', path, '-type', 'd', '-exec', 'setfacl', '-m', 'd:u:www-data:rwX', '{}', '+'],
+                    check=True,
+                    capture_output=True,
+                )
+        elif write:
+            subprocess.run(
+                ['sudo', 'find', path, '-type', 'd', '-exec', 'chmod', '2775', '{}', '+'],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ['sudo', 'find', path, '-type', 'f', '-exec', 'chmod', '664', '{}', '+'],
+                check=True,
+                capture_output=True,
+            )
+        else:
+            subprocess.run(
+                ['sudo', 'chmod', '-R', 'o+rx', path],
+                check=True,
+                capture_output=True,
+            )
+
     def fix_permissions(self, site_name: str) -> Dict:
         """Fix file owner and permissions for a site"""
         try:
@@ -739,19 +780,50 @@ class SiteManager:
             # Get current user
             current_user = os.getenv('SUDO_USER') or os.getenv('USER')
 
+            # Detect the site type by marker files in the document root and
+            # apply the least-privilege access matrix for local development.
+            doc_root_path = Path(doc_root)
+            wp_config = doc_root_path / 'wp-config.php'
+            is_wordpress = wp_config.exists()
+            is_laravel = (doc_root_path / 'artisan').exists()
+
+            # Create the directories we grant write access on BEFORE the
+            # recursive chown, so they get group www-data too. Creating them
+            # after chown would leave them with the invoking user's primary
+            # group and silently defeat the chmod fallback (2775 would grant
+            # group-write to the wrong group).
+            laravel_writable_dirs = []
+            if is_wordpress:
+                wp_content = doc_root_path / 'wp-content'
+                for writable_dir in ('plugins', 'uploads', 'upgrade'):
+                    (wp_content / writable_dir).mkdir(parents=True, exist_ok=True)
+            elif is_laravel:
+                for writable_dir in ('storage', 'bootstrap/cache'):
+                    target = doc_root_path / writable_dir
+                    target.mkdir(parents=True, exist_ok=True)
+                    laravel_writable_dirs.append(target)
+
             # Set owner to current_user:www-data
             cmd_chown = ['sudo', 'chown', '-R', f'{current_user}:www-data', doc_root]
             subprocess.run(cmd_chown, check=True, capture_output=True)
 
-            # Prefer POSIX ACLs for fine-grained www-data read access on Ubuntu.
+            # Prefer POSIX ACLs for fine-grained www-data access on Ubuntu.
             # Fall back to chmod when setfacl is unavailable.
             setfacl_path = shutil.which('setfacl')
-            if setfacl_path:
-                cmd_setfacl = ['sudo', 'setfacl', '-R', '-m', 'u:www-data:rx', doc_root]
-                subprocess.run(cmd_setfacl, check=True, capture_output=True)
+
+            if is_wordpress:
+                # WordPress core updates write to wp-admin/, wp-includes/ and
+                # root files, so www-data needs write on the whole docroot.
+                self._grant_www_data_access(doc_root, write=True, setfacl_path=setfacl_path)
             else:
-                cmd_chmod = ['sudo', 'chmod', '-R', 'o+rx', doc_root]
-                subprocess.run(cmd_chmod, check=True, capture_output=True)
+                # Base read-only access for every non-WordPress site.
+                self._grant_www_data_access(doc_root, write=False, setfacl_path=setfacl_path)
+
+                # Laravel writes logs/cache/sessions under storage/ and
+                # bootstrap/cache/. Escalate to rwX AFTER the base rx
+                # pass so the recursive rx does not override it.
+                for target in laravel_writable_dirs:
+                    self._grant_www_data_access(str(target), write=True, setfacl_path=setfacl_path)
 
             # Additional fix for storage folders commonly used in frameworks (Laravel, etc)
             # This ensures even new files created inherit the group 'www-data'
@@ -760,7 +832,6 @@ class SiteManager:
 
             # WordPress specific fix: FS_METHOD direct
             # This prevents WP from asking for FTP credentials
-            wp_config = Path(doc_root) / 'wp-config.php'
             if wp_config.exists():
                 try:
                     with open(wp_config, 'r') as f:

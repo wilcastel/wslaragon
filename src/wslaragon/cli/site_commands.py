@@ -329,7 +329,7 @@ def fix_permissions(name):
     
     if result['success']:
         console.print(f"[green]✓ Permissions fixed for '{name}'[/green]")
-        console.print(f"[dim]Owner set to current user, Group set to www-data (775)[/dim]")
+        console.print(f"[dim]www-data access applied per site type (write where required)[/dim]")
     else:
         console.print(f"[red]✗ Failed to fix permissions: {result['error']}[/red]")
 
