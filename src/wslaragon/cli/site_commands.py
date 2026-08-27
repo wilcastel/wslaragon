@@ -18,9 +18,19 @@ from ..services.mysql import MySQLManager
 from ..services.sites import SiteManager, SudoKeepAlive
 from ..services.ssl import SSLManager
 from ..services.backup import BackupManager
+from ..services.agent_privilege import PrivilegeClient
 
 logger = logging.getLogger(__name__)
 console = Console()
+_PRIVILEGE_MODES = ['interactive', 'agent']
+
+
+def _agent_creation_available() -> bool:
+    """Return whether the fixed helper is ready without interactive fallback."""
+    try:
+        return PrivilegeClient().ready().ok
+    except Exception:
+        return False
 
 
 @click.group()
@@ -54,8 +64,16 @@ def site():
 @click.option('--postgres', 'db_type', flag_value='postgres', help='Use PostgreSQL instead of MySQL')
 @click.option('--supabase', 'db_type', flag_value='supabase', help='Use Supabase (PostgreSQL + Supabase config)')
 @click.option('--force', 'recreate', is_flag=True, default=False, help='Force recreate site (overwrite existing files)')
-def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astro, is_headless, backend, frontend, headless_url, db_type, recreate):
+@click.option('--privilege-mode', type=click.Choice(_PRIVILEGE_MODES), default='interactive', hidden=True)
+def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astro, is_headless, backend, frontend, headless_url, db_type, recreate, privilege_mode):
     """Create a new site"""
+    if privilege_mode == 'agent':
+        if not _agent_creation_available():
+            console.print('[red]✗ Agent privilege setup is unavailable[/red]')
+            return
+        console.print('[yellow]✗ Agent site registration is not available yet[/yellow]')
+        return
+
     # Override defaults for Node/Python/Vite/Astro if not explicitly set
     
     if site_type in ('node', 'python') or vite:
