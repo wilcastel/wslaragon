@@ -70,6 +70,7 @@ class TestSiteCreateCommand:
                 'nginx': mock_nginx,
                 'mysql': mock_mysql,
                 'site_mgr': mock_site_mgr_instance,
+                'site_mgr_cls': mock_site_mgr,
                 'run': mock_run,
             }
 
@@ -93,10 +94,11 @@ class TestSiteCreateCommand:
 
     @patch('wslaragon.cli.site_commands.SudoKeepAlive')
     @patch('wslaragon.cli.site_commands.PrivilegeClient')
-    def test_agent_mode_ready_fails_closed_before_constructing_managers(
+    def test_agent_mode_ready_routes_to_injected_site_manager(
         self, mock_client, mock_keep_alive, runner, mock_deps
     ):
-        """Slice 4a validates readiness but deliberately has no routing yet."""
+        """A ready client routes creation through a privilege-injected SiteManager
+        with no interactive sudo and no SudoKeepAlive."""
         from wslaragon.cli.site_commands import site
 
         mock_client.return_value.ready.return_value = MagicMock(ok=True)
@@ -104,13 +106,33 @@ class TestSiteCreateCommand:
         result = runner.invoke(site, ['create', 'testsite', '--privilege-mode=agent'])
 
         assert result.exit_code == 0
-        assert 'not available' in result.output.lower()
         mock_client.return_value.ready.assert_called_once_with()
+        mock_deps['site_mgr'].create_site.assert_called_once()
+        # SiteManager was built with the ready client injected.
+        _, kwargs = mock_deps['site_mgr_cls'].call_args
+        assert kwargs.get('privilege_client') is mock_client.return_value
+        # No interactive sudo path.
         mock_deps['run'].assert_not_called()
         mock_keep_alive.assert_not_called()
-        mock_deps['nginx'].assert_not_called()
-        mock_deps['mysql'].assert_not_called()
-        mock_deps['site_mgr'].create_site.assert_not_called()
+
+    @patch('wslaragon.cli.site_commands.SudoKeepAlive')
+    @patch('wslaragon.cli.site_commands.PrivilegeClient')
+    def test_agent_mode_ready_routes_headless(
+        self, mock_client, mock_keep_alive, runner, mock_deps
+    ):
+        from wslaragon.cli.site_commands import site
+
+        mock_client.return_value.ready.return_value = MagicMock(ok=True)
+
+        result = runner.invoke(site, [
+            'create', '--headless', '--backend=wordpress', '--frontend=astro',
+            '--url=misitio', '--privilege-mode=agent',
+        ])
+
+        assert result.exit_code == 0
+        mock_deps['site_mgr'].create_headless_site.assert_called_once()
+        mock_deps['run'].assert_not_called()
+        mock_keep_alive.assert_not_called()
 
     @patch('wslaragon.cli.site_commands.SudoKeepAlive')
     @patch('wslaragon.cli.site_commands.PrivilegeClient')
@@ -132,13 +154,11 @@ class TestSiteCreateCommand:
         mock_client.return_value.ready.assert_called_once_with()
         mock_deps['run'].assert_not_called()
         mock_keep_alive.assert_not_called()
-        mock_deps['nginx'].assert_not_called()
-        mock_deps['mysql'].assert_not_called()
         mock_deps['site_mgr'].create_headless_site.assert_not_called()
 
     @patch('wslaragon.cli.site_commands.SudoKeepAlive')
     @patch('wslaragon.cli.site_commands.PrivilegeClient', side_effect=RuntimeError('missing'))
-    def test_agent_mode_missing_client_fails_safely_without_managers(
+    def test_agent_mode_missing_client_fails_safely_without_creating(
         self, mock_client, mock_keep_alive, runner, mock_deps
     ):
         """A client construction failure cannot reach the interactive path."""

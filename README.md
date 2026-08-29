@@ -209,6 +209,24 @@ make test-integration  # Solo integración (usa --run-slow)
 make test-cov          # Con cobertura (falla si < 90%)
 ```
 
+### Harness nativo de privilegios del agente (opt-in)
+
+`tests/integration/test_agent_privilege_native.py` ejerce el borde real de
+privilegios de extremo a extremo (bootstrap del helper root + fragmento sudoers
+dedicado, sonda `sudo -n` no interactiva, creación en modo agente y `disable`).
+Está **desactivado por defecto**: instala un helper de sistema, escribe un
+fragmento en `sudoers` y modifica `/etc/hosts`/Nginx. Ejecútalo solo contra un
+usuario desechable + root en un host Ubuntu nativo que estés dispuesto a
+modificar:
+
+```bash
+WSLARAGON_AGENT_NATIVE_TEST=1 \
+  ./venv/bin/pytest -m "integration and requires_sudo" \
+  tests/integration/test_agent_privilege_native.py
+```
+
+Nunca lo ejecutes contra tu cuenta habitual ni rutas del sistema.
+
 Ver **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** para más detalles del flujo de desarrollo.
 
 ## 📚 Documentación

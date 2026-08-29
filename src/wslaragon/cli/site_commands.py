@@ -25,12 +25,50 @@ console = Console()
 _PRIVILEGE_MODES = ['interactive', 'agent']
 
 
-def _agent_creation_available() -> bool:
-    """Return whether the fixed helper is ready without interactive fallback."""
+def _run_agent_create(config, nginx, mysql_mgr, *, name, php, mysql, ssl, database,
+                      public, proxy, site_type, vite, astro, is_headless, backend,
+                      frontend, headless_url, db_type, recreate):
+    """Explicit agent-mode site creation: a ready helper client, no ``sudo -v``,
+    no ``SudoKeepAlive``, and no interactive downgrade."""
     try:
-        return PrivilegeClient().ready().ok
+        client = PrivilegeClient()
+        ready_ok = client.ready().ok
     except Exception:
-        return False
+        client, ready_ok = None, False
+    if not ready_ok:
+        console.print('[red]✗ Agent privilege setup is unavailable[/red]')
+        return
+
+    site_mgr = SiteManager(config, nginx, mysql_mgr, privilege_client=client)
+
+    if is_headless:
+        if not headless_url:
+            console.print("[red]✗ --url is required for headless sites[/red]")
+            return
+        if not backend or not frontend:
+            console.print("[red]✗ --backend and --frontend are required for headless sites[/red]")
+            return
+        if frontend == 'sveltkit':
+            frontend = 'sveltekit'
+        result = site_mgr.create_headless_site(
+            headless_url, backend=backend, frontend=frontend, ssl=ssl,
+            database_name=database, recreate=recreate,
+        )
+    else:
+        if not name:
+            console.print("[red]✗ Missing argument 'NAME'[/red]")
+            return
+        result = site_mgr.create_site(
+            name, php=php, mysql=mysql, ssl=ssl, database_name=database,
+            public_dir=public, proxy_port=proxy, site_type=site_type,
+            db_type=db_type, recreate=recreate, vite_template=vite,
+            astro_template=astro,
+        )
+
+    if result.get('success'):
+        console.print("[green]✓ Site created (agent mode)[/green]")
+    else:
+        console.print(f"[red]✗ Failed to create site: {result.get('error')}[/red]")
 
 
 @click.group()
@@ -67,37 +105,41 @@ def site():
 @click.option('--privilege-mode', type=click.Choice(_PRIVILEGE_MODES), default='interactive', hidden=True)
 def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astro, is_headless, backend, frontend, headless_url, db_type, recreate, privilege_mode):
     """Create a new site"""
-    if privilege_mode == 'agent':
-        if not _agent_creation_available():
-            console.print('[red]✗ Agent privilege setup is unavailable[/red]')
-            return
-        console.print('[yellow]✗ Agent site registration is not available yet[/yellow]')
-        return
-
     # Override defaults for Node/Python/Vite/Astro if not explicitly set
-    
+
     if site_type in ('node', 'python') or vite:
         if php:
             php = False
-            
+
         if vite and not site_type:
             site_type = 'node'
-    
+
     # Astro SSG: no PHP, no node type (serves static from dist/)
     if astro:
         if php:
             php = False
-    
+
     # phpMyAdmin doesn't need its own database (it manages existing ones)
     if site_type == 'phpmyadmin' and mysql is None:
         mysql = False
-             
+
     config = Config()
     nginx = NginxManager(config)
     mysql_mgr = MySQLManager(config)
+
+    if privilege_mode == 'agent':
+        _run_agent_create(
+            config, nginx, mysql_mgr,
+            name=name, php=php, mysql=mysql, ssl=ssl, database=database,
+            public=public, proxy=proxy, site_type=site_type, vite=vite, astro=astro,
+            is_headless=is_headless, backend=backend, frontend=frontend,
+            headless_url=headless_url, db_type=db_type, recreate=recreate,
+        )
+        return
+
     site_mgr = SiteManager(config, nginx, mysql_mgr)
-    
-    
+
+
     # Ensure sudo permissions before showing spinner
     try:
         subprocess.run(['sudo', '-v'], check=True)

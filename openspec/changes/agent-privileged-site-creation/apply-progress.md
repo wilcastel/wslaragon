@@ -296,3 +296,38 @@ Slice 4b (registration routing in `sites.py` / `nginx.py` / `ssl.py`), Slice 5 G
 - Slice diff is ~531 changed lines (480 insertions / 51 deletions), above the ~360-line target — the overshoot is focused-test volume (RED asked for scalar-descriptor + no-host-registration + no-direct-sudo + delayed-commit + headless-rollback coverage; TRIANGULATE added five more). Production delta is ~135 net lines. RDD is disabled, so the chained bounded-review budget is not being enforced.
 - No `test_nginx.py` / `test_site_creators.py` changes: `NginxManager` gains no behavior and the layout mapping lives in `sites.py`.
 - MCP creation still returns `privilege_setup_required` unconditionally. Slice 5 GREEN is the only activation boundary.
+
+## Slice 5 completed — coordinated public activation
+
+### Work done
+
+- `src/wslaragon/mcp/server.py`:
+  - Removed `_agent_privilege_ready()` / `_AGENT_PRIVILEGE_HELPER`. Added `_privilege_client()` (lazy `PrivilegeClient` factory, the single test patch point), `_PRIVILEGE_SETUP_CODES = {"not_ready", "helper_missing"}`, and `_privilege_failure_json(code)` — maps setup-absent codes to the stable `privilege_setup_required` payload and every other finite code to `{"ok": false, "code": <code>, "message": "Agent site creation is not available."}` (never any client stderr).
+  - `create_site` / `create_headless_site`: call `_privilege_client().ready()`; on `not ok` return `_privilege_failure_json(code)`; on ready rebuild the historical CLI argv, append `--privilege-mode=agent`, run via `_run` (never `_run_interactive`), and map the run result to the existing success/failure strings.
+- `src/wslaragon/cli/site_commands.py`:
+  - The `--privilege-mode=agent` branch now does real work via new `_run_agent_create(...)`: default overrides run first, then a guarded `PrivilegeClient()` + `ready()` check (any construction/probe exception -> "Agent privilege setup is unavailable", no downgrade), then `SiteManager(config, nginx, mysql_mgr, privilege_client=client)` and `create_site` / `create_headless_site`. No `sudo -v`, no `SudoKeepAlive`. Interactive branch unchanged.
+  - Removed the now-dead `_agent_creation_available()` stub.
+- `tests/unit/test_mcp_server.py`: `TestCreateSite` / `TestCreateHeadlessSite` rewritten to the ready/denied contract (parametrized flag permutations assert `--privilege-mode=agent` on the `_run` argv; `not_ready`/`helper_missing` -> exact `privilege_setup_required`; other codes pass through; `_run_interactive` never called; CLI-failure surfaces stderr). New `TestPrivilegeFailureMapping` covers the mapping directly and that `get_services_status` never probes the client.
+- `tests/unit/test_site_commands.py`: Slice 4a "no routing yet" assertions replaced with ready-path routing tests (injected `privilege_client`, `create_site`/`create_headless_site` called, no `sudo -v` / `SudoKeepAlive`); unavailable + client-construction-failure tests retained.
+- `tests/integration/test_agent_privilege_native.py`: new opt-in `integration` + `requires_sudo` harness, module-skipped unless `WSLARAGON_AGENT_NATIVE_TEST=1`; bootstraps/disables the helper around a non-interactive ready-probe assertion; the full dedicated-user create+rollback+disable flow is a `@pytest.mark.skip` placeholder pending a throwaway-account fixture.
+- `README.md`: `## 🧪 Tests` gained the opt-in native-harness stanza (ES).
+
+### Verification
+
+- `./venv/bin/pytest tests/unit/` — **1442 passed, 1 skipped, 0 failed**, total coverage 99.33%.
+- `./venv/bin/pytest tests/integration/test_agent_privilege_native.py` — 2 skipped (opt-in).
+- `git diff --check` — clean.
+- `_run_interactive` is unreachable from either MCP create tool (asserted per permutation).
+
+### TDD Cycle Evidence
+
+| Task | Test files | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|---|---|---|---|---|---|---|---|
+| Slice 5 | `test_mcp_server.py`, `test_site_commands.py`, `test_agent_privilege_native.py` | Unit + opt-in integration | `./venv/bin/pytest tests/unit/` green before edits (1431 passed) | 29 failed (obsolete fail-closed MCP tests + Slice 4a "no routing" CLI tests) | 256 focused MCP+CLI tests pass after activation wiring | opt-in native harness added (`requires_sudo`, skipped by default) + README stanza | removed dead `_agent_creation_available`; single `_privilege_client()` patch point; response shape / no-stderr-echo preserved |
+
+### Deviations and risks
+
+- Slice diff ~512 changed lines (360 ins / 152 del across 6 files), above the ~350 target — mostly the `test_mcp_server.py` rewrite (272 changed lines). Production delta is modest. RDD is disabled so the bounded-review budget is not enforced.
+- `site_commands.py` coverage 98% — the uncovered lines are `_run_agent_create` guard clauses (missing `--url` / `--backend` / name, sveltkit alias) reachable only in ready agent mode; covered indirectly, not with dedicated CLI cases.
+- The activation is code-complete but **inert at runtime** until an administrator runs `scripts/agent-privilege-setup.sh bootstrap` on a native-Ubuntu host: with no installed helper, `ready()` returns `helper_missing` and both MCP tools return `privilege_setup_required`.
+- The native `requires_sudo` end-to-end flow (dedicated user create + forced headless rollback + disable) is a skipped placeholder — it needs a throwaway-account fixture and a real box.
