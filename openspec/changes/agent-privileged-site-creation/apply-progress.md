@@ -264,3 +264,35 @@ Earlier apply/verify passes reported the configured unit command as BLOCKED beca
 ### Still pending (unchanged)
 
 Slice 4b (registration routing in `sites.py` / `nginx.py` / `ssl.py`), Slice 5 GREEN (MCP ready-gated `--privilege-mode=agent` activation), the opt-in native `requires_sudo` integration harness, `README.md` admin setup/rollback docs, and running `scripts/agent-privilege-setup.sh` on the host to install `/usr/lib/wslaragon/agent-privilege-helper` + the dedicated sudoers fragment. Until Slice 5 GREEN, both MCP create tools stay unconditionally fail-closed.
+
+## Slice 4b completed — bounded agent registration routing
+
+### Work done
+
+- `src/wslaragon/services/sites.py`:
+  - New pure `registration_layout(*, is_astro_ssg, use_public, headless_role=None) -> str` returning the closed enum `normal-root|normal-public|normal-dist|headless-backend-{root,public}|headless-frontend-{root,dist}`. This is the only value that crosses the privilege boundary — no root, path, or Nginx content.
+  - `SiteManager.__init__` gains `privilege_client=None`; non-`None` selects agent mode. All existing call sites keep working.
+  - `create_site` agent branch: `SSLManager.setup_ssl_for_site(..., register_hosts=False)` + one `privilege_client.apply_registration(site, layout, ssl=, php=, proxy_port=)` replacing `SSLManager` host step and `nginx.add_site`; `sites.json` committed only after a successful `PrivilegeResult`; `fix_permissions` skipped (helper applies the www-data policy inside `apply_registration`); on `not result.ok` returns `{'success': False, 'error': <code>}` and the `except` skips `_cleanup_failed_site_directory` — scaffold/cert/db preserved for repair.
+  - `create_headless_site` agent branch: backend (`api.<name>`) registered first, frontend second; a frontend failure triggers `remove_registration(api.<name>, backend_layout)` only (never the frontend, project files, certs, or DB), leaves both `sites.json` entries uncommitted, and returns the original failure even if compensation also fails.
+- `src/wslaragon/services/ssl.py`: `setup_ssl_for_site` gains `register_hosts: bool = True`; `False` generates only the certificate and never calls `add_to_hosts` / `add_to_windows_hosts`. A cert failure still short-circuits to `{'success': False}`.
+- `src/wslaragon/services/nginx.py`: unchanged — direct `NginxManager` methods stay on the interactive path only.
+- `src/wslaragon/mcp/server.py`: unchanged — the unconditional fail-closed guard is intact (not in `git diff`).
+
+### Verification
+
+- `./venv/bin/pytest tests/unit/` — **1431 passed, 1 skipped, 0 failed**, total coverage 99.53% (`--cov-fail-under=90` satisfied).
+- Named focused files (`test_sites.py test_site_creators.py test_nginx.py test_ssl.py`) — 331 passed.
+- `git diff --check` — clean.
+- New tests: `TestRegistrationLayout` (8), `TestSiteManagerAgentMode` (10), `TestSiteManagerAgentModeTriangulation` (7) in `test_sites.py`; `TestSetupSSLForSiteHostRegistration` (3) in `test_ssl.py`.
+
+### TDD Cycle Evidence
+
+| Task | Test files | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|---|---|---|---|---|---|---|---|
+| Slice 4b | `tests/unit/test_sites.py`, `tests/unit/test_ssl.py` | Unit | `./venv/bin/pytest tests/unit/` green before edits (1406 passed) | 10 failed + 8 errored (API absent: `registration_layout`, `privilege_client` kwarg, `register_hosts` kwarg) | 20 focused tests pass after routing implementation | +7 failure/edge tests (per-code surfacing, no premature commit, headless backend-fail no-compensation, compensation-fail original error, unknown role) | Dropped unused `AGENT_REGISTRATION_LAYOUTS` frozenset; descriptor logic isolated in the pure function; `mcp/server.py` untouched |
+
+### Deviations and risks
+
+- Slice diff is ~531 changed lines (480 insertions / 51 deletions), above the ~360-line target — the overshoot is focused-test volume (RED asked for scalar-descriptor + no-host-registration + no-direct-sudo + delayed-commit + headless-rollback coverage; TRIANGULATE added five more). Production delta is ~135 net lines. RDD is disabled, so the chained bounded-review budget is not being enforced.
+- No `test_nginx.py` / `test_site_creators.py` changes: `NginxManager` gains no behavior and the layout mapping lives in `sites.py`.
+- MCP creation still returns `privilege_setup_required` unconditionally. Slice 5 GREEN is the only activation boundary.

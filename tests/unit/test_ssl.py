@@ -912,3 +912,55 @@ class TestSSLManagerSetupSSLForSite:
         assert result['success'] is True
         assert result['domain'] == 'myapp.test'
         ssl_manager.generate_certificate.assert_called_once_with('myapp.test')
+
+
+class TestSetupSSLForSiteHostRegistration:
+    """Slice 4b: agent-mode SSL setup must not touch the hosts file.
+
+    The privileged helper owns the managed /etc/hosts entry via
+    apply_registration, so setup_ssl_for_site(..., register_hosts=False) must
+    still generate the certificate but never call add_to_hosts /
+    add_to_windows_hosts.
+    """
+
+    @pytest.fixture
+    def ssl_manager(self, mock_config):
+        from wslaragon.services.ssl import SSLManager
+        return SSLManager(mock_config)
+
+    def test_registers_hosts_by_default(self, ssl_manager):
+        """Default (interactive) behaviour is unchanged: hosts entry is added."""
+        ssl_manager.generate_certificate = MagicMock(return_value=True)
+        ssl_manager.add_to_hosts = MagicMock(return_value=True)
+        ssl_manager.add_to_windows_hosts = MagicMock(return_value=True)
+        ssl_manager.get_certificate_info = MagicMock(return_value={'subject': 'test'})
+
+        result = ssl_manager.setup_ssl_for_site("myapp", ".test")
+
+        assert result['success'] is True
+        assert ssl_manager.add_to_hosts.called or ssl_manager.add_to_windows_hosts.called
+
+    def test_skips_hosts_when_register_hosts_false(self, ssl_manager):
+        """Agent mode: cert is generated, no hosts-file mutation is attempted."""
+        ssl_manager.generate_certificate = MagicMock(return_value=True)
+        ssl_manager.add_to_hosts = MagicMock(return_value=True)
+        ssl_manager.add_to_windows_hosts = MagicMock(return_value=True)
+        ssl_manager.get_certificate_info = MagicMock(return_value={'subject': 'test'})
+
+        result = ssl_manager.setup_ssl_for_site("myapp", ".test", register_hosts=False)
+
+        assert result['success'] is True
+        assert result['domain'] == 'myapp.test'
+        ssl_manager.generate_certificate.assert_called_once_with('myapp.test')
+        ssl_manager.add_to_hosts.assert_not_called()
+        ssl_manager.add_to_windows_hosts.assert_not_called()
+
+    def test_skips_hosts_still_fails_on_cert_error(self, ssl_manager):
+        """register_hosts=False does not paper over a certificate failure."""
+        ssl_manager.generate_certificate = MagicMock(return_value=False)
+        ssl_manager.add_to_hosts = MagicMock(return_value=True)
+
+        result = ssl_manager.setup_ssl_for_site("myapp", ".test", register_hosts=False)
+
+        assert result['success'] is False
+        ssl_manager.add_to_hosts.assert_not_called()

@@ -444,6 +444,300 @@ class TestSiteManagerCreateSite:
         assert result['success'] is False
 
 
+class TestRegistrationLayout:
+    """Slice 4b: pure mapping from computed site metadata to the closed layout
+    enum the privileged helper accepts (no root, path, or Nginx content)."""
+
+    @pytest.mark.parametrize("kwargs,expected", [
+        (dict(is_astro_ssg=False, use_public=False), "normal-root"),
+        (dict(is_astro_ssg=False, use_public=True), "normal-public"),
+        (dict(is_astro_ssg=True, use_public=False), "normal-dist"),
+        (dict(is_astro_ssg=True, use_public=True), "normal-dist"),
+        (dict(is_astro_ssg=False, use_public=False, headless_role="backend"), "headless-backend-root"),
+        (dict(is_astro_ssg=False, use_public=True, headless_role="backend"), "headless-backend-public"),
+        (dict(is_astro_ssg=False, use_public=False, headless_role="frontend"), "headless-frontend-root"),
+        (dict(is_astro_ssg=True, use_public=False, headless_role="frontend"), "headless-frontend-dist"),
+    ])
+    def test_layout_mapping(self, kwargs, expected):
+        from wslaragon.services.sites import registration_layout
+        assert registration_layout(**kwargs) == expected
+
+
+class TestSiteManagerAgentMode:
+    """Slice 4b: when a PrivilegeClient is injected, derived host/Nginx/access
+    registration is routed through it instead of direct sudo, sites.json is
+    committed only after registration succeeds, and a registration failure
+    preserves the unprivileged scaffold/certificate/database."""
+
+    @pytest.fixture
+    def privilege_client(self):
+        from wslaragon.services.agent_privilege import PrivilegeResult
+        client = MagicMock()
+        client.apply_registration.return_value = PrivilegeResult(True, "ok")
+        client.remove_registration.return_value = PrivilegeResult(True, "ok")
+        return client
+
+    @pytest.fixture
+    def site_manager(self, tmp_path, mock_nginx_manager, mock_mysql_manager, privilege_client):
+        with patch('wslaragon.services.sites.SSLManager'):
+            from wslaragon.services.sites import SiteManager
+
+            config = MagicMock()
+            config.get.side_effect = lambda key, default=None: {
+                "sites.tld": ".test",
+                "sites.document_root": str(tmp_path / "web"),
+                "sites.dir": str(tmp_path / "sites"),
+                "ssl.dir": str(tmp_path / "ssl"),
+            }.get(key, default)
+
+            return SiteManager(
+                config, mock_nginx_manager, mock_mysql_manager,
+                privilege_client=privilege_client,
+            )
+
+    @patch('wslaragon.services.sites.get_site_creator', return_value=None)
+    @patch('subprocess.run')
+    def test_create_site_routes_apply_registration_not_nginx(
+        self, mock_run, _creator, site_manager, privilege_client
+    ):
+        result = site_manager.create_site('agentsite', php=True, ssl=False)
+
+        assert result['success'] is True
+        privilege_client.apply_registration.assert_called_once_with(
+            'agentsite', 'normal-root', ssl=False, php=True, proxy_port=None
+        )
+        site_manager.nginx.add_site.assert_not_called()
+        assert 'agentsite' in site_manager.sites
+
+    @patch('wslaragon.services.sites.get_site_creator', return_value=None)
+    @patch('subprocess.run')
+    def test_create_site_public_layout(self, mock_run, _creator, site_manager, privilege_client):
+        site_manager.create_site('pubsite', php=True, ssl=False, public_dir=True)
+
+        assert privilege_client.apply_registration.call_args[0][1] == 'normal-public'
+
+    @patch('wslaragon.services.sites.get_site_creator')
+    @patch('subprocess.run')
+    def test_create_site_astro_layout(self, mock_run, mock_creator, site_manager, privilege_client):
+        mock_creator.return_value.create.return_value = []
+
+        site_manager.create_site('blogsite', php=False, ssl=False, astro_template='basics')
+
+        assert privilege_client.apply_registration.call_args[0][1] == 'normal-dist'
+
+    @patch('wslaragon.services.sites.SiteManager._cleanup_failed_site_directory')
+    @patch('wslaragon.services.sites.get_site_creator', return_value=None)
+    @patch('subprocess.run')
+    def test_apply_registration_failure_preserves_scaffold(
+        self, mock_run, _creator, mock_cleanup, site_manager, privilege_client
+    ):
+        from wslaragon.services.agent_privilege import PrivilegeResult
+        privilege_client.apply_registration.return_value = PrivilegeResult(False, "operation_failed")
+
+        result = site_manager.create_site('failsite', php=True, ssl=False)
+
+        assert result['success'] is False
+        assert 'operation_failed' in result['error']
+        assert 'failsite' not in site_manager.sites
+        assert (site_manager.document_root / 'failsite').exists()
+        mock_cleanup.assert_not_called()
+
+    @patch('wslaragon.services.sites.SiteManager.fix_permissions')
+    @patch('wslaragon.services.sites.get_site_creator', return_value=None)
+    @patch('subprocess.run')
+    def test_agent_mode_skips_fix_permissions(self, mock_run, _creator, mock_fix, site_manager):
+        site_manager.create_site('permsite', php=True, ssl=False)
+
+        mock_fix.assert_not_called()
+
+    @patch('wslaragon.services.sites.SSLManager')
+    @patch('wslaragon.services.sites.get_site_creator', return_value=None)
+    @patch('subprocess.run')
+    def test_ssl_setup_skips_host_registration(self, mock_run, _creator, mock_ssl, site_manager):
+        mock_ssl.return_value.setup_ssl_for_site.return_value = {'success': True}
+
+        site_manager.create_site('sslsite', php=True, ssl=True)
+
+        _, kwargs = mock_ssl.return_value.setup_ssl_for_site.call_args
+        assert kwargs.get('register_hosts') is False
+
+    @patch('wslaragon.services.sites.SSLManager')
+    @patch('wslaragon.services.sites.get_site_creator')
+    @patch('subprocess.run')
+    def test_headless_registers_backend_then_frontend(
+        self, mock_run, mock_creator, mock_ssl, site_manager, privilege_client
+    ):
+        mock_creator.return_value.create.return_value = []
+        mock_ssl.return_value.setup_ssl_for_site.return_value = {'success': True}
+        site_manager.mysql.database_exists.return_value = False
+        site_manager.mysql.create_database.return_value = (True, None)
+
+        result = site_manager.create_headless_site('hs', backend='wordpress', frontend='astro', ssl=False)
+
+        assert result['success'] is True
+        calls = privilege_client.apply_registration.call_args_list
+        assert len(calls) == 2
+        assert calls[0][0][0] == 'api.hs'
+        assert calls[0][0][1].startswith('headless-backend')
+        assert calls[1][0][0] == 'hs'
+        assert calls[1][0][1].startswith('headless-frontend')
+        assert 'hs' in site_manager.sites and 'api.hs' in site_manager.sites
+        site_manager.nginx.add_site.assert_not_called()
+
+    @patch('wslaragon.services.sites.SSLManager')
+    @patch('wslaragon.services.sites.get_site_creator')
+    @patch('subprocess.run')
+    def test_headless_frontend_failure_removes_backend_only(
+        self, mock_run, mock_creator, mock_ssl, site_manager, privilege_client
+    ):
+        from wslaragon.services.agent_privilege import PrivilegeResult
+        mock_creator.return_value.create.return_value = []
+        mock_ssl.return_value.setup_ssl_for_site.return_value = {'success': True}
+        site_manager.mysql.database_exists.return_value = False
+        site_manager.mysql.create_database.return_value = (True, None)
+        privilege_client.apply_registration.side_effect = [
+            PrivilegeResult(True, "ok"),
+            PrivilegeResult(False, "operation_failed"),
+        ]
+
+        result = site_manager.create_headless_site('hf', backend='wordpress', frontend='astro', ssl=False)
+
+        assert result['success'] is False
+        privilege_client.remove_registration.assert_called_once()
+        removed = privilege_client.remove_registration.call_args[0]
+        assert removed[0] == 'api.hf'
+        assert removed[1].startswith('headless-backend')
+        assert 'hf' not in site_manager.sites
+        assert 'api.hf' not in site_manager.sites
+        assert (site_manager.document_root / 'hf').exists()
+        site_manager.mysql.drop_database.assert_not_called()
+
+    @patch('wslaragon.services.sites.get_site_creator', return_value=None)
+    @patch('subprocess.run')
+    def test_interactive_mode_unchanged_without_client(
+        self, mock_run, _creator, tmp_path, mock_nginx_manager, mock_mysql_manager
+    ):
+        with patch('wslaragon.services.sites.SSLManager'):
+            from wslaragon.services.sites import SiteManager
+
+            config = MagicMock()
+            config.get.side_effect = lambda key, default=None: {
+                "sites.tld": ".test",
+                "sites.document_root": str(tmp_path / "web"),
+                "sites.dir": str(tmp_path / "sites"),
+            }.get(key, default)
+            sm = SiteManager(config, mock_nginx_manager, mock_mysql_manager)
+        sm.nginx.add_site.return_value = (True, None)
+
+        sm.create_site('classic', php=True, ssl=False)
+
+        sm.nginx.add_site.assert_called_once()
+
+
+class TestSiteManagerAgentModeTriangulation:
+    """Slice 4b TRIANGULATE: failure/edge behaviour of the agent registration path."""
+
+    @pytest.fixture
+    def privilege_client(self):
+        from wslaragon.services.agent_privilege import PrivilegeResult
+        client = MagicMock()
+        client.apply_registration.return_value = PrivilegeResult(True, "ok")
+        client.remove_registration.return_value = PrivilegeResult(True, "ok")
+        return client
+
+    @pytest.fixture
+    def site_manager(self, tmp_path, mock_nginx_manager, mock_mysql_manager, privilege_client):
+        with patch('wslaragon.services.sites.SSLManager'):
+            from wslaragon.services.sites import SiteManager
+
+            config = MagicMock()
+            config.get.side_effect = lambda key, default=None: {
+                "sites.tld": ".test",
+                "sites.document_root": str(tmp_path / "web"),
+                "sites.dir": str(tmp_path / "sites"),
+                "ssl.dir": str(tmp_path / "ssl"),
+            }.get(key, default)
+            return SiteManager(
+                config, mock_nginx_manager, mock_mysql_manager,
+                privilege_client=privilege_client,
+            )
+
+    def test_registration_layout_rejects_unknown_headless_role(self):
+        from wslaragon.services.sites import registration_layout
+        with pytest.raises(ValueError):
+            registration_layout(is_astro_ssg=False, use_public=False, headless_role="sidecar")
+
+    @pytest.mark.parametrize("code", ["not_ready", "authorization_denied", "operation_failed"])
+    @patch('wslaragon.services.sites.get_site_creator', return_value=None)
+    @patch('subprocess.run')
+    def test_create_site_surfaces_each_failure_code(
+        self, mock_run, _creator, code, site_manager, privilege_client
+    ):
+        from wslaragon.services.agent_privilege import PrivilegeResult
+        privilege_client.apply_registration.return_value = PrivilegeResult(False, code)
+
+        result = site_manager.create_site('coded', php=True, ssl=False)
+
+        assert result['success'] is False
+        assert code in result['error']
+
+    @patch('wslaragon.services.sites.SiteManager._save_sites')
+    @patch('wslaragon.services.sites.get_site_creator', return_value=None)
+    @patch('subprocess.run')
+    def test_no_state_commit_before_successful_registration(
+        self, mock_run, _creator, mock_save, site_manager, privilege_client
+    ):
+        from wslaragon.services.agent_privilege import PrivilegeResult
+        privilege_client.apply_registration.return_value = PrivilegeResult(False, "operation_failed")
+
+        site_manager.create_site('nocommit', php=True, ssl=False)
+
+        mock_save.assert_not_called()
+
+    @patch('wslaragon.services.sites.SSLManager')
+    @patch('wslaragon.services.sites.get_site_creator')
+    @patch('subprocess.run')
+    def test_headless_backend_registration_failure_does_not_compensate(
+        self, mock_run, mock_creator, mock_ssl, site_manager, privilege_client
+    ):
+        from wslaragon.services.agent_privilege import PrivilegeResult
+        mock_creator.return_value.create.return_value = []
+        mock_ssl.return_value.setup_ssl_for_site.return_value = {'success': True}
+        site_manager.mysql.database_exists.return_value = False
+        site_manager.mysql.create_database.return_value = (True, None)
+        privilege_client.apply_registration.return_value = PrivilegeResult(False, "operation_failed")
+
+        result = site_manager.create_headless_site('hb', backend='wordpress', frontend='astro', ssl=False)
+
+        assert result['success'] is False
+        privilege_client.apply_registration.assert_called_once()
+        privilege_client.remove_registration.assert_not_called()
+        assert 'hb' not in site_manager.sites and 'api.hb' not in site_manager.sites
+
+    @patch('wslaragon.services.sites.SSLManager')
+    @patch('wslaragon.services.sites.get_site_creator')
+    @patch('subprocess.run')
+    def test_headless_compensation_failure_still_returns_original_error(
+        self, mock_run, mock_creator, mock_ssl, site_manager, privilege_client
+    ):
+        from wslaragon.services.agent_privilege import PrivilegeResult
+        mock_creator.return_value.create.return_value = []
+        mock_ssl.return_value.setup_ssl_for_site.return_value = {'success': True}
+        site_manager.mysql.database_exists.return_value = False
+        site_manager.mysql.create_database.return_value = (True, None)
+        privilege_client.apply_registration.side_effect = [
+            PrivilegeResult(True, "ok"),
+            PrivilegeResult(False, "operation_failed"),
+        ]
+        privilege_client.remove_registration.return_value = PrivilegeResult(False, "operation_failed")
+
+        result = site_manager.create_headless_site('hc', backend='wordpress', frontend='astro', ssl=False)
+
+        assert result['success'] is False
+        assert 'operation_failed' in result['error']
+        privilege_client.remove_registration.assert_called_once()
+
+
 class TestSiteManagerListSites:
     """Test suite for list_sites method"""
 

@@ -407,22 +407,28 @@ Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile", "-ExecutionPoli
             logger.debug(f"revoke_certificate failed: {e}")
             return False
     
-    def setup_ssl_for_site(self, site_name: str, tld: str) -> Dict:
-        """Setup SSL for a site"""
+    def setup_ssl_for_site(self, site_name: str, tld: str, register_hosts: bool = True) -> Dict:
+        """Setup SSL for a site.
+
+        ``register_hosts=False`` generates only the certificate and skips the
+        hosts-file entry. Agent-mode site creation uses this because the
+        privileged helper owns the managed ``/etc/hosts`` entry.
+        """
         try:
             # Normalize: strip TLD if user included it
             if site_name.endswith(tld):
                 site_name = site_name[:-len(tld)]
             domain = f"{site_name}{tld}"
-            
+
             # Generate certificate
             if not self.generate_certificate(domain):
                 return {'success': False, 'error': 'Failed to generate certificate'}
-            
+
             # Add to hosts (non-fatal if it fails — domain may already exist)
-            hosts_result = self.add_to_hosts(domain)
-            if not hosts_result:
-                logger.warning(f"Could not add {domain} to hosts (may already exist or permission denied)")
+            if register_hosts:
+                hosts_result = self.add_to_hosts(domain)
+                if not hosts_result:
+                    logger.warning(f"Could not add {domain} to hosts (may already exist or permission denied)")
             
             # Get certificate info
             cert_info = self.get_certificate_info(domain)

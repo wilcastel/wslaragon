@@ -14,6 +14,25 @@ from .site_creators import get_site_creator
 logger = logging.getLogger(__name__)
 
 
+def registration_layout(*, is_astro_ssg: bool, use_public: bool,
+                        headless_role: Optional[str] = None) -> str:
+    """Map computed site metadata to the closed layout enum the privileged
+    helper accepts.
+
+    Only this scalar enum crosses the agent privilege boundary; no root,
+    directory, hosts file, or Nginx path/content is ever passed.
+    """
+    if headless_role is None:
+        if is_astro_ssg:
+            return "normal-dist"
+        return "normal-public" if use_public else "normal-root"
+    if headless_role == "backend":
+        return "headless-backend-public" if use_public else "headless-backend-root"
+    if headless_role == "frontend":
+        return "headless-frontend-dist" if is_astro_ssg else "headless-frontend-root"
+    raise ValueError(f"invalid headless_role: {headless_role!r}")
+
+
 class SudoKeepAlive:
     """Context manager that keeps sudo credentials alive in a daemon thread.
 
@@ -53,10 +72,13 @@ class SudoKeepAlive:
 
 
 class SiteManager:
-    def __init__(self, config, nginx_manager, mysql_manager):
+    def __init__(self, config, nginx_manager, mysql_manager, privilege_client=None):
         self.config = config
         self.nginx = nginx_manager
         self.mysql = mysql_manager
+        # When set, privileged site registration (hosts/Nginx/access policy) is
+        # routed through the bounded agent helper instead of direct sudo.
+        self.privilege_client = privilege_client
         self.sites_dir = Path(config.get('sites.dir', str(config.home_dir / ".wslaragon" / "sites")))
         
         # Provide default if document_root is missing
@@ -266,25 +288,39 @@ class SiteManager:
             # wslaragon site api add <name> /api https://backend.test
             api_proxies = {}
             
+            agent_mode = self.privilege_client is not None
+
             if ssl:
                 ssl_mgr = SSLManager(self.config)
-                ssl_result = ssl_mgr.setup_ssl_for_site(site_name, self.tld)
+                ssl_result = ssl_mgr.setup_ssl_for_site(
+                    site_name, self.tld, register_hosts=not agent_mode
+                )
                 if not ssl_result['success']:
                     raise Exception(f"Failed to generate SSL: {ssl_result['error']}")
-            
-            nginx_created, nginx_error = self.nginx.add_site(
-                site_name, 
-                str(web_root), 
-                ssl=ssl, 
-                php=php,
-                proxy_port=proxy_port,
-                api_proxies=api_proxies,
-                astro_ssg=is_astro_ssg
-            )
-            
-            if not nginx_created:
-                raise Exception(f'Failed to create Nginx configuration: {nginx_error}')
-            
+
+            if agent_mode:
+                layout = registration_layout(
+                    is_astro_ssg=is_astro_ssg, use_public=use_public
+                )
+                registration = self.privilege_client.apply_registration(
+                    site_name, layout, ssl=ssl, php=php, proxy_port=proxy_port
+                )
+                if not registration.ok:
+                    raise Exception(f"Agent registration failed: {registration.code}")
+            else:
+                nginx_created, nginx_error = self.nginx.add_site(
+                    site_name,
+                    str(web_root),
+                    ssl=ssl,
+                    php=php,
+                    proxy_port=proxy_port,
+                    api_proxies=api_proxies,
+                    astro_ssg=is_astro_ssg
+                )
+
+                if not nginx_created:
+                    raise Exception(f'Failed to create Nginx configuration: {nginx_error}')
+
             site_info = {
                 'name': site_name,
                 'domain': f"{site_name}{self.tld}",
@@ -304,9 +340,12 @@ class SiteManager:
             
             self.sites[site_name] = site_info
             self._save_sites()
-            
-            self.fix_permissions(site_name)
-            
+
+            if not agent_mode:
+                # The privileged helper applies the fixed www-data policy itself
+                # as part of apply_registration; agent mode must not sudo here.
+                self.fix_permissions(site_name)
+
             panel_content = f"[bold green]Site created successfully![/bold green]\n\n"
             panel_content += f"Domain: {site_info['domain']}\n"
             panel_content += f"Document Root: {site_info['document_root']}\n"
@@ -321,7 +360,13 @@ class SiteManager:
             return {'success': True, 'site': site_info, 'messages': messages}
             
         except Exception as e:
-            if cleanup_on_failure and site_name not in self.sites:
+            # Agent mode keeps the unprivileged scaffold/cert/db for repair and
+            # never calls _cleanup_failed_site_directory (it can invoke sudo).
+            if (
+                self.privilege_client is None
+                and cleanup_on_failure
+                and site_name not in self.sites
+            ):
                 self._cleanup_failed_site_directory(site_base_dir)
             logger.error(f"Failed to create site {site_name}: {e}")
             return {'success': False, 'error': str(e)}
@@ -402,25 +447,52 @@ class SiteManager:
             if frontend_creator:
                 messages.extend(frontend_creator.create())
 
+            agent_mode = self.privilege_client is not None
+
             if ssl:
                 ssl_mgr = SSLManager(self.config)
                 for configured_site in (site_name, backend_site_name):
-                    ssl_result = ssl_mgr.setup_ssl_for_site(configured_site, self.tld)
+                    ssl_result = ssl_mgr.setup_ssl_for_site(
+                        configured_site, self.tld, register_hosts=not agent_mode
+                    )
                     if not ssl_result['success']:
                         raise Exception(f"Failed to generate SSL for {configured_site}: {ssl_result['error']}")
 
-            backend_nginx_created, backend_nginx_error = self.nginx.add_site(
-                backend_site_name, str(backend_web_root), ssl=ssl, php=True
-            )
-            if not backend_nginx_created:
-                raise Exception(f'Failed to create backend Nginx configuration: {backend_nginx_error}')
+            if agent_mode:
+                backend_layout = registration_layout(
+                    is_astro_ssg=False, use_public=(backend == 'laravel'),
+                    headless_role="backend",
+                )
+                frontend_layout = registration_layout(
+                    is_astro_ssg=(frontend == 'astro'), use_public=False,
+                    headless_role="frontend",
+                )
+                backend_reg = self.privilege_client.apply_registration(
+                    backend_site_name, backend_layout, ssl=ssl, php=True, proxy_port=None
+                )
+                if not backend_reg.ok:
+                    raise Exception(f"Agent backend registration failed: {backend_reg.code}")
+                frontend_reg = self.privilege_client.apply_registration(
+                    site_name, frontend_layout, ssl=ssl, php=False,
+                    proxy_port=frontend_proxy_port,
+                )
+                if not frontend_reg.ok:
+                    # Only the backend was registered; compensate that one alone.
+                    self.privilege_client.remove_registration(backend_site_name, backend_layout)
+                    raise Exception(f"Agent frontend registration failed: {frontend_reg.code}")
+            else:
+                backend_nginx_created, backend_nginx_error = self.nginx.add_site(
+                    backend_site_name, str(backend_web_root), ssl=ssl, php=True
+                )
+                if not backend_nginx_created:
+                    raise Exception(f'Failed to create backend Nginx configuration: {backend_nginx_error}')
 
-            frontend_nginx_created, frontend_nginx_error = self.nginx.add_site(
-                site_name, str(frontend_web_root), ssl=ssl, php=False,
-                proxy_port=frontend_proxy_port, astro_ssg=(frontend == 'astro')
-            )
-            if not frontend_nginx_created:
-                raise Exception(f'Failed to create frontend Nginx configuration: {frontend_nginx_error}')
+                frontend_nginx_created, frontend_nginx_error = self.nginx.add_site(
+                    site_name, str(frontend_web_root), ssl=ssl, php=False,
+                    proxy_port=frontend_proxy_port, astro_ssg=(frontend == 'astro')
+                )
+                if not frontend_nginx_created:
+                    raise Exception(f'Failed to create frontend Nginx configuration: {frontend_nginx_error}')
 
             now = datetime.now().isoformat()
             frontend_site_info = {
@@ -471,8 +543,9 @@ class SiteManager:
             self.sites[backend_site_name] = backend_site_info
             self._save_sites()
 
-            self.fix_permissions(site_name)
-            self.fix_permissions(backend_site_name)
+            if not agent_mode:
+                self.fix_permissions(site_name)
+                self.fix_permissions(backend_site_name)
 
             return {
                 'success': True,
@@ -482,20 +555,25 @@ class SiteManager:
             }
 
         except Exception as e:
+            agent_mode = self.privilege_client is not None
             for rollback_site in (site_name, backend_site_name):
                 if rollback_site:
-                    try:
-                        self.nginx.remove_site(rollback_site)
-                    except Exception:
-                        pass
+                    if not agent_mode:
+                        try:
+                            self.nginx.remove_site(rollback_site)
+                        except Exception:
+                            pass
                     self.sites.pop(rollback_site, None)
             self._save_sites()
-            self._cleanup_failed_site_directory(root_dir)
-            if db_created_by_us and db_name:
-                try:
-                    self.mysql.drop_database(db_name)
-                except Exception:
-                    pass
+            if not agent_mode:
+                # Agent mode already compensated any successful registration via
+                # remove_registration and keeps user-owned files/DB for repair.
+                self._cleanup_failed_site_directory(root_dir)
+                if db_created_by_us and db_name:
+                    try:
+                        self.mysql.drop_database(db_name)
+                    except Exception:
+                        pass
             logger.error(f"Failed to create headless site {site_name}: {e}")
             return {'success': False, 'error': str(e)}
 

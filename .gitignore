@@ -44,3 +44,6 @@ Thumbs.db
 
 # CodeGraph index
 .codegraph/
+
+# Stray dirs from tests that pass a MagicMock config without sites.dir
+<MagicMock*
