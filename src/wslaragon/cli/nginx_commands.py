@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ..core.config import Config
+from ..core.privilege import ensure_sudo
 from ..services.nginx import NginxManager
 from ..services.mysql import MySQLManager
 from ..services.sites import SiteManager
@@ -59,10 +60,7 @@ def set_nginx_config(key, value):
     nginx_mgr = NginxManager(config)
     
     # Validate sudo permissions
-    try:
-        subprocess.run(['sudo', '-v'], check=True)
-    except subprocess.CalledProcessError:
-        console.print("[red]✗ This command requires sudo privileges[/red]")
+    if not ensure_sudo(console):
         return
     
     valid_keys = ['client_max_body_size']

@@ -11,6 +11,7 @@ from rich.table import Table
 from rich.panel import Panel
 
 from ..core.config import Config
+from ..core.privilege import ensure_sudo
 from ..core.services import ServiceManager
 from ..services.php import PHPManager
 from ..services.nginx import NginxManager
@@ -141,10 +142,7 @@ def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astr
 
 
     # Ensure sudo permissions before showing spinner
-    try:
-        subprocess.run(['sudo', '-v'], check=True)
-    except subprocess.CalledProcessError:
-        console.print("[red]✗ This command requires sudo privileges[/red]")
+    if not ensure_sudo(console):
         return
 
     if is_headless:
@@ -252,10 +250,7 @@ def delete(name, remove_database):
     site_mgr = SiteManager(config, nginx, mysql_mgr)
     
     # Validate sudo permissions
-    try:
-        subprocess.run(['sudo', '-v'], check=True)
-    except subprocess.CalledProcessError:
-        console.print("[red]✗ This command requires sudo privileges[/red]")
+    if not ensure_sudo(console):
         return
      
     site_info = site_mgr.get_site(name)
@@ -332,10 +327,7 @@ def set_public(name, enable):
     site_mgr = SiteManager(config, nginx, mysql_mgr)
     
     # Ensure sudo permissions
-    try:
-        subprocess.run(['sudo', '-v'], check=True)
-    except subprocess.CalledProcessError:
-        console.print("[red]✗ This command requires sudo privileges[/red]")
+    if not ensure_sudo(console):
         return
 
     action = "Enabling" if enable else "Disabling"
@@ -378,10 +370,7 @@ def fix_permissions(name):
     site_mgr = SiteManager(config, nginx, mysql_mgr)
     
     # Validate sudo permissions
-    try:
-        subprocess.run(['sudo', '-v'], check=True)
-    except subprocess.CalledProcessError:
-        console.print("[red]✗ This command requires sudo privileges[/red]")
+    if not ensure_sudo(console):
         return
 
     with console.status(f"[bold green]Fixing permissions for {name}..."):
@@ -406,10 +395,7 @@ def export_site(name, output):
     backup_mgr = BackupManager(config, site_mgr, mysql_mgr, nginx)
     
     # Ensure sudo
-    try:
-        subprocess.run(['sudo', '-v'], check=True)
-    except subprocess.CalledProcessError:
-        console.print("[red]✗ This command requires sudo privileges[/red]")
+    if not ensure_sudo(console):
         return
         
     with console.status(f"[bold green]Backing up {name}..."):
@@ -434,10 +420,7 @@ def import_site_cmd(file, name):
     backup_mgr = BackupManager(config, site_mgr, mysql_mgr, nginx)
     
     # Ensure sudo
-    try:
-        subprocess.run(['sudo', '-v'], check=True)
-    except subprocess.CalledProcessError:
-        console.print("[red]✗ This command requires sudo privileges[/red]")
+    if not ensure_sudo(console):
         return
     
     with console.status(f"[bold green]Importing {file}..."):
@@ -471,10 +454,7 @@ def site_ssl(name):
         console.print(f"[yellow]✓ Site '{name}' already has SSL enabled[/yellow]")
         return
     
-    try:
-        subprocess.run(['sudo', '-v'], check=True)
-    except subprocess.CalledProcessError:
-        console.print("[red]✗ This command requires sudo privileges[/red]")
+    if not ensure_sudo(console):
         return
 
     with console.status(f"[bold green]Enabling SSL for {name}..."):
@@ -534,10 +514,7 @@ def api_add(name, path, backend):
     site_mgr = SiteManager(config, nginx, mysql_mgr)
     
     # Validate sudo permissions
-    try:
-        subprocess.run(['sudo', '-v'], check=True)
-    except subprocess.CalledProcessError:
-        console.print("[red]✗ This command requires sudo privileges[/red]")
+    if not ensure_sudo(console):
         return
     
     result = site_mgr.add_api_proxy(name, path, backend)
@@ -566,10 +543,7 @@ def api_remove(name, path):
     site_mgr = SiteManager(config, nginx, mysql_mgr)
     
     # Validate sudo permissions
-    try:
-        subprocess.run(['sudo', '-v'], check=True)
-    except subprocess.CalledProcessError:
-        console.print("[red]✗ This command requires sudo privileges[/red]")
+    if not ensure_sudo(console):
         return
     
     result = site_mgr.remove_api_proxy(name, path)

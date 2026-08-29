@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ..core.config import Config
+from ..core.privilege import ensure_sudo
 from ..services.php import PHPManager
 from ..services.nginx import NginxManager
 
@@ -152,10 +153,7 @@ def set_config(key, value):
     php_mgr = PHPManager(config)
     
     # Validate sudo permissions
-    try:
-        subprocess.run(['sudo', '-v'], check=True)
-    except subprocess.CalledProcessError:
-        console.print("[red]✗ This command requires sudo privileges[/red]")
+    if not ensure_sudo(console):
         return
 
     with console.status(f"[bold green]Updating {key} to {value}..."):
@@ -204,10 +202,7 @@ def upload_limit(size):
         console.print("[red]No PHP versions found installed.[/red]")
         return
 
-    try:
-        subprocess.run(['sudo', '-v'], check=True)
-    except subprocess.CalledProcessError:
-        console.print("[red]This command requires sudo privileges.[/red]")
+    if not ensure_sudo(console):
         return
 
     console.print(f"[bold]Setting upload limits to {size} across PHP {', '.join(installed)}...[/bold]")

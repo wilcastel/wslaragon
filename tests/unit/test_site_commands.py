@@ -4,6 +4,14 @@ from click.testing import CliRunner
 from unittest.mock import patch, MagicMock, call
 
 
+@pytest.fixture(autouse=True)
+def ensure_sudo_ok():
+    """The sudo warm-up is non-fatal without a TTY; default it to success and
+    let individual tests flip it to simulate a failed interactive auth."""
+    with patch('wslaragon.cli.site_commands.ensure_sudo', return_value=True) as mock:
+        yield mock
+
+
 class TestSiteCreateCommand:
     """Test suite for site create command"""
 
@@ -74,7 +82,7 @@ class TestSiteCreateCommand:
                 'run': mock_run,
             }
 
-    def test_site_create_basic(self, runner, mock_deps):
+    def test_site_create_basic(self, runner, mock_deps, ensure_sudo_ok):
         """Test basic site creation"""
         from wslaragon.cli.site_commands import site
 
@@ -83,14 +91,23 @@ class TestSiteCreateCommand:
         # Should attempt to create site
         assert result.exit_code == 0
 
-    def test_site_create_calls_sudo_check(self, runner, mock_deps):
-        """Test that site create checks sudo permissions"""
+    def test_site_create_warms_up_sudo(self, runner, mock_deps, ensure_sudo_ok):
+        """Interactive create still warms up sudo via the shared helper."""
         from wslaragon.cli.site_commands import site
 
         runner.invoke(site, ['create', 'testsite'])
 
-        # The default remains the legacy interactive sudo preflight.
-        mock_deps['run'].assert_any_call(['sudo', '-v'], check=True)
+        ensure_sudo_ok.assert_called_once()
+
+    def test_site_create_aborts_when_sudo_auth_fails(self, runner, mock_deps, ensure_sudo_ok):
+        """A failed interactive sudo auth stops before any site work."""
+        from wslaragon.cli.site_commands import site
+
+        ensure_sudo_ok.return_value = False
+
+        runner.invoke(site, ['create', 'testsite'])
+
+        mock_deps['site_mgr'].create_site.assert_not_called()
 
     @patch('wslaragon.cli.site_commands.SudoKeepAlive')
     @patch('wslaragon.cli.site_commands.PrivilegeClient')
@@ -173,7 +190,7 @@ class TestSiteCreateCommand:
         mock_keep_alive.assert_not_called()
         mock_deps['site_mgr'].create_site.assert_not_called()
 
-    def test_privilege_mode_is_hidden_and_rejects_invalid_values(self, runner, mock_deps):
+    def test_privilege_mode_is_hidden_and_rejects_invalid_values(self, runner, mock_deps, ensure_sudo_ok):
         """The internal agent selector is explicit but absent from public help."""
         from wslaragon.cli.site_commands import site
 
@@ -187,18 +204,17 @@ class TestSiteCreateCommand:
         mock_deps['run'].assert_not_called()
         mock_deps['site_mgr'].create_site.assert_not_called()
 
-    def test_site_create_fails_without_sudo(self, runner, mock_deps):
-        """Test that site create fails without sudo"""
+    def test_site_create_fails_without_sudo(self, runner, mock_deps, ensure_sudo_ok):
+        """Test that site create bails out when the sudo warm-up fails"""
         from wslaragon.cli.site_commands import site
-        import subprocess
 
-        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
+        ensure_sudo_ok.return_value = False
 
-        result = runner.invoke(site, ['create', 'testsite'])
+        runner.invoke(site, ['create', 'testsite'])
 
-        assert 'sudo' in result.output.lower() or result.exit_code != 0
+        mock_deps['site_mgr'].create_site.assert_not_called()
 
-    def test_site_create_with_php_flag(self, runner, mock_deps):
+    def test_site_create_with_php_flag(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --php flag"""
         from wslaragon.cli.site_commands import site
 
@@ -206,7 +222,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_with_mysql_flag(self, runner, mock_deps):
+    def test_site_create_with_mysql_flag(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --mysql flag"""
         from wslaragon.cli.site_commands import site
 
@@ -227,7 +243,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_with_ssl_disabled(self, runner, mock_deps):
+    def test_site_create_with_ssl_disabled(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --no-ssl"""
         from wslaragon.cli.site_commands import site
 
@@ -247,7 +263,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_with_custom_database(self, runner, mock_deps):
+    def test_site_create_with_custom_database(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with custom database name"""
         from wslaragon.cli.site_commands import site
 
@@ -268,7 +284,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_with_public_dir(self, runner, mock_deps):
+    def test_site_create_with_public_dir(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --public flag"""
         from wslaragon.cli.site_commands import site
 
@@ -276,7 +292,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_with_proxy_port(self, runner, mock_deps):
+    def test_site_create_with_proxy_port(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --proxy option"""
         from wslaragon.cli.site_commands import site
 
@@ -298,7 +314,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_html_type(self, runner, mock_deps):
+    def test_site_create_html_type(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --html flag"""
         from wslaragon.cli.site_commands import site
 
@@ -306,7 +322,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_wordpress_type(self, runner, mock_deps):
+    def test_site_create_wordpress_type(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --wordpress flag"""
         from wslaragon.cli.site_commands import site
 
@@ -360,7 +376,7 @@ class TestSiteCreateCommand:
         mock_keep_alive.return_value.__enter__.assert_called_once()
         mock_keep_alive.return_value.__exit__.assert_called_once()
 
-    def test_site_create_headless_calls_headless_manager(self, runner, mock_deps):
+    def test_site_create_headless_calls_headless_manager(self, runner, mock_deps, ensure_sudo_ok):
         """Test headless site creation dispatches to create_headless_site."""
         from wslaragon.cli.site_commands import site
 
@@ -374,7 +390,7 @@ class TestSiteCreateCommand:
             database_name=None, recreate=False
         )
 
-    def test_site_create_headless_requires_url(self, runner, mock_deps):
+    def test_site_create_headless_requires_url(self, runner, mock_deps, ensure_sudo_ok):
         """Test headless site creation requires --url."""
         from wslaragon.cli.site_commands import site
 
@@ -386,7 +402,7 @@ class TestSiteCreateCommand:
         assert '--url is required' in result.output
         mock_deps['site_mgr'].create_headless_site.assert_not_called()
 
-    def test_site_create_headless_requires_backend_and_frontend(self, runner, mock_deps):
+    def test_site_create_headless_requires_backend_and_frontend(self, runner, mock_deps, ensure_sudo_ok):
         """Test headless site creation requires both --backend and --frontend."""
         from wslaragon.cli.site_commands import site
 
@@ -396,7 +412,7 @@ class TestSiteCreateCommand:
         assert '--backend and --frontend are required' in result.output
         mock_deps['site_mgr'].create_headless_site.assert_not_called()
 
-    def test_site_create_missing_name_for_non_headless(self, runner, mock_deps):
+    def test_site_create_missing_name_for_non_headless(self, runner, mock_deps, ensure_sudo_ok):
         """Test that a non-headless create without NAME reports a friendly error."""
         from wslaragon.cli.site_commands import site
 
@@ -406,7 +422,7 @@ class TestSiteCreateCommand:
         assert "Missing argument 'NAME'" in result.output
         mock_deps['site_mgr'].create_site.assert_not_called()
 
-    def test_site_create_astro_forces_php_off(self, runner, mock_deps):
+    def test_site_create_astro_forces_php_off(self, runner, mock_deps, ensure_sudo_ok):
         """Test that --astro overrides --php to disable PHP (SSG sites serve dist/ directly)."""
         from wslaragon.cli.site_commands import site
 
@@ -423,7 +439,7 @@ class TestSiteCreateCommand:
         assert result.exit_code == 0
         assert mock_deps['site_mgr'].create_site.call_args.kwargs['php'] is False
 
-    def test_site_create_phpmyadmin_disables_mysql_by_default(self, runner, mock_deps):
+    def test_site_create_phpmyadmin_disables_mysql_by_default(self, runner, mock_deps, ensure_sudo_ok):
         """Test that --phpmyadmin defaults mysql to False since it manages existing DBs."""
         from wslaragon.cli.site_commands import site
 
@@ -440,7 +456,7 @@ class TestSiteCreateCommand:
         assert result.exit_code == 0
         assert mock_deps['site_mgr'].create_site.call_args.kwargs['mysql'] is False
 
-    def test_site_create_headless_accepts_sveltkit_alias(self, runner, mock_deps):
+    def test_site_create_headless_accepts_sveltkit_alias(self, runner, mock_deps, ensure_sudo_ok):
         """Test headless site creation accepts the common sveltkit spelling alias."""
         from wslaragon.cli.site_commands import site
 
@@ -454,7 +470,7 @@ class TestSiteCreateCommand:
             database_name=None, recreate=False
         )
 
-    def test_site_create_literal_name_headless_creates_normal_site(self, runner, mock_deps):
+    def test_site_create_literal_name_headless_creates_normal_site(self, runner, mock_deps, ensure_sudo_ok):
         """A site literally named 'headless' (no --headless flag) must not be hijacked."""
         from wslaragon.cli.site_commands import site
 
@@ -473,7 +489,7 @@ class TestSiteCreateCommand:
         assert mock_deps['site_mgr'].create_site.call_args[0][0] == 'headless'
         mock_deps['site_mgr'].create_headless_site.assert_not_called()
 
-    def test_site_create_laravel_type(self, runner, mock_deps):
+    def test_site_create_laravel_type(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --laravel flag"""
         from wslaragon.cli.site_commands import site
 
@@ -495,7 +511,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_node_type(self, runner, mock_deps):
+    def test_site_create_node_type(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --node flag"""
         from wslaragon.cli.site_commands import site
 
@@ -517,7 +533,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_python_type(self, runner, mock_deps):
+    def test_site_create_python_type(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --python flag"""
         from wslaragon.cli.site_commands import site
 
@@ -539,7 +555,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_vite_type(self, runner, mock_deps):
+    def test_site_create_vite_type(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --vite flag"""
         from wslaragon.cli.site_commands import site
 
@@ -561,7 +577,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_with_postgres(self, runner, mock_deps):
+    def test_site_create_with_postgres(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --postgres flag"""
         from wslaragon.cli.site_commands import site
 
@@ -584,7 +600,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_with_force(self, runner, mock_deps):
+    def test_site_create_with_force(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation with --force flag"""
         from wslaragon.cli.site_commands import site
 
@@ -592,7 +608,7 @@ class TestSiteCreateCommand:
 
         assert result.exit_code == 0
 
-    def test_site_create_shows_error_on_failure(self, runner, mock_deps):
+    def test_site_create_shows_error_on_failure(self, runner, mock_deps, ensure_sudo_ok):
         """Test site creation shows error on failure"""
         from wslaragon.cli.site_commands import site
 
@@ -632,7 +648,7 @@ class TestSiteListCommand:
                 'site_mgr': mock_site_mgr_instance,
             }
 
-    def test_site_list_empty(self, runner, mock_deps):
+    def test_site_list_empty(self, runner, mock_deps, ensure_sudo_ok):
         """Test site list with no sites"""
         from wslaragon.cli.site_commands import site
 
@@ -643,7 +659,7 @@ class TestSiteListCommand:
         assert result.exit_code == 0
         assert 'no sites' in result.output.lower()
 
-    def test_site_list_with_sites(self, runner, mock_deps):
+    def test_site_list_with_sites(self, runner, mock_deps, ensure_sudo_ok):
         """Test site list with multiple sites"""
         from wslaragon.cli.site_commands import site
 
@@ -658,7 +674,7 @@ class TestSiteListCommand:
         assert 'site1' in result.output
         assert 'site2' in result.output
 
-    def test_site_list_shows_enabled_status(self, runner, mock_deps):
+    def test_site_list_shows_enabled_status(self, runner, mock_deps, ensure_sudo_ok):
         """Test site list shows enabled/disabled status"""
         from wslaragon.cli.site_commands import site
 
@@ -672,7 +688,7 @@ class TestSiteListCommand:
         assert 'Enabled' in result.output or 'enabled' in result.output
         assert 'Disabled' in result.output or 'disabled' in result.output
 
-    def test_site_list_shows_proxy_port(self, runner, mock_deps):
+    def test_site_list_shows_proxy_port(self, runner, mock_deps, ensure_sudo_ok):
         """Test site list shows proxy port for Node/Python sites"""
         from wslaragon.cli.site_commands import site
 
@@ -717,7 +733,7 @@ class TestSiteDeleteCommand:
                 'run': mock_run,
             }
 
-    def test_site_delete_requires_confirmation(self, runner, mock_deps):
+    def test_site_delete_requires_confirmation(self, runner, mock_deps, ensure_sudo_ok):
         """Test site delete requires confirmation"""
         from wslaragon.cli.site_commands import site
 
@@ -730,7 +746,7 @@ class TestSiteDeleteCommand:
         # Should prompt for confirmation
         assert result.exit_code != 0 or 'confirm' in result.output.lower() or 'sure' in result.output.lower()
 
-    def test_site_delete_confirmed(self, runner, mock_deps):
+    def test_site_delete_confirmed(self, runner, mock_deps, ensure_sudo_ok):
         """Test site delete when confirmed"""
         from wslaragon.cli.site_commands import site
 
@@ -742,7 +758,7 @@ class TestSiteDeleteCommand:
 
         assert result.exit_code == 0
 
-    def test_site_delete_not_found(self, runner, mock_deps):
+    def test_site_delete_not_found(self, runner, mock_deps, ensure_sudo_ok):
         """Test site delete when site not found"""
         from wslaragon.cli.site_commands import site
 
@@ -752,7 +768,7 @@ class TestSiteDeleteCommand:
 
         assert 'not found' in result.output.lower()
 
-    def test_site_delete_with_remove_files(self, runner, mock_deps):
+    def test_site_delete_with_remove_files(self, runner, mock_deps, ensure_sudo_ok):
         """Test site delete answering 'yes' to the remove-files prompt"""
         from wslaragon.cli.site_commands import site
 
@@ -764,7 +780,7 @@ class TestSiteDeleteCommand:
         assert result.exit_code == 0
         mock_deps['site_mgr'].delete_site.assert_called_once_with('testsite', True, False)
 
-    def test_site_delete_with_remove_database(self, runner, mock_deps):
+    def test_site_delete_with_remove_database(self, runner, mock_deps, ensure_sudo_ok):
         """Test site delete with --remove-database option"""
         from wslaragon.cli.site_commands import site
 
@@ -775,7 +791,7 @@ class TestSiteDeleteCommand:
 
         assert result.exit_code == 0
 
-    def test_site_delete_headless_warns_about_paired_site(self, runner, mock_deps):
+    def test_site_delete_headless_warns_about_paired_site(self, runner, mock_deps, ensure_sudo_ok):
         """Deleting one half of a headless pair warns the user and offers to remove the shared root."""
         from wslaragon.cli.site_commands import site
 
@@ -791,7 +807,7 @@ class TestSiteDeleteCommand:
         assert 'api.misitio' in result.output
         assert '/test/web/misitio' in result.output
 
-    def test_site_delete_failure_path(self, runner, mock_deps):
+    def test_site_delete_failure_path(self, runner, mock_deps, ensure_sudo_ok):
         """Test site delete when deletion fails"""
         from wslaragon.cli.site_commands import site
 
@@ -802,7 +818,7 @@ class TestSiteDeleteCommand:
 
         assert 'failed' in result.output.lower() or 'error' in result.output.lower()
 
-    def test_site_delete_cancelled_at_final_confirmation(self, runner, mock_deps):
+    def test_site_delete_cancelled_at_final_confirmation(self, runner, mock_deps, ensure_sudo_ok):
         """Test that declining the final 'are you sure' prompt cancels without deleting."""
         from wslaragon.cli.site_commands import site
 
@@ -815,7 +831,7 @@ class TestSiteDeleteCommand:
         assert 'Cancelled' in result.output
         mock_deps['site_mgr'].delete_site.assert_not_called()
 
-    def test_site_delete_keeps_files_when_declined(self, runner, mock_deps):
+    def test_site_delete_keeps_files_when_declined(self, runner, mock_deps, ensure_sudo_ok):
         """Test that answering 'no' to the remove-files prompt keeps files on disk."""
         from wslaragon.cli.site_commands import site
 
@@ -830,16 +846,15 @@ class TestSiteDeleteCommand:
         assert 'Files kept at: /test/web/testsite' in result.output
         mock_deps['site_mgr'].delete_site.assert_called_once_with('testsite', False, False)
 
-    def test_site_delete_requires_sudo(self, runner, mock_deps):
+    def test_site_delete_requires_sudo(self, runner, mock_deps, ensure_sudo_ok):
         """Test site delete checks sudo permissions"""
         from wslaragon.cli.site_commands import site
-        import subprocess
 
-        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
+        ensure_sudo_ok.return_value = False
 
         result = runner.invoke(site, ['delete', 'testsite'])
 
-        assert 'sudo' in result.output.lower() or result.exit_code != 0
+        assert result.output.strip() == ''
 
 
 class TestSiteEnableDisableCommands:
@@ -868,7 +883,7 @@ class TestSiteEnableDisableCommands:
                 'site_mgr': mock_site_mgr_instance,
             }
 
-    def test_site_enable_success(self, runner, mock_deps):
+    def test_site_enable_success(self, runner, mock_deps, ensure_sudo_ok):
         """Test site enable command"""
         from wslaragon.cli.site_commands import site
 
@@ -878,7 +893,7 @@ class TestSiteEnableDisableCommands:
 
         assert result.exit_code == 0
 
-    def test_site_enable_failure(self, runner, mock_deps):
+    def test_site_enable_failure(self, runner, mock_deps, ensure_sudo_ok):
         """Test site enable command failure"""
         from wslaragon.cli.site_commands import site
 
@@ -889,7 +904,7 @@ class TestSiteEnableDisableCommands:
         assert result.exit_code == 0
         assert 'error' in result.output.lower() or 'failed' in result.output.lower()
 
-    def test_site_disable_success(self, runner, mock_deps):
+    def test_site_disable_success(self, runner, mock_deps, ensure_sudo_ok):
         """Test site disable command"""
         from wslaragon.cli.site_commands import site
 
@@ -899,7 +914,7 @@ class TestSiteEnableDisableCommands:
 
         assert result.exit_code == 0
 
-    def test_site_disable_failure(self, runner, mock_deps):
+    def test_site_disable_failure(self, runner, mock_deps, ensure_sudo_ok):
         """Test site disable command failure"""
         from wslaragon.cli.site_commands import site
 
@@ -940,7 +955,7 @@ class TestSitePublicCommand:
                 'run': mock_run,
             }
 
-    def test_site_public_enable(self, runner, mock_deps):
+    def test_site_public_enable(self, runner, mock_deps, ensure_sudo_ok):
         """Test site public enable"""
         from wslaragon.cli.site_commands import site
 
@@ -950,7 +965,7 @@ class TestSitePublicCommand:
 
         assert result.exit_code == 0
 
-    def test_site_public_disable(self, runner, mock_deps):
+    def test_site_public_disable(self, runner, mock_deps, ensure_sudo_ok):
         """Test site public disable"""
         from wslaragon.cli.site_commands import site
 
@@ -960,7 +975,7 @@ class TestSitePublicCommand:
 
         assert result.exit_code == 0
 
-    def test_site_public_failure(self, runner, mock_deps):
+    def test_site_public_failure(self, runner, mock_deps, ensure_sudo_ok):
         """Test site public command failure"""
         from wslaragon.cli.site_commands import site
 
@@ -970,16 +985,15 @@ class TestSitePublicCommand:
 
         assert 'failed' in result.output.lower() or 'error' in result.output.lower()
 
-    def test_site_public_requires_sudo(self, runner, mock_deps):
+    def test_site_public_requires_sudo(self, runner, mock_deps, ensure_sudo_ok):
         """Test site public requires sudo"""
         from wslaragon.cli.site_commands import site
-        import subprocess
 
-        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
+        ensure_sudo_ok.return_value = False
 
         result = runner.invoke(site, ['public', 'testsite'])
 
-        assert 'sudo' in result.output.lower() or result.exit_code != 0
+        assert result.output.strip() == ''
 
 
 class TestSiteFixPermissionsCommand:
@@ -1012,7 +1026,7 @@ class TestSiteFixPermissionsCommand:
                 'run': mock_run,
             }
 
-    def test_fix_permissions_success(self, runner, mock_deps):
+    def test_fix_permissions_success(self, runner, mock_deps, ensure_sudo_ok):
         """Test fix-permissions command success"""
         from wslaragon.cli.site_commands import site
 
@@ -1022,7 +1036,7 @@ class TestSiteFixPermissionsCommand:
 
         assert result.exit_code == 0
 
-    def test_fix_permissions_failure(self, runner, mock_deps):
+    def test_fix_permissions_failure(self, runner, mock_deps, ensure_sudo_ok):
         """Test fix-permissions command failure"""
         from wslaragon.cli.site_commands import site
 
@@ -1032,16 +1046,15 @@ class TestSiteFixPermissionsCommand:
 
         assert 'error' in result.output.lower() or 'failed' in result.output.lower()
 
-    def test_fix_permissions_requires_sudo(self, runner, mock_deps):
+    def test_fix_permissions_requires_sudo(self, runner, mock_deps, ensure_sudo_ok):
         """Test fix-permissions requires sudo"""
         from wslaragon.cli.site_commands import site
-        import subprocess
 
-        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
+        ensure_sudo_ok.return_value = False
 
         result = runner.invoke(site, ['fix-permissions', 'testsite'])
 
-        assert 'sudo' in result.output.lower() or result.exit_code != 0
+        assert result.output.strip() == ''
 
 
 class TestSiteExportCommand:
@@ -1084,7 +1097,7 @@ class TestSiteExportCommand:
                 'run': mock_run,
             }
 
-    def test_export_success(self, runner, mock_deps):
+    def test_export_success(self, runner, mock_deps, ensure_sudo_ok):
         """Test site export success"""
         from wslaragon.cli.site_commands import site
 
@@ -1092,7 +1105,7 @@ class TestSiteExportCommand:
 
         assert result.exit_code == 0
 
-    def test_export_with_output_path(self, runner, mock_deps):
+    def test_export_with_output_path(self, runner, mock_deps, ensure_sudo_ok):
         """Test site export with custom output path"""
         from wslaragon.cli.site_commands import site
 
@@ -1106,7 +1119,7 @@ class TestSiteExportCommand:
 
         assert result.exit_code == 0
 
-    def test_export_failure(self, runner, mock_deps):
+    def test_export_failure(self, runner, mock_deps, ensure_sudo_ok):
         """Test site export failure"""
         from wslaragon.cli.site_commands import site
 
@@ -1119,16 +1132,15 @@ class TestSiteExportCommand:
 
         assert 'error' in result.output.lower() or 'failed' in result.output.lower()
 
-    def test_export_requires_sudo(self, runner, mock_deps):
+    def test_export_requires_sudo(self, runner, mock_deps, ensure_sudo_ok):
         """Test site export requires sudo"""
         from wslaragon.cli.site_commands import site
-        import subprocess
 
-        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
+        ensure_sudo_ok.return_value = False
 
         result = runner.invoke(site, ['export', 'testsite'])
 
-        assert 'sudo' in result.output.lower() or result.exit_code != 0
+        assert result.output.strip() == ''
 
 
 class TestSiteImportCommand:
@@ -1175,7 +1187,7 @@ class TestSiteImportCommand:
                 'run': mock_run,
             }
 
-    def test_import_success(self, runner, mock_deps):
+    def test_import_success(self, runner, mock_deps, ensure_sudo_ok):
         """Test site import success"""
         from wslaragon.cli.site_commands import site
 
@@ -1183,7 +1195,7 @@ class TestSiteImportCommand:
 
         assert result.exit_code == 0
 
-    def test_import_with_new_name(self, runner, mock_deps):
+    def test_import_with_new_name(self, runner, mock_deps, ensure_sudo_ok):
         """Test site import with custom name"""
         from wslaragon.cli.site_commands import site
 
@@ -1201,7 +1213,7 @@ class TestSiteImportCommand:
 
         assert result.exit_code == 0
 
-    def test_import_failure(self, runner, mock_deps):
+    def test_import_failure(self, runner, mock_deps, ensure_sudo_ok):
         """Test site import failure"""
         from wslaragon.cli.site_commands import site
 
@@ -1214,16 +1226,15 @@ class TestSiteImportCommand:
 
         assert 'error' in result.output.lower() or 'failed' in result.output.lower()
 
-    def test_import_requires_sudo(self, runner, mock_deps):
+    def test_import_requires_sudo(self, runner, mock_deps, ensure_sudo_ok):
         """Test site import requires sudo"""
         from wslaragon.cli.site_commands import site
-        import subprocess
 
-        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
+        ensure_sudo_ok.return_value = False
 
         result = runner.invoke(site, ['import', '/tmp/backup.wslaragon'])
 
-        assert 'sudo' in result.output.lower() or result.exit_code != 0
+        assert result.output.strip() == ''
 
 
 class TestSiteSSLCommand:
@@ -1275,7 +1286,7 @@ class TestSiteSSLCommand:
                 'run': mock_run,
             }
 
-    def test_ssl_enable_success(self, runner, mock_deps):
+    def test_ssl_enable_success(self, runner, mock_deps, ensure_sudo_ok):
         """Test site ssl enable success"""
         from wslaragon.cli.site_commands import site
 
@@ -1283,7 +1294,7 @@ class TestSiteSSLCommand:
 
         assert result.exit_code == 0
 
-    def test_ssl_already_enabled(self, runner, mock_deps):
+    def test_ssl_already_enabled(self, runner, mock_deps, ensure_sudo_ok):
         """Test site ssl when already enabled"""
         from wslaragon.cli.site_commands import site
 
@@ -1296,7 +1307,7 @@ class TestSiteSSLCommand:
 
         assert 'already' in result.output.lower()
 
-    def test_ssl_site_not_found(self, runner, mock_deps):
+    def test_ssl_site_not_found(self, runner, mock_deps, ensure_sudo_ok):
         """Test site ssl when site not found"""
         from wslaragon.cli.site_commands import site
 
@@ -1306,18 +1317,17 @@ class TestSiteSSLCommand:
 
         assert 'not found' in result.output.lower()
 
-    def test_ssl_requires_sudo(self, runner, mock_deps):
+    def test_ssl_requires_sudo(self, runner, mock_deps, ensure_sudo_ok):
         """Test site ssl requires sudo"""
         from wslaragon.cli.site_commands import site
-        import subprocess
 
-        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
+        ensure_sudo_ok.return_value = False
 
         result = runner.invoke(site, ['ssl', 'testsite'])
 
-        assert 'sudo' in result.output.lower() or result.exit_code != 0
+        assert result.output.strip() == ''
 
-    def test_ssl_failure(self, runner, mock_deps):
+    def test_ssl_failure(self, runner, mock_deps, ensure_sudo_ok):
         """Test site ssl when SSL setup fails"""
         from wslaragon.cli.site_commands import site
 
@@ -1327,7 +1337,7 @@ class TestSiteSSLCommand:
 
         assert 'failed' in result.output.lower() or 'error' in result.output.lower()
 
-    def test_ssl_nginx_failure(self, runner, mock_deps):
+    def test_ssl_nginx_failure(self, runner, mock_deps, ensure_sudo_ok):
         """Test site ssl when nginx fails"""
         from wslaragon.cli.site_commands import site
 
@@ -1368,7 +1378,7 @@ class TestSiteApiCommands:
                 'run': mock_run,
             }
 
-    def test_api_add_success(self, runner, mock_deps):
+    def test_api_add_success(self, runner, mock_deps, ensure_sudo_ok):
         """Test api add reports success and reload message"""
         from wslaragon.cli.site_commands import site
 
@@ -1382,7 +1392,7 @@ class TestSiteApiCommands:
         assert 'API proxy added: /api -> https://api.dash.test' in result.output
         mock_deps['site_mgr'].add_api_proxy.assert_called_once_with('dash', '/api', 'https://api.dash.test')
 
-    def test_api_add_failure(self, runner, mock_deps):
+    def test_api_add_failure(self, runner, mock_deps, ensure_sudo_ok):
         """Test api add reports the error message on failure"""
         from wslaragon.cli.site_commands import site
 
@@ -1393,19 +1403,18 @@ class TestSiteApiCommands:
         assert result.exit_code == 0
         assert 'Failed to add API proxy: Site not found' in result.output
 
-    def test_api_add_requires_sudo(self, runner, mock_deps):
+    def test_api_add_requires_sudo(self, runner, mock_deps, ensure_sudo_ok):
         """Test api add checks sudo permissions before proceeding"""
         from wslaragon.cli.site_commands import site
-        import subprocess
 
-        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
+        ensure_sudo_ok.return_value = False
 
         result = runner.invoke(site, ['api', 'add', 'dash', '/api', 'https://api.dash.test'])
 
-        assert 'sudo' in result.output.lower() or result.exit_code != 0
+        assert result.output.strip() == ''
         mock_deps['site_mgr'].add_api_proxy.assert_not_called()
 
-    def test_api_remove_success(self, runner, mock_deps):
+    def test_api_remove_success(self, runner, mock_deps, ensure_sudo_ok):
         """Test api remove reports success and reload message"""
         from wslaragon.cli.site_commands import site
 
@@ -1419,7 +1428,7 @@ class TestSiteApiCommands:
         assert 'API proxy removed: /api (was -> https://api.dash.test)' in result.output
         mock_deps['site_mgr'].remove_api_proxy.assert_called_once_with('dash', '/api')
 
-    def test_api_remove_failure(self, runner, mock_deps):
+    def test_api_remove_failure(self, runner, mock_deps, ensure_sudo_ok):
         """Test api remove reports the error message on failure"""
         from wslaragon.cli.site_commands import site
 
@@ -1430,19 +1439,18 @@ class TestSiteApiCommands:
         assert result.exit_code == 0
         assert 'Failed to remove API proxy: Path not found' in result.output
 
-    def test_api_remove_requires_sudo(self, runner, mock_deps):
+    def test_api_remove_requires_sudo(self, runner, mock_deps, ensure_sudo_ok):
         """Test api remove checks sudo permissions before proceeding"""
         from wslaragon.cli.site_commands import site
-        import subprocess
 
-        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
+        ensure_sudo_ok.return_value = False
 
         result = runner.invoke(site, ['api', 'remove', 'dash', '/api'])
 
-        assert 'sudo' in result.output.lower() or result.exit_code != 0
+        assert result.output.strip() == ''
         mock_deps['site_mgr'].remove_api_proxy.assert_not_called()
 
-    def test_api_list_with_proxies(self, runner, mock_deps):
+    def test_api_list_with_proxies(self, runner, mock_deps, ensure_sudo_ok):
         """Test api list renders a table of configured proxies"""
         from wslaragon.cli.site_commands import site
 
@@ -1458,7 +1466,7 @@ class TestSiteApiCommands:
         assert '/api' in result.output
         assert 'https://api.dash.test' in result.output
 
-    def test_api_list_no_proxies(self, runner, mock_deps):
+    def test_api_list_no_proxies(self, runner, mock_deps, ensure_sudo_ok):
         """Test api list reports when no proxies are configured"""
         from wslaragon.cli.site_commands import site
 
@@ -1469,7 +1477,7 @@ class TestSiteApiCommands:
         assert result.exit_code == 0
         assert 'No API proxies configured' in result.output
 
-    def test_api_list_failure(self, runner, mock_deps):
+    def test_api_list_failure(self, runner, mock_deps, ensure_sudo_ok):
         """Test api list reports the error message when the site lookup fails"""
         from wslaragon.cli.site_commands import site
 

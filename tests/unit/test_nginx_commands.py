@@ -158,26 +158,25 @@ class TestNginxConfigSetCommand:
         assert result.exit_code == 0
         mock_deps['config'].set.assert_called_once_with('nginx.client_max_body_size', '256M')
 
-    def test_config_set_validates_sudo(self, runner, mock_deps):
-        """Test config set checks sudo permissions"""
+    @patch('wslaragon.cli.nginx_commands.ensure_sudo', return_value=False)
+    def test_config_set_validates_sudo(self, mock_ensure_sudo, runner, mock_deps):
+        """Test config set bails out when the sudo warm-up fails"""
         from wslaragon.cli.nginx_commands import nginx
-        import subprocess
-
-        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo')
 
         result = runner.invoke(nginx, ['config', 'set', 'client_max_body_size', '256M'])
 
         assert result.exit_code == 0
-        mock_deps['run'].assert_called_with(['sudo', '-v'], check=True)
+        mock_ensure_sudo.assert_called_once()
         mock_deps['config'].set.assert_not_called()
 
-    def test_config_set_checks_sudo_with_v_flag(self, runner, mock_deps):
-        """Test config set uses sudo -v for validation"""
+    @patch('wslaragon.cli.nginx_commands.ensure_sudo', return_value=True)
+    def test_config_set_checks_sudo_with_v_flag(self, mock_ensure_sudo, runner, mock_deps):
+        """Test config set warms up sudo via the shared helper"""
         from wslaragon.cli.nginx_commands import nginx
 
         runner.invoke(nginx, ['config', 'set', 'client_max_body_size', '256M'])
 
-        mock_deps['run'].assert_any_call(['sudo', '-v'], check=True)
+        mock_ensure_sudo.assert_called_once()
 
     def test_config_set_invalid_key(self, runner, mock_deps):
         """Test config set rejects invalid key"""
@@ -353,25 +352,23 @@ class TestNginxConfigSetCommandSudo:
                 'run': mock_run,
             }
 
-    def test_sudo_check_failure_shows_message(self, runner, mock_deps):
-        """Test that sudo failure shows proper error message"""
+    @patch('wslaragon.cli.nginx_commands.ensure_sudo', return_value=False)
+    def test_sudo_check_failure_stops_the_command(self, mock_ensure_sudo, runner, mock_deps):
+        """A failed sudo warm-up stops config set without touching config"""
         from wslaragon.cli.nginx_commands import nginx
-        import subprocess
-
-        mock_deps['run'].side_effect = subprocess.CalledProcessError(1, 'sudo', output='', stderr='')
 
         result = runner.invoke(nginx, ['config', 'set', 'client_max_body_size', '256M'])
 
         assert result.exit_code == 0
-        assert 'sudo' in result.output.lower()
+        mock_deps['config'].set.assert_not_called()
 
-    def test_sudo_detached_session(self, runner, mock_deps):
-        """Test sudo check uses -v flag"""
+    @patch('wslaragon.cli.nginx_commands.ensure_sudo', return_value=True)
+    def test_sudo_warmup_runs_before_config_change(self, mock_ensure_sudo, runner, mock_deps):
         from wslaragon.cli.nginx_commands import nginx
 
         runner.invoke(nginx, ['config', 'set', 'client_max_body_size', '128M'])
 
-        mock_deps['run'].assert_any_call(['sudo', '-v'], check=True)
+        mock_ensure_sudo.assert_called_once()
 
 
 class TestNginxConfigListOutput:

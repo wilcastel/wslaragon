@@ -331,3 +331,19 @@ Slice 4b (registration routing in `sites.py` / `nginx.py` / `ssl.py`), Slice 5 G
 - `site_commands.py` coverage 98% — the uncovered lines are `_run_agent_create` guard clauses (missing `--url` / `--backend` / name, sveltkit alias) reachable only in ready agent mode; covered indirectly, not with dedicated CLI cases.
 - The activation is code-complete but **inert at runtime** until an administrator runs `scripts/agent-privilege-setup.sh bootstrap` on a native-Ubuntu host: with no installed helper, `ready()` returns `helper_missing` and both MCP tools return `privilege_setup_required`.
 - The native `requires_sudo` end-to-end flow (dedicated user create + forced headless rollback + disable) is a skipped placeholder — it needs a throwaway-account fixture and a real box.
+
+## Post-Slice-5 course correction — `ensure_sudo` + MCP unification
+
+**Why**: Testing revealed the MCP was broken for *every* privileged operation, not just create — all 12 privileged CLI commands run `subprocess.run(['sudo','-v'], check=True)`, which fails without a TTY (the MCP server). The user's goal is a fully working MCP (create/delete/fix-permissions/php/nginx/ssl/mysql). The bounded agent-privilege helper only ever covered `create`, and this machine already runs broad `(ALL) ALL` sudo, so a bounded helper for all 20+ operations is disproportionate.
+
+**Decision (user, RDD disabled)**: introduce a shared `ensure_sudo()` warm-up that is non-fatal without a TTY (relies on the now-complete `/etc/sudoers.d/wslaragon` NOPASSWD list), and route MCP `create_site` / `create_headless_site` back through the plain interactive CLI like every other tool. The Slice 4b/5 agent path (`--privilege-mode=agent`, `PrivilegeClient`, `agent-privilege-helper`, `SiteManager(privilege_client=...)`) is **kept intact as opt-in hardening**, just no longer the MCP default.
+
+**Changes**:
+- New `src/wslaragon/core/privilege.py::ensure_sudo(console=None)` — valid cached ticket or no TTY -> proceed; interactive TTY -> refresh (`sudo -v`); returns False only on a failed interactive auth.
+- Replaced the 12 duplicated `sudo -v` blocks in `cli/site_commands.py` (9), `cli/php_commands.py` (2), `cli/nginx_commands.py` (1) with `if not ensure_sudo(console): return`.
+- `mcp/server.py`: dropped `_privilege_client` / `_privilege_failure_json` / `_PRIVILEGE_SETUP_*`; `create_site` / `create_headless_site` build the historical argv and `_run` it (no `--privilege-mode=agent`, no readiness probe).
+- Tests: `test_privilege.py` (new, 5), MCP create suites simplified back to argv/`_run` assertions, CLI sudo tests moved to the `ensure_sudo` contract (autouse `ensure_sudo_ok` fixture in `test_site_commands.py`).
+
+**Verification**: `./venv/bin/pytest tests/unit/` -> 1435 passed, 1 skipped, 99.35% coverage. `git diff --check` clean.
+
+**Net effect on this change**: Slices 1-4b stand unchanged. Slice 5's *MCP activation* is superseded (MCP no longer gates on the helper); Slice 5's test migration and the CLI `--privilege-mode=agent` branch remain. `agent-privilege-setup.sh` bootstrap is now only needed by whoever wants the opt-in bounded path, and still needs its legacy-coexistence fix.

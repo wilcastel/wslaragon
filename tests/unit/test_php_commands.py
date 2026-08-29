@@ -406,27 +406,23 @@ class TestPhpConfigSetCommand:
         assert 'Updated memory_limit to 512M' in result.output
         mock_deps['php'].update_config.assert_called_once_with('memory_limit', '512M')
 
-    @patch('wslaragon.cli.php_commands.subprocess.run')
-    def test_php_config_set_sudo_check(self, mock_subprocess, runner, mock_deps):
+    @patch('wslaragon.cli.php_commands.ensure_sudo', return_value=True)
+    def test_php_config_set_sudo_check(self, mock_ensure_sudo, runner, mock_deps):
         from wslaragon.cli.php_commands import php
 
-        mock_subprocess.return_value = MagicMock(returncode=0)
         mock_deps['php'].update_config.return_value = True
 
         runner.invoke(php, ['config', 'set', 'memory_limit', '512M'])
 
-        mock_subprocess.assert_called_with(['sudo', '-v'], check=True)
+        mock_ensure_sudo.assert_called_once()
 
-    @patch('wslaragon.cli.php_commands.subprocess.run')
-    def test_php_config_set_no_sudo(self, mock_subprocess, runner, mock_deps):
+    @patch('wslaragon.cli.php_commands.ensure_sudo', return_value=False)
+    def test_php_config_set_no_sudo(self, mock_ensure_sudo, runner, mock_deps):
         from wslaragon.cli.php_commands import php
-
-        mock_subprocess.side_effect = subprocess.CalledProcessError(1, 'sudo')
 
         result = runner.invoke(php, ['config', 'set', 'memory_limit', '512M'])
 
         assert result.exit_code == 0
-        assert 'requires sudo privileges' in result.output
         mock_deps['php'].update_config.assert_not_called()
 
     @patch('wslaragon.cli.php_commands.subprocess.run')
@@ -586,17 +582,15 @@ class TestPhpUploadLimitCommand:
         assert 'No PHP versions found installed' in result.output
         mock_subprocess.assert_not_called()
 
-    @patch('wslaragon.cli.php_commands.subprocess.run')
-    def test_upload_limit_no_sudo(self, mock_subprocess, runner, mock_deps):
+    @patch('wslaragon.cli.php_commands.ensure_sudo', return_value=False)
+    def test_upload_limit_no_sudo(self, mock_ensure_sudo, runner, mock_deps):
         from wslaragon.cli.php_commands import php
 
         mock_deps['php'].get_installed_versions.return_value = ['8.3']
-        mock_subprocess.side_effect = subprocess.CalledProcessError(1, 'sudo')
 
         result = runner.invoke(php, ['upload-limit', '512M'])
 
         assert result.exit_code == 0
-        assert 'requires sudo privileges' in result.output
         mock_deps['php'].set_upload_limits.assert_not_called()
 
     @patch('wslaragon.cli.php_commands.subprocess.run')

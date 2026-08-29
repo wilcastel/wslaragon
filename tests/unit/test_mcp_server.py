@@ -596,17 +596,9 @@ class TestGetServicesStatus:
 
 
 class TestCreateSite:
-    """create_site probes the fixed helper via a PrivilegeClient: a ready result
-    runs the CLI with --privilege-mode=agent (never _run_interactive); an absent
-    setup returns privilege_setup_required; any other finite code passes through
-    as a safe failure."""
-
-    _SETUP_REQUIRED = {
-        "ok": False,
-        "code": "privilege_setup_required",
-        "message": "Agent site creation requires administrator setup.",
-        "guidance": "Run wslaragon agent-privilege bootstrap in a terminal.",
-    }
+    """create_site builds the historical `wslaragon site create` argv and runs it
+    via _run (the CLI's own sudo warm-up is non-fatal without a TTY); it never
+    uses _run_interactive."""
 
     _KWARG_FLAG = [
         ({}, None),
@@ -627,22 +619,12 @@ class TestCreateSite:
         ({"public_dir": True}, "--public"),
     ]
 
-    @staticmethod
-    def _ready_client(ok=True, code="ok"):
-        client = MagicMock()
-        client.ready.return_value = MagicMock(ok=ok, code=code)
-        return client
-
     @pytest.mark.parametrize("kwargs,flag", _KWARG_FLAG)
     @patch("wslaragon.mcp.server._run_interactive")
     @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._privilege_client")
-    def test_ready_runs_cli_agent_mode_with_historical_flags(
-        self, mock_client, mock_run, mock_interactive, kwargs, flag
-    ):
+    def test_builds_historical_argv(self, mock_run, mock_interactive, kwargs, flag):
         from wslaragon.mcp.server import create_site
 
-        mock_client.return_value = self._ready_client()
         mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
 
         with patch("wslaragon.mcp.server._load_sites", return_value={}):
@@ -650,18 +632,16 @@ class TestCreateSite:
 
         cmd = mock_run.call_args[0][0]
         assert cmd[:4] == ["wslaragon", "site", "create", "testsite"]
-        assert cmd[-1] == "--privilege-mode=agent"
+        assert "--privilege-mode=agent" not in cmd
         if flag is not None:
             assert flag in cmd
         mock_interactive.assert_not_called()
 
     @patch("wslaragon.mcp.server._run_interactive")
     @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._privilege_client")
-    def test_ready_success_reports_created(self, mock_client, mock_run, mock_interactive):
+    def test_success_reports_created(self, mock_run, mock_interactive):
         from wslaragon.mcp.server import create_site
 
-        mock_client.return_value = self._ready_client()
         mock_run.return_value = {"success": True, "stdout": "done", "stderr": ""}
 
         with patch(
@@ -673,60 +653,19 @@ class TestCreateSite:
 
         assert "created successfully" in result
         assert "testsite.test" in result
+        mock_interactive.assert_not_called()
 
     @patch("wslaragon.mcp.server._run_interactive")
     @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._privilege_client")
-    def test_ready_cli_failure_surfaces_stderr(self, mock_client, mock_run, mock_interactive):
+    def test_cli_failure_surfaces_stderr(self, mock_run, mock_interactive):
         from wslaragon.mcp.server import create_site
 
-        mock_client.return_value = self._ready_client()
         mock_run.return_value = {"success": False, "stdout": "", "stderr": "boom"}
 
         result = create_site("testsite")
 
         assert "Failed to create site" in result
         assert "boom" in result
-
-    @pytest.mark.parametrize("code", ["not_ready", "helper_missing"])
-    @patch("wslaragon.mcp.server._run_interactive")
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._privilege_client")
-    def test_not_ready_returns_setup_required(
-        self, mock_client, mock_run, mock_interactive, code
-    ):
-        from wslaragon.mcp.server import create_site
-
-        mock_client.return_value = self._ready_client(ok=False, code=code)
-
-        result = json.loads(create_site("testsite", site_type="wordpress"))
-
-        assert result == self._SETUP_REQUIRED
-        mock_run.assert_not_called()
-        mock_interactive.assert_not_called()
-
-    @pytest.mark.parametrize(
-        "code", ["authorization_denied", "timeout", "platform_unsupported", "protocol_invalid"]
-    )
-    @patch("wslaragon.mcp.server._run_interactive")
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._privilege_client")
-    def test_other_failure_codes_pass_through_safely(
-        self, mock_client, mock_run, mock_interactive, code
-    ):
-        from wslaragon.mcp.server import create_site
-
-        mock_client.return_value = self._ready_client(ok=False, code=code)
-
-        result = json.loads(create_site("testsite"))
-
-        assert result == {
-            "ok": False,
-            "code": code,
-            "message": "Agent site creation is not available.",
-        }
-        mock_run.assert_not_called()
-        mock_interactive.assert_not_called()
 
 
 class TestStartService:
@@ -1148,10 +1087,8 @@ class TestRunInteractive:
 
 
 class TestCreateHeadlessSite:
-    """create_headless_site mirrors create_site: ready -> CLI agent mode, else a
-    stable failure; never _run_interactive."""
-
-    _SETUP_REQUIRED = TestCreateSite._SETUP_REQUIRED
+    """create_headless_site builds the headless `wslaragon site create` argv and
+    runs it via _run; it never uses _run_interactive."""
 
     @pytest.mark.parametrize("kwargs,flag", [
         ({}, None),
@@ -1161,11 +1098,9 @@ class TestCreateHeadlessSite:
     ])
     @patch("wslaragon.mcp.server._run_interactive")
     @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._privilege_client")
-    def test_ready_runs_cli_agent_mode(self, mock_client, mock_run, mock_interactive, kwargs, flag):
+    def test_builds_headless_argv(self, mock_run, mock_interactive, kwargs, flag):
         from wslaragon.mcp.server import create_headless_site
 
-        mock_client.return_value = TestCreateSite._ready_client()
         mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
 
         create_headless_site("misitio", backend="wordpress", frontend="astro", **kwargs)
@@ -1176,70 +1111,35 @@ class TestCreateHeadlessSite:
         assert "--backend=wordpress" in cmd
         assert "--frontend=astro" in cmd
         assert "--url=misitio" in cmd
-        assert cmd[-1] == "--privilege-mode=agent"
+        assert "--privilege-mode=agent" not in cmd
         if flag is not None:
             assert flag in cmd
         mock_interactive.assert_not_called()
 
     @patch("wslaragon.mcp.server._run_interactive")
     @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._privilege_client")
-    def test_not_ready_returns_setup_required(self, mock_client, mock_run, mock_interactive):
+    def test_success_reports_both_urls(self, mock_run, mock_interactive):
         from wslaragon.mcp.server import create_headless_site
 
-        mock_client.return_value = TestCreateSite._ready_client(ok=False, code="not_ready")
+        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
 
-        result = json.loads(
-            create_headless_site("misitio", backend="wordpress", frontend="astro")
-        )
+        result = create_headless_site("misitio", backend="wordpress", frontend="astro")
 
-        assert result == self._SETUP_REQUIRED
-        mock_run.assert_not_called()
-        mock_interactive.assert_not_called()
+        assert "created successfully" in result
+        assert "https://misitio.test" in result
+        assert "https://api.misitio.test" in result
 
     @patch("wslaragon.mcp.server._run_interactive")
     @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._privilege_client")
-    def test_ready_cli_failure_surfaces_stderr(self, mock_client, mock_run, mock_interactive):
+    def test_cli_failure_surfaces_stderr(self, mock_run, mock_interactive):
         from wslaragon.mcp.server import create_headless_site
 
-        mock_client.return_value = TestCreateSite._ready_client()
         mock_run.return_value = {"success": False, "stdout": "", "stderr": "nope"}
 
         result = create_headless_site("misitio", backend="laravel", frontend="sveltekit")
 
         assert "Failed to create headless site" in result
         assert "nope" in result
-
-
-class TestPrivilegeFailureMapping:
-    """The readiness-code -> stable JSON mapping, and that unrelated MCP tools
-    never touch the privilege client."""
-
-    @pytest.mark.parametrize("code", ["not_ready", "helper_missing"])
-    def test_setup_codes_map_to_privilege_setup_required(self, code):
-        from wslaragon.mcp.server import _privilege_failure_json
-
-        assert json.loads(_privilege_failure_json(code))["code"] == "privilege_setup_required"
-
-    @pytest.mark.parametrize("code", ["authorization_denied", "timeout", "layout_invalid"])
-    def test_other_codes_pass_through(self, code):
-        from wslaragon.mcp.server import _privilege_failure_json
-
-        assert json.loads(_privilege_failure_json(code)) == {
-            "ok": False,
-            "code": code,
-            "message": "Agent site creation is not available.",
-        }
-
-    @patch("wslaragon.mcp.server._privilege_client")
-    def test_unrelated_tool_does_not_probe_privilege(self, mock_client):
-        from wslaragon.mcp.server import get_services_status
-
-        with patch("wslaragon.mcp.server._service_status", return_value="active"):
-            get_services_status()
-
-        mock_client.assert_not_called()
 
 
 class TestDeleteSite:
