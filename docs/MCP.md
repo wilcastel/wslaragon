@@ -62,7 +62,9 @@ Cada tool ejecuta el comando `wslaragon` real correspondiente. Los nombres entre
 **Sitios**
 - `list_sites` (`site list`)
 - `create_site` — sitio individual: PHP, WordPress, Laravel, Node, Python, Vite, Astro (SSG), phpMyAdmin, HTML (`site create`)
+  - Svelte SPA: `vite_template="svelte"` (Vite + dev server tras proxy, sin SSR).
 - `create_headless_site` — par frontend+backend vinculado, ej. SvelteKit + WordPress (`site create --headless`)
+  - Es el único camino para **SvelteKit** (SSR/routing completo): `frontend="sveltekit"` + un `backend`.
 - `delete_site` — borra un sitio (o ambas mitades si es un par headless) (`site delete`)
 - `enable_site` / `disable_site` (`site enable` / `site disable`)
 - `set_site_public` — apunta la raíz web a `public/` (Laravel/Symfony) (`site public`)

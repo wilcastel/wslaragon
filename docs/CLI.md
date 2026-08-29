@@ -79,6 +79,10 @@ wslaragon site create --headless --backend=wordpress --frontend=sveltekit --url=
 - `--vite <template>`: Crear sitio Vite usando una plantilla (react, vue, svelte, vanilla, etc). Asigna puerto Node.
 - `--astro`: Crear sitio Astro SSG. Usa template `basics` por defecto. Especificar template: `--astro=blog`, `--astro=minimal`, `--astro=headless`. Compila a estáticos en `dist/`, nginx sirve directamente sin proxy.
 - `--headless --backend=<wordpress|laravel> --frontend=<sveltekit|astro> --url=<nombre>`: Crear un par de sitios vinculados (frontend + backend/API), ver [sección 1.1](#11-sitios-headless-pareados---headless).
+
+> **Svelte — dos caminos distintos:**
+> - **Svelte SPA (Vite)**: `wslaragon site create <nombre> --vite svelte` — UN sitio, dev server de Vite tras proxy Nginx, sin SSR. Para desarrollo con `npm run dev`.
+> - **SvelteKit (framework completo, SSR/routing)**: `wslaragon site create --headless --frontend=sveltekit --backend=<wordpress|laravel> --url=<nombre>` — se crea pareado con un backend/API (ver [sección 1.1](#11-sitios-headless-pareados---headless)). No hay un flag `--sveltekit` para un SvelteKit standalone hoy.
 - `--proxy [PORT]`: Configurar como Proxy Inverso para Apps manuales en el puerto especificado.
 - `--public`: Apuntar document root a directorio `public/`.
 - `--database`: Nombre personalizado para la base de datos.
