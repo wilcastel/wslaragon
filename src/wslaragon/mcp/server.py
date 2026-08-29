@@ -78,6 +78,35 @@ def _run_interactive(cmd: list[str], input_text: str) -> dict:
     }
 
 
+_AGENT_PRIVILEGE_HELPER = "/usr/lib/wslaragon/agent-privilege-helper"
+_PRIVILEGE_SETUP_REQUIRED = {
+    "ok": False,
+    "code": "privilege_setup_required",
+    "message": "Agent site creation requires administrator setup.",
+    "guidance": "Run wslaragon agent-privilege bootstrap in a terminal.",
+}
+
+
+def _agent_privilege_ready() -> bool:
+    """Perform the fixed helper's non-interactive, read-only readiness probe."""
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "--", _AGENT_PRIVILEGE_HELPER],
+            input='{"version":1,"op":"ready"}\n',
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _privilege_setup_required() -> str:
+    """Return the stable MCP result for the deliberately disabled create path."""
+    return json.dumps(_PRIVILEGE_SETUP_REQUIRED, separators=(",", ":"))
+
+
 def _service_status(service: str) -> str:
     r = subprocess.run(
         ["systemctl", "is-active", service], capture_output=True, text=True
@@ -213,58 +242,10 @@ def create_site(
         Create an Astro static site (SSG, served from dist/, no PHP/proxy) using this
         template: 'basics', 'blog', or 'minimal'. Leave empty for a non-Astro site.
     """
-    cmd = ["wslaragon", "site", "create", name]
+    # The legacy CLI performs interactive sudo; MCP must never reach it.
+    _agent_privilege_ready()
+    return _privilege_setup_required()
 
-    if site_type == "html":
-        cmd.append("--html")
-    elif site_type == "wordpress":
-        cmd.append("--wordpress")
-    elif site_type == "node":
-        cmd.append("--node")
-    elif site_type == "python":
-        cmd.append("--python")
-    elif site_type == "phpmyadmin":
-        cmd.append("--phpmyadmin")
-
-    if laravel_version:
-        cmd += [f"--laravel={laravel_version}"]
-
-    if vite_template:
-        cmd += ["--vite", vite_template]
-
-    if astro_template:
-        cmd.append(f"--astro={astro_template}")
-
-    if mysql:
-        cmd.append("--mysql")
-
-    if not ssl:
-        cmd.append("--no-ssl")
-
-    if not php and site_type not in ("node", "python"):
-        cmd.append("--no-php")
-
-    if proxy_port:
-        cmd += ["--proxy", str(proxy_port)]
-
-    if db_type in ("postgres", "supabase"):
-        cmd.append(f"--{db_type}")
-
-    if public_dir:
-        cmd.append("--public")
-
-    result = _run(cmd)
-    if result["success"]:
-        sites = _load_sites()
-        info = sites.get(name, {})
-        domain = info.get("domain", f"{name}.test")
-        return (
-            f"Site '{name}' created successfully.\n"
-            f"URL: https://{domain}\n"
-            f"Document root: {info.get('document_root', f'~/web/{name}')}\n"
-            f"{result['stdout']}"
-        ).strip()
-    return f"Failed to create site:\n{result['stderr'] or result['stdout']}"
 
 
 @mcp.tool()
@@ -437,29 +418,10 @@ def create_headless_site(
     force : bool
         Overwrite existing files if a site with this name already exists.
     """
-    cmd = [
-        "wslaragon", "site", "create",
-        "--headless",
-        f"--backend={backend}",
-        f"--frontend={frontend}",
-        f"--url={url}",
-    ]
-    if not ssl:
-        cmd.append("--no-ssl")
-    if database:
-        cmd += ["--database", database]
-    if force:
-        cmd.append("--force")
+    # The legacy CLI performs interactive sudo; MCP must never reach it.
+    _agent_privilege_ready()
+    return _privilege_setup_required()
 
-    result = _run(cmd)
-    if result["success"]:
-        return (
-            f"Headless site '{url}' created successfully.\n"
-            f"Frontend: https://{url}.test\n"
-            f"Backend/API: https://api.{url}.test\n"
-            f"{result['stdout']}"
-        ).strip()
-    return f"Failed to create headless site:\n{result['stderr'] or result['stdout']}"
 
 
 @mcp.tool()

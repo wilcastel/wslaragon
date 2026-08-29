@@ -596,234 +596,66 @@ class TestGetServicesStatus:
 
 
 class TestCreateSite:
-    """Test suite for create_site tool"""
+    """create_site must fail closed with a stable setup-required result until
+    agent-privilege setup exists; it must never reach _run or the interactive CLI."""
 
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_success(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site returns success result"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "Site created", "stderr": ""}
-        mock_load.return_value = {"testsite": {"domain": "testsite.test", "document_root": "/home/user/web/testsite"}}
-        
-        result = create_site("testsite")
-        
-        assert "created successfully" in result
-        assert "testsite" in result
-        mock_run.assert_called_once()
+    _SETUP_REQUIRED = {
+        "ok": False,
+        "code": "privilege_setup_required",
+        "message": "Agent site creation requires administrator setup.",
+        "guidance": "Run wslaragon agent-privilege bootstrap in a terminal.",
+    }
 
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_failure(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site returns failure message"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": False, "stdout": "", "stderr": "Error: site already exists"}
-        mock_load.return_value = {}
-        
-        result = create_site("existing")
-        
-        assert "Failed to create site" in result
-        assert "Error: site already exists" in result
+    _KWARG_PERMUTATIONS = [
+        {},
+        {"site_type": "html"},
+        {"site_type": "wordpress"},
+        {"site_type": "node"},
+        {"site_type": "python"},
+        {"site_type": "phpmyadmin"},
+        {"laravel_version": "12"},
+        {"vite_template": "react"},
+        {"astro_template": "blog"},
+        {"mysql": True},
+        {"ssl": False},
+        {"php": False},
+        {"proxy_port": 3000},
+        {"db_type": "postgres"},
+        {"db_type": "supabase"},
+        {"public_dir": True},
+        {"site_type": "node", "php": False},
+    ]
 
+    @pytest.mark.parametrize("kwargs", _KWARG_PERMUTATIONS)
+    @patch("wslaragon.mcp.server._run_interactive")
     @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_html_type(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --html flag"""
+    @patch("wslaragon.mcp.server._agent_privilege_ready", return_value=False)
+    def test_create_site_fails_closed_for_every_permutation(
+        self, mock_ready, mock_run, mock_interactive, kwargs
+    ):
+        """Historical argument permutations are still accepted but never executed."""
         from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", site_type="html")
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--html" in call_args
 
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_wordpress_type(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --wordpress flag"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", site_type="wordpress")
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--wordpress" in call_args
+        result = json.loads(create_site("testsite", **kwargs))
 
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_node_type(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --node flag"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", site_type="node")
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--node" in call_args
+        assert result == self._SETUP_REQUIRED
+        mock_run.assert_not_called()
+        mock_interactive.assert_not_called()
 
+    @patch("wslaragon.mcp.server._run_interactive")
     @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_python_type(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --python flag"""
+    @patch("wslaragon.mcp.server._agent_privilege_ready", return_value=True)
+    def test_create_site_fails_closed_even_when_probe_succeeds(
+        self, mock_ready, mock_run, mock_interactive
+    ):
+        """A successful readiness probe must not resume the legacy interactive route."""
         from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", site_type="python")
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--python" in call_args
 
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_with_laravel_version(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with Laravel version flag"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", laravel_version="12")
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--laravel=12" in call_args
+        result = json.loads(create_site("testsite", site_type="wordpress"))
 
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_with_vite_template(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with Vite template flag"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", vite_template="react")
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--vite" in call_args
-        assert "react" in call_args
-
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_with_mysql(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --mysql flag"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", mysql=True)
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--mysql" in call_args
-
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_without_ssl(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --no-ssl flag"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", ssl=False)
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--no-ssl" in call_args
-
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_without_php(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --no-php flag"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", php=False)
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--no-php" in call_args
-
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_with_proxy_port(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --proxy flag"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", proxy_port=3000)
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--proxy" in call_args
-        assert "3000" in call_args
-
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_with_postgres(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --postgres flag"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", db_type="postgres")
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--postgres" in call_args
-
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_with_supabase(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --supabase flag"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", db_type="supabase")
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--supabase" in call_args
-
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_with_public_dir(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --public flag"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", public_dir=True)
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--public" in call_args
-
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_no_php_for_node_python(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site does not add --no-php for node/python"""
-        from wslaragon.mcp.server import create_site
-        
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-        
-        create_site("testsite", site_type="node", php=False)
-        
-        call_args = mock_run.call_args[0][0]
-        assert "--no-php" not in call_args
+        assert result == self._SETUP_REQUIRED
+        mock_run.assert_not_called()
+        mock_interactive.assert_not_called()
 
 
 class TestStartService:
@@ -1244,121 +1076,112 @@ class TestRunInteractive:
         assert result["stderr"] == "error"
 
 
-class TestCreateSiteExtras:
-    """Test suite for create_site's phpmyadmin and astro_template support"""
-
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_phpmyadmin_type(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --phpmyadmin flag"""
-        from wslaragon.mcp.server import create_site
-
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-
-        create_site("testsite", site_type="phpmyadmin")
-
-        call_args = mock_run.call_args[0][0]
-        assert "--phpmyadmin" in call_args
-
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_with_astro_template(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site with --astro=<template> flag"""
-        from wslaragon.mcp.server import create_site
-
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-
-        create_site("testsite", astro_template="blog")
-
-        call_args = mock_run.call_args[0][0]
-        assert "--astro=blog" in call_args
-
-    @patch("wslaragon.mcp.server._run")
-    @patch("wslaragon.mcp.server._load_sites")
-    def test_create_site_without_astro_template(self, mock_load, mock_run, mock_mcp_module):
-        """Test create_site omits --astro when astro_template is not given"""
-        from wslaragon.mcp.server import create_site
-
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-        mock_load.return_value = {"testsite": {}}
-
-        create_site("testsite")
-
-        call_args = mock_run.call_args[0][0]
-        assert not any(arg.startswith("--astro") for arg in call_args)
-
-
 class TestCreateHeadlessSite:
-    """Test suite for create_headless_site tool"""
+    """create_headless_site must fail closed exactly like create_site."""
 
+    _SETUP_REQUIRED = {
+        "ok": False,
+        "code": "privilege_setup_required",
+        "message": "Agent site creation requires administrator setup.",
+        "guidance": "Run wslaragon agent-privilege bootstrap in a terminal.",
+    }
+
+    _KWARG_PERMUTATIONS = [
+        {},
+        {"ssl": False},
+        {"database": "customdb"},
+        {"force": True},
+    ]
+
+    @pytest.mark.parametrize("kwargs", _KWARG_PERMUTATIONS)
+    @patch("wslaragon.mcp.server._run_interactive")
     @patch("wslaragon.mcp.server._run")
-    def test_create_headless_site_success(self, mock_run, mock_mcp_module):
-        """Test create_headless_site returns success message with both URLs"""
+    @patch("wslaragon.mcp.server._agent_privilege_ready", return_value=False)
+    def test_create_headless_site_fails_closed_for_every_permutation(
+        self, mock_ready, mock_run, mock_interactive, kwargs
+    ):
         from wslaragon.mcp.server import create_headless_site
 
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+        result = json.loads(
+            create_headless_site("misitio", backend="wordpress", frontend="astro", **kwargs)
+        )
 
-        result = create_headless_site("misitio", backend="wordpress", frontend="astro")
+        assert result == self._SETUP_REQUIRED
+        mock_run.assert_not_called()
+        mock_interactive.assert_not_called()
 
-        assert "created successfully" in result
-        assert "https://misitio.test" in result
-        assert "https://api.misitio.test" in result
-        call_args = mock_run.call_args[0][0]
-        assert call_args == [
-            "wslaragon", "site", "create",
-            "--headless", "--backend=wordpress", "--frontend=astro", "--url=misitio",
-        ]
-
+    @patch("wslaragon.mcp.server._run_interactive")
     @patch("wslaragon.mcp.server._run")
-    def test_create_headless_site_failure(self, mock_run, mock_mcp_module):
-        """Test create_headless_site returns failure message"""
+    @patch("wslaragon.mcp.server._agent_privilege_ready", return_value=True)
+    def test_create_headless_site_fails_closed_even_when_probe_succeeds(
+        self, mock_ready, mock_run, mock_interactive
+    ):
         from wslaragon.mcp.server import create_headless_site
 
-        mock_run.return_value = {"success": False, "stdout": "", "stderr": "already exists"}
+        result = json.loads(
+            create_headless_site("misitio", backend="laravel", frontend="sveltekit")
+        )
 
-        result = create_headless_site("misitio", backend="laravel", frontend="sveltekit")
+        assert result == self._SETUP_REQUIRED
+        mock_run.assert_not_called()
+        mock_interactive.assert_not_called()
 
-        assert "Failed to create headless site" in result
-        assert "already exists" in result
 
+class TestAgentPrivilegeReadiness:
+    """MCP create tools must fail closed before they can invoke the interactive CLI."""
+
+    @patch("wslaragon.mcp.server._run_interactive")
     @patch("wslaragon.mcp.server._run")
-    def test_create_headless_site_no_ssl(self, mock_run, mock_mcp_module):
-        """Test create_headless_site with ssl=False adds --no-ssl"""
+    @patch("wslaragon.mcp.server._agent_privilege_ready", return_value=False)
+    def test_create_site_returns_setup_required_without_creating(
+        self, mock_ready, mock_run, mock_interactive, mock_mcp_module
+    ):
+        from wslaragon.mcp.server import create_site
+
+        result = json.loads(create_site("testsite"))
+
+        assert result == {
+            "ok": False,
+            "code": "privilege_setup_required",
+            "message": "Agent site creation requires administrator setup.",
+            "guidance": "Run wslaragon agent-privilege bootstrap in a terminal.",
+        }
+        mock_ready.assert_called_once_with()
+        mock_run.assert_not_called()
+        mock_interactive.assert_not_called()
+
+    @patch("wslaragon.mcp.server._run_interactive")
+    @patch("wslaragon.mcp.server._run")
+    @patch("wslaragon.mcp.server._agent_privilege_ready", return_value=False)
+    def test_create_headless_site_returns_setup_required_without_creating(
+        self, mock_ready, mock_run, mock_interactive, mock_mcp_module
+    ):
         from wslaragon.mcp.server import create_headless_site
 
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
+        result = json.loads(
+            create_headless_site("misitio", backend="wordpress", frontend="astro")
+        )
 
-        create_headless_site("misitio", backend="wordpress", frontend="astro", ssl=False)
+        assert result["code"] == "privilege_setup_required"
+        assert result["guidance"] == "Run wslaragon agent-privilege bootstrap in a terminal."
+        mock_ready.assert_called_once_with()
+        mock_run.assert_not_called()
+        mock_interactive.assert_not_called()
 
-        call_args = mock_run.call_args[0][0]
-        assert "--no-ssl" in call_args
+    @patch("wslaragon.mcp.server.subprocess.run")
+    def test_readiness_probe_uses_non_interactive_fixed_helper(self, mock_run, mock_mcp_module):
+        from wslaragon.mcp.server import _agent_privilege_ready
 
-    @patch("wslaragon.mcp.server._run")
-    def test_create_headless_site_with_database(self, mock_run, mock_mcp_module):
-        """Test create_headless_site with custom database name"""
-        from wslaragon.mcp.server import create_headless_site
+        mock_run.return_value = MagicMock(returncode=1)
 
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-
-        create_headless_site("misitio", backend="wordpress", frontend="astro", database="customdb")
-
-        call_args = mock_run.call_args[0][0]
-        assert "--database" in call_args
-        assert "customdb" in call_args
-
-    @patch("wslaragon.mcp.server._run")
-    def test_create_headless_site_with_force(self, mock_run, mock_mcp_module):
-        """Test create_headless_site with force=True adds --force"""
-        from wslaragon.mcp.server import create_headless_site
-
-        mock_run.return_value = {"success": True, "stdout": "", "stderr": ""}
-
-        create_headless_site("misitio", backend="wordpress", frontend="astro", force=True)
-
-        call_args = mock_run.call_args[0][0]
-        assert "--force" in call_args
+        assert _agent_privilege_ready() is False
+        mock_run.assert_called_once_with(
+            ["sudo", "-n", "--", "/usr/lib/wslaragon/agent-privilege-helper"],
+            input='{"version":1,"op":"ready"}\n',
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
 
 
 class TestDeleteSite:

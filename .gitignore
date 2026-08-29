@@ -36,5 +36,11 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Editor lock files (LibreOffice, etc.)
+.~lock.*#
+
 # Agent skill registry cache
 .atl/
+
+# CodeGraph index
+.codegraph/

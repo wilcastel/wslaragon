@@ -236,3 +236,31 @@ nextRecommended: parent-lifecycle
 ### Deferred lifecycle actions
 
 The five parent-owned rows for chain PR creation, bounded review, Slice 4b prerequisite confirmation, Slice 5 prerequisite confirmation, and activation review remain byte-for-byte unchanged.
+
+## Consolidation — predecessor readiness slice folded in
+
+### Context
+
+The predecessor change `agent-safe-privilege-setup/` was never committed; it lived only as an untracked OpenSpec folder. Its single authorized deliverable — the MCP `create_site` / `create_headless_site` fail-closed non-interactive readiness probe — was sitting uncommitted in the working tree. To avoid two overlapping live changes, `agent-safe-privilege-setup/` was deleted and its readiness slice is recorded here as partial progress on Slice 5's RED task.
+
+### Environment finding (clears a prior blocker)
+
+Earlier apply/verify passes reported the configured unit command as BLOCKED because `pytest-cov` and `python-dotenv` were "unavailable". That was an environment mismatch, not a real gap: the SDD executors invoked bare `pytest` against system Python. The project venv `/home/wilcastell/infra/wslaragon/venv` (Python 3.14) already has `pytest-cov` 7.1.0, `python-dotenv` 1.2.3, `mcp` 1.29.0, black, ruff, mypy, pytest-mock, pytest-asyncio. All suite/coverage runs below use `./venv/bin/pytest`.
+
+### Work done
+
+- Deleted untracked `openspec/changes/agent-safe-privilege-setup/`.
+- `tests/unit/test_mcp_server.py`: replaced the obsolete `TestCreateSite`, `TestCreateSiteExtras` (removed, folded in), and `TestCreateHeadlessSite` CLI-command-construction expectations with parametrized fail-closed contract tests. Every historical kwarg permutation now asserts the exact `privilege_setup_required` JSON and that `_run` / `_run_interactive` are never called; `_agent_privilege_ready` is patched so tests never invoke real `sudo`. Added a "probe succeeds -> still fails closed" case for each tool.
+- `src/wslaragon/mcp/server.py`: unchanged by this step (the fail-closed `_agent_privilege_ready` / `_privilege_setup_required` implementation from the predecessor slice remains in the working tree, now committed together with this reconciliation).
+- `pyproject.toml`: `mcp>=1.0.0` -> `mcp>=1.0.0,<2.0.0` (carried from the predecessor slice; `mcp` 2.x is untested).
+- `.gitignore`: added `.codegraph/` and `.~lock.*#`.
+
+### Verification
+
+- `./venv/bin/pytest tests/unit/ -q` — **1404 passed, 1 skipped (shellcheck absent), 0 failed.** Total coverage 99.52% (`--cov-fail-under=90` satisfied).
+- `git diff --check` — clean.
+- Pre-existing repo-wide ruff/black nits were not touched; reformatting would inflate the diff.
+
+### Still pending (unchanged)
+
+Slice 4b (registration routing in `sites.py` / `nginx.py` / `ssl.py`), Slice 5 GREEN (MCP ready-gated `--privilege-mode=agent` activation), the opt-in native `requires_sudo` integration harness, `README.md` admin setup/rollback docs, and running `scripts/agent-privilege-setup.sh` on the host to install `/usr/lib/wslaragon/agent-privilege-helper` + the dedicated sudoers fragment. Until Slice 5 GREEN, both MCP create tools stay unconditionally fail-closed.
