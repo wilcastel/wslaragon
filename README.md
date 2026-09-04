@@ -1,8 +1,8 @@
 # WSLaragon
 
-🚀 **Laragon-style development environment manager for WSL2**
+🚀 **Entorno de desarrollo estilo Laragon para Omarchy y WSL2**
 
-WSLaragon es una herramienta de gestión de entorno de desarrollo estilo Laragon diseñada específicamente para WSL2. Permite gestionar fácilmente servicios web como PHP, Nginx y MySQL, con soporte para múltiples sitios (WordPress, Laravel, Vite, Astro, SvelteKit, sitios headless pareados, Node.js/Python), SSL con mkcert y configuración automática del archivo hosts de Windows.
+WSLaragon administra un entorno local estilo Laragon en Omarchy y WSL2. Permite gestionar PHP, Nginx y MySQL, con sitios WordPress, Laravel, Vite, Astro, SvelteKit, Node.js/Python, dominios `.test` y SSL local.
 
 ## ✨ Características
 
@@ -30,6 +30,7 @@ WSLaragon es una herramienta de gestión de entorno de desarrollo estilo Laragon
 - **SSL/TLS**: Certificados válidos con mkcert
 - **Windows Hosts**: Integración con el archivo hosts de Windows
 - **Backup/Restore**: Exportar e importar sitios completos (`site export` / `site import`)
+- **Migración desde Git**: `site clone` puede preparar `.env`, dependencias, assets, base y PM2 — ver [guía de clonación](docs/CLONE.md)
 
 ### 🔐 SSL con mkcert
 - **Certificados locales**: Certificados SSL válidos para desarrollo
@@ -54,9 +55,10 @@ WSLaragon es una herramienta de gestión de entorno de desarrollo estilo Laragon
 ## 📋 Requisitos
 
 ### Sistema
+- **Omarchy** actualizado, o
 - **WSL2** con Ubuntu 20.04+ o Debian 10+
 - **Windows 10/11** para integración con hosts
-- **Python 3.9+** instalado
+- **Python 3.10+** instalado
 - **Permisos sudo** para configuración de servicios
 
 ### Software
@@ -76,6 +78,25 @@ chmod +x mkcert && sudo mv mkcert /usr/local/bin/
 ```
 
 ## 🚀 Instalación
+
+### Omarchy / Omarchygon
+
+En Omarchy, un solo instalador prepara el entorno completo y lo deja apagado
+hasta que se necesite:
+
+```bash
+git clone https://github.com/wilcastel/wslaragon.git
+cd wslaragon
+./scripts/install-omarchygon.sh
+wslaragon on
+```
+
+Si ya existen los contenedores `mysql8` y `mariadb11`, selecciona expresamente
+el que contiene tus datos, por ejemplo
+`./scripts/install-omarchygon.sh --database mysql8`. Consulta la
+[guía de Omarchy](docs/OMARCHY.md) para opciones y actualizaciones seguras.
+
+### WSL2 / Ubuntu
 
 Ver **[docs/INSTALL.md](docs/INSTALL.md)** para la guía completa (setup automático con `scripts/setup-env.sh`, instalación manual con `pip install -e .`, y verificación con `scripts/test-setup.sh`).
 
@@ -213,6 +234,9 @@ Ver **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** para más detalles del flujo 
 
 ## 📚 Documentación
 
+> **Omarchygon:** la instalación completa y el funcionamiento en Omarchy están
+> documentados en [docs/OMARCHY.md](docs/OMARCHY.md).
+
 Este README es solo la puerta de entrada. La referencia completa vive en `docs/`:
 
 - **[docs/README.md](docs/README.md)** — índice general de la documentación
@@ -257,9 +281,9 @@ Este proyecto está licenciado bajo la MIT License - ver el archivo [LICENSE](LI
 
 ## 📞 Soporte
 
-- **Issues**: [GitHub Issues](https://github.com/your-username/wslaragon/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-username/wslaragon/discussions)
+- **Issues**: [GitHub Issues](https://github.com/wilcastel/wslaragon/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/wilcastel/wslaragon/discussions)
 
 ---
 
-**WSLaragon** - Tu entorno de desarrollo WSL2, simplificado. 🚀
+**WSLaragon / Omarchygon** - Tu entorno local de desarrollo, simplificado. 🚀

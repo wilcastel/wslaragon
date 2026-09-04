@@ -327,10 +327,13 @@ class TestDoctorCommand:
         """Test doctor command when PHP config exists"""
         from wslaragon.cli.doctor import doctor_command
 
-        mock_doctor_deps['config'].get.side_effect = [
-            '/etc/php.ini',
-            '/etc/php.ini',
-        ]
+        mock_doctor_deps['config'].get.side_effect = lambda key, default=None: {
+            'ssl.ca_file': '/etc/php.ini',
+            'php.ini_file': '/etc/php.ini',
+            'php.fpm_service': 'php-fpm',
+            'php.fpm_listen': 'unix:/run/php-fpm/php-fpm.sock',
+            'platform.name': 'omarchy',
+        }.get(key, default)
         mock_doctor_deps['exists'].return_value = True
 
         result = runner.invoke(doctor_command)

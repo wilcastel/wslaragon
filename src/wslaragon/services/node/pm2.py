@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 import json
+from pathlib import Path
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ class PM2Manager:
             Dict with 'success', 'data', and 'error' keys
         """
         try:
-            cmd = ['pm2'] + args + ['--json']
+            cmd = ['pm2'] + args
             run_env = os.environ.copy()
             if env:
                 run_env.update(env)
@@ -67,8 +68,8 @@ class PM2Manager:
                     'error': f"PM2 output: {result.stdout[:200]}"
                 }
         except FileNotFoundError:
-            logger.error("PM2 not found. Install with 'npm install -g pm2'")
-            return {'success': False, 'error': "PM2 not found. Install it with 'npm install -g pm2'"}
+            logger.error("PM2 not found. Install it with './scripts/setup-omarchy-node.sh'")
+            return {'success': False, 'error': "PM2 not found. Run './scripts/setup-omarchy-node.sh'"}
         except Exception as e:
             logger.error(f"Error running PM2 command: {e}")
             return {'success': False, 'error': str(e)}
@@ -104,10 +105,6 @@ class PM2Manager:
         # Build PM2 arguments
         args = ['start', script_path, '--name', site_name]
         
-        # Set environment variables via PM2 --env flag
-        # PM2 respects PORT env var for most frameworks
-        args.extend(['--env', f'PORT={port}'])
-        
         if cwd:
             args.extend(['--cwd', cwd])
         
@@ -116,6 +113,23 @@ class PM2Manager:
         
         logger.info(f"Starting PM2 process '{site_name}' on port {port}")
         return self._run_pm2(args, env=env)
+
+    def start_project(self, site_name: str, project_root: str, port: int) -> Dict:
+        """Start a conventional Node, pnpm, or Python project."""
+        root = Path(project_root)
+        if (root / 'app.js').exists():
+            return self.start_process(site_name, str(root / 'app.js'), port, cwd=str(root))
+        if (root / 'package.json').exists():
+            return self._run_pm2(
+                ['start', 'pnpm', '--name', site_name, '--cwd', str(root), '--', 'start'],
+                env={'PORT': str(port)},
+            )
+        if (root / 'main.py').exists():
+            return self.start_process(
+                site_name, str(root / 'main.py'), port,
+                interpreter='python3', cwd=str(root)
+            )
+        return {'success': False, 'error': 'No app.js, package.json, or main.py entry point found'}
 
     def stop_process(self, site_name: str) -> Dict:
         """Stop a PM2 process
@@ -161,3 +175,13 @@ class PM2Manager:
         """
         logger.info("Saving PM2 process list")
         return self._run_pm2(['save'])
+
+    def resurrect(self) -> Dict:
+        """Restore the process list saved by ``pm2 save``."""
+        logger.info("Restoring saved PM2 processes")
+        return self._run_pm2(['resurrect'])
+
+    def kill(self) -> Dict:
+        """Stop every PM2 process and its user daemon."""
+        logger.info("Stopping the PM2 daemon")
+        return self._run_pm2(['kill'])

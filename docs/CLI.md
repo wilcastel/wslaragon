@@ -2,6 +2,28 @@
 
 El comando principal es `wslaragon`. Aquí tienes todos los comandos disponibles y ejemplos de uso.
 
+## Entorno centralizado
+
+```bash
+wslaragon on       # Enciende PHP, MariaDB, Redis opcional, Nginx y PM2
+wslaragon status   # Muestra el estado conjunto sin iniciar servicios
+wslaragon off      # Detiene todo y evita el arranque automático
+```
+
+Docker no se detiene globalmente: `off` sólo para el contenedor de base de
+datos administrado por WSLaragon, evitando afectar otros proyectos.
+
+## Entorno centralizado
+
+```bash
+wslaragon on       # Enciende PHP, MariaDB, Redis opcional, Nginx y PM2
+wslaragon status   # Consulta el estado conjunto sin iniciar servicios
+wslaragon off      # Detiene todo y evita el arranque automático
+```
+
+Docker no se detiene globalmente: `off` sólo para el contenedor de base de
+datos administrado por WSLaragon, evitando afectar otros proyectos.
+
 ## 📁 Gestión de Sitios (`site`)
 
 ### 1. Crear un Sitio
@@ -39,7 +61,7 @@ wslaragon site create mi-api --node
 # Ejemplo Python (Auto-puerto desde 8000)
 wslaragon site create mi-script --python
 
-# Ejemplo Vite React (Auto-puerto 3000+, npm install automático)
+# Ejemplo Vite React (Auto-puerto 3000+, pnpm install automático)
 wslaragon site create mi-app-react --vite react
 
 # Ejemplo Astro SSG (sitio estático, nginx sirve dist/, sin proceso)
@@ -58,7 +80,7 @@ wslaragon site api add dash /api https://api.dash.test/api
 wslaragon site create --headless --backend=wordpress --frontend=sveltekit --url=misitio
 ```
 
-> **Astro SSG**: El sitio se compila a HTML estático (`npm run build` → `dist/`). Nginx sirve los archivos directamente, sin proxy ni proceso corriendo. Para desarrollo con HMR, ejecutá `npm run dev` manualmente desde la carpeta del proyecto.
+> **Astro SSG**: El sitio se compila a HTML estático (`pnpm run build` → `dist/`). Nginx sirve los archivos directamente, sin proxy ni proceso corriendo. Para desarrollo con HMR, ejecutá `pnpm run dev` manualmente desde la carpeta del proyecto.
 
 > **⚠️ No confundir `--astro=headless` con `--headless`**: son dos features distintas.
 > - `--astro=headless` es un template de Astro: UN solo sitio con "islas" que consumen APIs externas vía `site api add` (documentado arriba).
@@ -78,6 +100,7 @@ wslaragon site create --headless --backend=wordpress --frontend=sveltekit --url=
 - `--python`: Crear sitio para Python (asigna puerto libre automáticamente iniciando en 8000, deshabilita PHP/MySQL).
 - `--vite <template>`: Crear sitio Vite usando una plantilla (react, vue, svelte, vanilla, etc). Asigna puerto Node.
 - `--astro`: Crear sitio Astro SSG. Usa template `basics` por defecto. Especificar template: `--astro=blog`, `--astro=minimal`, `--astro=headless`. Compila a estáticos en `dist/`, nginx sirve directamente sin proxy.
+- `--sveltekit`: Crear una aplicación SvelteKit con pnpm, puerto automático, proxy Nginx y ejecución mediante PM2.
 - `--headless --backend=<wordpress|laravel> --frontend=<sveltekit|astro> --url=<nombre>`: Crear un par de sitios vinculados (frontend + backend/API), ver [sección 1.1](#11-sitios-headless-pareados---headless).
 - `--proxy [PORT]`: Configurar como Proxy Inverso para Apps manuales en el puerto especificado.
 - `--public`: Apuntar document root a directorio `public/`.
@@ -113,8 +136,40 @@ Muestra todos los sitios creados y su estado actual.
 wslaragon site list
 ```
 
+### Clonar y configurar un proyecto existente
+
+Clona un repositorio dentro de `~/web`, detecta su stack y configura dominio
+`.test`, HTTPS, Nginx, base de datos y proxy cuando corresponda:
+
+```bash
+# Modo guiado: pregunta repositorio, dominio local y stack
+wslaragon site clone
+
+# Detección automática
+wslaragon site clone git@github.com:equipo/proyecto.git proyecto
+
+# Configuración explícita y automatizable
+wslaragon site clone https://github.com/equipo/api.git api \
+  --stack laravel --branch develop --database api_local
+```
+
+Stacks admitidos: `static`, `php`, `wordpress`, `laravel`, `node`, `vite`,
+`sveltekit` y `astro`. Con `auto`, WSLaragon inspecciona los archivos del
+repositorio. WordPress y Laravel crean una base MySQL por defecto; se puede
+evitar con `--no-mysql`. Los proyectos JavaScript reciben un puerto y pueden
+prepararse automáticamente:
+
+```bash
+wslaragon site clone URL proyecto --env --install --build --start
+```
+
+`--env` no sobrescribe un archivo existente y `--migrate` es siempre explícito.
+Consulta la [guía completa de clonación](CLONE.md) para opciones y ejemplos.
+
 ### 3. Borrar un Sitio
-Elimina la configuración Nginx, SSL, y opcionalmente los archivos y la base de datos.
+Elimina la configuración Nginx, el certificado SSL y las entradas locales de
+`hosts`. Si el sitio usa un proxy Node/Astro/SvelteKit, también detiene y retira
+su proceso de PM2. Los archivos y la base de datos son opcionales.
 
 ```bash
 # Borrar sitio (pregunta si borrar archivos)
@@ -128,6 +183,10 @@ wslaragon site delete mi-web
 ```
 
 > **Nota**: El comando pregunta interactivamente si deseás eliminar los archivos del proyecto. La base de datos se elimina solo con `--remove-database`.
+
+> Si el proceso ya no existe en PM2, la eliminación continúa normalmente. Al
+> terminar, la nueva lista de procesos se guarda para que el sitio tampoco
+> reaparezca después de reiniciar la sesión.
 
 > **⚠️ Sitios headless**: Si `<name>` es una mitad de un par headless (`--headless`), el comando avisa cuál es el sitio pareado y, al confirmar, **elimina ambas mitades** junto con la carpeta raíz compartida.
 
@@ -143,10 +202,19 @@ wslaragon site enable mi-web
 Si tienes problemas de escritura (ej. WordPress no sube archivos, VSCode no puede guardar, logs, cache, uploads) o has copiado archivos desde Windows, usa este comando para reasignar el propietario y permisos.
 
 ```bash
+# Diagnosticar propietario, grupo y rutas de escritura sin modificar nada
+wslaragon site fix-permissions mi-web --check
+
+# Aplicar la reparación
 wslaragon site fix-permissions mi-web
 ```
 
-> Los permisos se corrigen automáticamente al crear un sitio. Usá este comando solo en sitios existentes que necesiten reparación.
+El comando detecta Laravel, WordPress, Astro, SvelteKit, JavaScript, PHP y sitios
+estáticos. Aplica `755` a directorios, `644` a archivos y conserva los archivos
+que ya eran ejecutables. La escritura del grupo del servidor web se limita a
+rutas de ejecución como `storage/`, `bootstrap/cache/` o `wp-content/`.
+
+> Los permisos se corrigen automáticamente al crear un sitio. Usá este comando en sitios existentes que necesiten diagnóstico o reparación, especialmente después de copiarlos desde otra máquina.
 
 **Qué hace:**
 - `chown -R usuario:www-data` — el usuario puede editar desde VSCode, www-data (Nginx/PHP) puede leer y escribir
@@ -284,7 +352,7 @@ wslaragon ssl delete midominio.test
 
 Para aplicaciones Node.js (Express, NestJS, etc.) o Python que requieren un servidor de aplicaciones persistente, `wslaragon` integra PM2.
 
-> **Nota**: Cuando creas un sitio con `--node`, se genera un archivo `app.js` básico de prueba. Debes reemplazarlo con tu propio proyecto (ej. `npm init`, `npm create vite`, clonar repo) y luego iniciar el proceso.
+> **Nota**: Cuando creas un sitio con `--node`, se genera un archivo `app.js` básico de prueba. Debes reemplazarlo con tu propio proyecto (ej. `pnpm init`, `pnpm create vite`, clonar repo) y luego iniciar el proceso.
 
 ### 1. Listar procesos
 ```bash
@@ -292,7 +360,7 @@ wslaragon node list
 ```
 
 ### 2. Iniciar aplicación
-Detecta automáticamente `app.js`, `main.py` o `npm start` en la carpeta del sitio.
+Detecta automáticamente `app.js`, `main.py` o `pnpm start` en la carpeta del sitio.
 ```bash
 wslaragon node start mi-app-node
 ```

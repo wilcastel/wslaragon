@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import re
 import subprocess
 import base64
 import secrets
@@ -10,7 +11,15 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import yaml
+
 logger = logging.getLogger(__name__)
+
+
+def database_name_for_site(site_name: str) -> str:
+    """Return a MySQL-safe default database name for a local site."""
+    safe_name = re.sub(r'[^A-Za-z0-9_]', '_', site_name)
+    return f"{safe_name}_db"
 
 
 class SiteCreator(ABC):
@@ -32,7 +41,7 @@ class SiteCreator(ABC):
     def _prepare_run_as_user(self, site_base_dir: Path):
         """Chown site_base_dir to the invoking (non-root) user and return a
         run_as_user(cmd, **kwargs) callable that runs shell commands as that
-        user — npm/npx scaffolding tools must not run as root.
+        user — pnpm scaffolding tools must not run as root.
         """
         current_user = os.getenv('SUDO_USER') or os.getenv('USER')
         is_root = os.geteuid() == 0 and current_user
@@ -47,6 +56,23 @@ class SiteCreator(ABC):
                 return subprocess.run(cmd, shell=True, **kwargs)
 
         return run_as_user
+
+    @staticmethod
+    def _allow_pnpm_builds(site_base_dir: Path, packages: List[str]) -> None:
+        """Allow a minimal set of trusted dependency build scripts for pnpm 11+."""
+        workspace_file = site_base_dir / 'pnpm-workspace.yaml'
+        workspace = {}
+        if workspace_file.exists():
+            workspace = yaml.safe_load(workspace_file.read_text(encoding='utf-8')) or {}
+
+        allow_builds = workspace.setdefault('allowBuilds', {})
+        for package in packages:
+            allow_builds[package] = True
+
+        workspace_file.write_text(
+            yaml.safe_dump(workspace, sort_keys=False),
+            encoding='utf-8'
+        )
 
 
 class HtmlSiteCreator(SiteCreator):
@@ -238,6 +264,8 @@ document.addEventListener('DOMContentLoaded', function() {{
 
 class WordPressSiteCreator(SiteCreator):
     """Create a WordPress site."""
+    SYSTEM_WORDPRESS_DIR = Path('/usr/share/webapps/wordpress')
+
     def __init__(self, config, site_name: str, web_root: Path, site_base_dir: Path, tld: str,
                  proxy_port: int = None, database_name: str = None):
         super().__init__(config, site_name, web_root, site_base_dir, tld, proxy_port)
@@ -247,38 +275,64 @@ class WordPressSiteCreator(SiteCreator):
         """Create a WordPress site."""
         web_root = self.web_root
         site_name = self.site_name
-        database_name = self.database_name or f"{site_name.replace('.', '_')}_db"
+        database_name = self.database_name or database_name_for_site(site_name)
+        db_user = self.config.get('mysql.user', 'root')
         db_password = self.config.get('mysql.password')
+        db_host = self.config.get('mysql.host', 'localhost')
+        db_port = self.config.get('mysql.port', 3306)
         current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+        web_user = self.config.get('nginx.user', 'www-data')
         
         if web_root.exists():
             shutil.rmtree(str(web_root))
         
         web_root.mkdir(parents=True)
         
-        wp_tar_path = f'/tmp/wordpress-{site_name}.tar.gz'
-        subprocess.run(['wget', '-q', '-O', wp_tar_path, 'https://wordpress.org/latest.tar.gz'], check=True)
-        subprocess.run(['sudo', 'tar', '-xzf', wp_tar_path, '-C', str(web_root.parent)], check=True)
+        if self.config.get('platform.name') == 'omarchy':
+            if not self.SYSTEM_WORDPRESS_DIR.exists():
+                raise Exception("WordPress is not installed; run: omarchy pkg add wordpress")
+            shutil.rmtree(str(web_root))
+            shutil.copytree(self.SYSTEM_WORDPRESS_DIR, web_root)
+        else:
+            wp_tar_path = f'/tmp/wordpress-{site_name}.tar.gz'
+            if shutil.which('wget'):
+                download_cmd = ['wget', '-q', '-O', wp_tar_path, 'https://wordpress.org/latest.tar.gz']
+            elif shutil.which('curl'):
+                download_cmd = ['curl', '-fsSL', '-o', wp_tar_path, 'https://wordpress.org/latest.tar.gz']
+            else:
+                raise Exception("WordPress download requires curl or wget")
+            subprocess.run(download_cmd, check=True)
+            subprocess.run(['sudo', 'tar', '-xzf', wp_tar_path, '-C', str(web_root.parent)], check=True)
+
+            wordpress_dir = web_root.parent / 'wordpress'
+            if wordpress_dir.exists():
+                subprocess.run(['sudo', 'cp', '-r', f'{wordpress_dir}/.', str(web_root)], check=True)
+                subprocess.run(['sudo', 'rm', '-rf', str(wordpress_dir)], check=True)
+            subprocess.run(['sudo', 'rm', '-f', wp_tar_path], check=True)
         
-        wordpress_dir = web_root.parent / 'wordpress'
-        if wordpress_dir.exists():
-            subprocess.run(['sudo', 'cp', '-r', f'{wordpress_dir}/.', str(web_root)], check=True)
-            subprocess.run(['sudo', 'rm', '-rf', str(wordpress_dir)], check=True)
-        subprocess.run(['sudo', 'rm', '-f', wp_tar_path], check=True)
-        
-        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:www-data', str(web_root)], check=True)
+        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{web_user}', str(web_root)], check=True)
         subprocess.run(['sudo', 'chmod', '-R', '755', str(web_root)], check=True)
+
+        salt_names = (
+            'AUTH_KEY', 'SECURE_AUTH_KEY', 'LOGGED_IN_KEY', 'NONCE_KEY',
+            'AUTH_SALT', 'SECURE_AUTH_SALT', 'LOGGED_IN_SALT', 'NONCE_SALT'
+        )
+        salts = '\n'.join(
+            f"define( '{name}', '{secrets.token_urlsafe(64)}' );" for name in salt_names
+        )
         
         wp_content = f"""<?php
 /**
  * The base configuration for WordPress
  */
 define( 'DB_NAME', '{database_name}' );
-define( 'DB_USER', 'root' );
+define( 'DB_USER', '{db_user}' );
 define( 'DB_PASSWORD', '{db_password}' );
-define( 'DB_HOST', 'localhost' );
+define( 'DB_HOST', '{db_host}:{db_port}' );
 define( 'DB_CHARSET', 'utf8mb4' );
 define( 'DB_COLLATE', 'utf8mb4_unicode_ci' );
+
+{salts}
 
 $table_prefix = 'wp_';
 
@@ -287,6 +341,7 @@ define( 'WP_DEBUG_LOG', true );
 define( 'WP_DEBUG_DISPLAY', false );
 define( 'WP_MEMORY_LIMIT', '256M' );
 define( 'FS_METHOD', 'direct' );
+define( 'FORCE_SSL_ADMIN', true );
 
 if ( ! defined( 'ABSPATH' ) ) {{
     define( 'ABSPATH', __DIR__ . '/' );
@@ -331,7 +386,10 @@ class LaravelSiteCreator(SiteCreator):
         database_name = self.database_name
         
         if not database_name:
-            database_name = f"{site_name}_db"
+            database_name = database_name_for_site(site_name)
+
+        if self.config.get('platform.name') == 'omarchy' and not shutil.which('composer'):
+            raise Exception("Composer is not installed; run: ./scripts/setup-omarchy-laravel.sh")
         
         postgres_port = self.config.get('supabase.postgres_port', 5433)
         postgres_password = self.config.get('supabase.postgres_password', 'postgres')
@@ -375,7 +433,7 @@ class LaravelSiteCreator(SiteCreator):
 APP_ENV=local
 APP_KEY={app_key}
 APP_DEBUG=true
-APP_URL=http://{site_name}.test
+APP_URL=https://{site_name}{self.tld}
 
 LOG_CHANNEL=stack
 LOG_LEVEL=debug
@@ -438,20 +496,23 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 """
         else:
             db_password = self.config.get('mysql.password')
+            db_host = self.config.get('mysql.host', '127.0.0.1')
+            db_port = self.config.get('mysql.port', 3306)
+            db_user = self.config.get('mysql.user', 'root')
             env_content = f"""APP_NAME="{site_name}"
 APP_ENV=local
 APP_KEY={app_key}
 APP_DEBUG=true
-APP_URL=http://{site_name}.test
+APP_URL=https://{site_name}{self.tld}
 
 LOG_CHANNEL=stack
 LOG_LEVEL=debug
 
 DB_CONNECTION=mysql
-DB_HOST=127.0.0.1
-DB_PORT=3306
+DB_HOST={db_host}
+DB_PORT={db_port}
 DB_DATABASE={database_name}
-DB_USERNAME=root
+DB_USERNAME={db_user}
 DB_PASSWORD={db_password}
 
 BROADCAST_DRIVER=log
@@ -500,7 +561,8 @@ VITE_PUSHER_CLUSTER="${{PUSHER_APP_CLUSTER}}"
             f.write(env_content)
         
         current_user = os.getenv('SUDO_USER') or os.getenv('USER')
-        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:www-data', str(site_base_dir)], check=True)
+        web_user = self.config.get('nginx.user', 'www-data')
+        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{web_user}', str(site_base_dir)], check=True)
         subprocess.run(['sudo', 'chmod', '-R', '775', str(site_base_dir / 'storage')], check=True)
         subprocess.run(['sudo', 'chmod', '-R', '775', str(site_base_dir / 'bootstrap/cache')], check=True)
         
@@ -598,22 +660,24 @@ class ViteSiteCreator(SiteCreator):
         site_name = self.site_name
         site_base_dir = self.site_base_dir
         vite_template = self.vite_template
+        domain = f"{site_name}{self.tld}"
         
         try:
             run_as_user = self._prepare_run_as_user(site_base_dir)
 
-            run_as_user(f"npm create vite@latest . -- --template {vite_template}",
+            run_as_user(f"pnpm create vite@latest . --template {vite_template}",
                        cwd=str(site_base_dir), check=True, input="\nn\n", text=True)
-            
-            run_as_user("npm install", cwd=str(site_base_dir), check=True)
+
+            self._allow_pnpm_builds(site_base_dir, ['esbuild'])
+            run_as_user("pnpm install", cwd=str(site_base_dir), check=True)
             
             pkg_path = site_base_dir / "package.json"
             with open(pkg_path, 'r') as f:
                 pkg = json.load(f)
             
             if 'scripts' in pkg:
-                pkg['scripts']['dev'] = f"vite --port {proxy_port} --host"
-                pkg['scripts']['start'] = f"vite --port {proxy_port} --host"
+                pkg['scripts']['dev'] = f"vite --port {proxy_port} --host 0.0.0.0 --strictPort"
+                pkg['scripts']['start'] = f"vite --port {proxy_port} --host 0.0.0.0 --strictPort"
             
             with open(pkg_path, 'w') as f:
                 json.dump(pkg, f, indent=2)
@@ -625,13 +689,16 @@ class ViteSiteCreator(SiteCreator):
                         content = f.read()
                     
                     if 'defineConfig({' in content and 'allowedHosts' not in content:
-                        new_content = content.replace('defineConfig({', 'defineConfig({\n  server: {\n    allowedHosts: true\n  },')
+                        new_content = content.replace(
+                            'defineConfig({',
+                            f"defineConfig({{\n  server: {{\n    allowedHosts: ['{domain}']\n  }},"
+                        )
                         with open(cfg_path, 'w') as f:
                             f.write(new_content)
                     break
 
             messages.append(f"[green]Vite ({vite_template}) project created successfully![/green]")
-            messages.append(f"[yellow]Node process prepared. Run 'wslaragon node start {site_name}' to serve 'npm run dev'.[/yellow]")
+            messages.append(f"[yellow]Node process prepared. Run 'wslaragon node start {site_name}' to serve 'pnpm run dev'.[/yellow]")
 
         except Exception as e:
             raise Exception(f"Vite scaffolding failed: {str(e)}")
@@ -652,17 +719,19 @@ class SvelteKitSiteCreator(SiteCreator):
         try:
             run_as_user = self._prepare_run_as_user(site_base_dir)
 
-            scaffold_cmd = "npx sv create . --template minimal --types ts --no-add-ons --no-install"
+            scaffold_cmd = "pnpm dlx sv create . --template minimal --types ts --no-add-ons --no-install"
             result = run_as_user(scaffold_cmd, cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
-                fallback_cmd = "npm create svelte@latest . -- --template skeleton --types typescript --no-add-ons --no-install"
+                fallback_cmd = "pnpm create svelte@latest . --template skeleton --types typescript --no-add-ons --no-install"
                 result = run_as_user(fallback_cmd, cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
                 if result.returncode != 0:
                     raise Exception(f"SvelteKit scaffolding failed: {result.stderr}")
 
-            result = run_as_user("npm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+            self._allow_pnpm_builds(site_base_dir, ['esbuild'])
+            result = run_as_user("pnpm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
-                raise Exception(f"SvelteKit npm install failed: {result.stderr}")
+                details = result.stderr.strip() or result.stdout.strip()
+                raise Exception(f"SvelteKit pnpm install failed: {details}")
 
             pkg_path = site_base_dir / "package.json"
             if pkg_path.exists():
@@ -671,8 +740,8 @@ class SvelteKitSiteCreator(SiteCreator):
 
                 if 'scripts' not in pkg:
                     pkg['scripts'] = {}
-                pkg['scripts']['dev'] = f"vite dev --host 0.0.0.0 --port {proxy_port}"
-                pkg['scripts']['start'] = f"vite dev --host 0.0.0.0 --port {proxy_port}"
+                pkg['scripts']['dev'] = f"vite dev --host 0.0.0.0 --port {proxy_port} --strictPort"
+                pkg['scripts']['start'] = f"vite dev --host 0.0.0.0 --port {proxy_port} --strictPort"
                 pkg['scripts'].setdefault('build', 'vite build')
 
                 with open(pkg_path, 'w') as f:
@@ -689,7 +758,7 @@ class SvelteKitSiteCreator(SiteCreator):
                     vite_config.write_text(content)
 
             messages.append(f"[green]SvelteKit project created successfully![/green]")
-            messages.append(f"[yellow]Node process prepared. Run 'wslaragon node start {site_name}' to serve 'npm run dev'.[/yellow]")
+            messages.append(f"[yellow]Node process prepared. Run 'wslaragon node start {site_name}' to serve 'pnpm run dev'.[/yellow]")
 
         except Exception as e:
             raise Exception(f"SvelteKit project creation failed: {str(e)}")
@@ -722,18 +791,20 @@ class AstroSiteCreator(SiteCreator):
         try:
             run_as_user = self._prepare_run_as_user(site_base_dir)
 
-            scaffold_cmd = f"npm create astro@latest . -- --template {astro_template} --no-install --no-git --yes"
+            scaffold_cmd = f"pnpm create astro@latest . --template {astro_template} --no-install --no-git --yes"
             result = run_as_user(scaffold_cmd, cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             
             if result.returncode != 0:
-                scaffold_cmd = f"npm create astro@latest . --yes"
+                scaffold_cmd = f"pnpm create astro@latest . --yes"
                 result = run_as_user(scaffold_cmd, cwd=str(site_base_dir), input=f"{astro_template}\n\n", capture_output=True, text=True, timeout=120)
                 if result.returncode != 0:
                     raise Exception(f"Astro scaffolding failed: {result.stderr}")
             
-            result = run_as_user("npm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+            self._allow_pnpm_builds(site_base_dir, ['esbuild'])
+            result = run_as_user("pnpm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
-                raise Exception(f"Astro npm install failed: {result.stderr}")
+                details = result.stderr.strip() or result.stdout.strip()
+                raise Exception(f"Astro pnpm install failed: {details}")
             
             pkg_path = site_base_dir / "package.json"
             if pkg_path.exists():
@@ -749,7 +820,7 @@ class AstroSiteCreator(SiteCreator):
                 with open(pkg_path, 'w') as f:
                     json.dump(pkg, f, indent=2)
             
-            result = run_as_user("npm run build", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+            result = run_as_user("pnpm run build", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
                 raise Exception(f"Astro build failed: {result.stderr}")
             
@@ -759,7 +830,7 @@ class AstroSiteCreator(SiteCreator):
             
             messages.append(f"[green]Astro ({astro_template}) project created successfully![/green]")
             messages.append(f"[green]Static site built -> dist/ ({dist_dir})[/green]")
-            messages.append(f"[dim]Dev mode: npm run dev (from {site_base_dir})[/dim]")
+            messages.append(f"[dim]Dev mode: pnpm run dev (from {site_base_dir})[/dim]")
             
         except subprocess.CalledProcessError as e:
             raise Exception(f"Astro project creation failed: {str(e)}")
@@ -876,6 +947,8 @@ SITE_URL=https://{domain}
             }
             with open(site_base_dir / "package.json", 'w') as f:
                 json.dump(pkg, f, indent=2)
+
+            self._allow_pnpm_builds(site_base_dir, ['esbuild'])
             
             # --- astro.config.mjs ---
             astro_config = f"""import {{ defineConfig }} from 'astro/config';
@@ -1283,26 +1356,26 @@ const endpoints = getConfiguredEndpoints();
             # Install dependencies
             if os.geteuid() == 0 and current_user:
                 result = subprocess.run(
-                    ['runuser', '-l', current_user, '-c', 'npm install'],
+                    ['runuser', '-l', current_user, '-c', 'pnpm install'],
                     cwd=str(site_base_dir), capture_output=True, text=True, timeout=180
                 )
             else:
-                result = subprocess.run(['npm', 'install'], cwd=str(site_base_dir), capture_output=True, text=True, timeout=180)
+                result = subprocess.run(['pnpm', 'install'], cwd=str(site_base_dir), capture_output=True, text=True, timeout=180)
             if result.returncode != 0:
-                messages.append(f"[yellow]npm install had warnings[/yellow]")
+                messages.append(f"[yellow]pnpm install had warnings[/yellow]")
             
             # Build static site
             if os.geteuid() == 0 and current_user:
                 build_result = subprocess.run(
-                    ['runuser', '-l', current_user, '-c', 'npm run build'],
+                    ['runuser', '-l', current_user, '-c', 'pnpm run build'],
                     cwd=str(site_base_dir), capture_output=True, text=True, timeout=120
                 )
             else:
-                build_result = subprocess.run(['npm', 'run', 'build'], cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+                build_result = subprocess.run(['pnpm', 'run', 'build'], cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             
             dist_dir = site_base_dir / "dist"
             if build_result.returncode != 0 or not dist_dir.exists():
-                messages.append(f"[yellow]Build failed — run 'npm run build' manually from {site_base_dir}[/yellow]")
+                messages.append(f"[yellow]Build failed — run 'pnpm run build' manually from {site_base_dir}[/yellow]")
             else:
                 messages.append(f"[green]Static site built -> dist/ ({dist_dir})[/green]")
             
@@ -1312,7 +1385,7 @@ const endpoints = getConfiguredEndpoints();
             messages.append(f"[green]Astro Headless project created successfully![/green]")
             messages.append(f"[yellow]Edit .env to configure your API endpoints[/yellow]")
             messages.append(f"[yellow]Add API proxies: wslaragon site api add {site_name} /api https://api.{domain}/api[/yellow]")
-            messages.append(f"[dim]Dev mode: npm run dev (from {site_base_dir})[/dim]")
+            messages.append(f"[dim]Dev mode: pnpm run dev (from {site_base_dir})[/dim]")
             
         except subprocess.CalledProcessError as e:
             raise Exception(f"Astro Headless project creation failed: {str(e)}")
@@ -1328,58 +1401,33 @@ class PhpMyAdminSiteCreator(SiteCreator):
         web_root = self.web_root
         site_name = self.site_name
         current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+        web_user = self.config.get('nginx.user', 'www-data')
         
         # Download phpMyAdmin
         pma_version = '5.2.2'
         pma_tar_path = f'/tmp/phpMyAdmin-{site_name}.tar.xz'
         pma_url = f'https://files.phpmyadmin.net/phpMyAdmin/{pma_version}/phpMyAdmin-{pma_version}-all-languages.tar.xz'
-        
-        # Download
-        result = subprocess.run(
-            ['wget', '-q', '-O', pma_tar_path, pma_url],
-            capture_output=True, text=True
-        )
-        if result.returncode != 0:
-            # Fallback to .tar.gz
-            pma_url_gz = f'https://files.phpmyadmin.net/phpMyAdmin/{pma_version}/phpMyAdmin-{pma_version}-all-languages.tar.gz'
-            result = subprocess.run(
-                ['wget', '-q', '-O', pma_tar_path, pma_url_gz],
-                capture_output=True, text=True
-            )
-            if result.returncode != 0:
-                raise Exception(f"Failed to download phpMyAdmin: {result.stderr}")
-        
-        # Extract
-        result = subprocess.run(
-            ['tar', '-xf', pma_tar_path, '-C', '/tmp'],
-            capture_output=True, text=True,
-            cwd='/tmp'
-        )
-        if result.returncode != 0:
-            raise Exception(f"Failed to extract phpMyAdmin: {result.stderr}")
-        
-        # Find extracted directory
-        pma_extracted = Path(f'/tmp/phpMyAdmin-{pma_version}-all-languages')
-        if not pma_extracted.exists():
-            # Try to find it
-            pma_dirs = list(Path('/tmp').glob('phpMyAdmin-*-all-languages'))
-            if pma_dirs:
-                pma_extracted = pma_dirs[0]
-            else:
-                raise Exception("Could not find extracted phpMyAdmin directory")
-        
-        # Clear web_root and copy files
-        if web_root.exists():
-            shutil.rmtree(str(web_root))
-        
-        subprocess.run(['cp', '-r', f'{pma_extracted}/.', str(web_root)], check=True)
-        subprocess.run(['rm', '-rf', str(pma_extracted)], check=False)
-        subprocess.run(['rm', '-f', pma_tar_path], check=False)
-        
+        system_pma = Path('/usr/share/webapps/phpMyAdmin')
+
+        # Arch ships a maintained phpMyAdmin package. Prefer it on Omarchy so
+        # site creation is fast, reproducible, and does not depend on a remote
+        # download server.
+        if self.config.get('platform.name') == 'omarchy':
+            if not system_pma.exists():
+                raise Exception(
+                    "phpMyAdmin is not installed; run: omarchy pkg add phpmyadmin"
+                )
+            if web_root.exists():
+                shutil.rmtree(str(web_root))
+            shutil.copytree(system_pma, web_root)
+            pma_version = 'system'
+        else:
+            self._download_phpmyadmin(pma_url, pma_tar_path, pma_version, web_root)
+
         # Set permissions
-        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:www-data', str(web_root)], check=True)
+        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{web_user}', str(web_root)], check=True)
         subprocess.run(['sudo', 'chmod', '-R', '755', str(web_root)], check=True)
-        
+
         # Create blowfish_secret for cookie auth
         blowfish_secret = secrets.token_urlsafe(32)
 
@@ -1395,8 +1443,8 @@ class PhpMyAdminSiteCreator(SiteCreator):
 $cfg['Servers'][1]['auth_type'] = 'cookie';
 
 // Server settings
-$cfg['Servers'][1]['host'] = 'localhost';
-$cfg['Servers'][1]['port'] = '3306';
+$cfg['Servers'][1]['host'] = '{self.config.get('mysql.host', 'localhost')}';
+$cfg['Servers'][1]['port'] = '{self.config.get('mysql.port', 3306)}';
 $cfg['Servers'][1]['connect_type'] = 'tcp';
 $cfg['Servers'][1]['compress'] = false;
 
@@ -1425,17 +1473,72 @@ $cfg['NavigationDBSeparator'] = '_';
 // Hide databases pattern (system databases)
 // $cfg['Servers'][1]['hide_db'] = '^(information_schema|performance_schema|mysql|sys)$';
 ?>"""
-        
+
         with open(web_root / "config.inc.php", 'w') as f:
             f.write(config_content)
-        
+
         # Create tmp directory for phpMyAdmin
         tmp_dir = web_root / 'tmp'
         tmp_dir.mkdir(exist_ok=True)
-        subprocess.run(['sudo', 'chown', '-R', f'www-data:www-data', str(tmp_dir)], check=False)
-        
+        subprocess.run(['sudo', 'chown', '-R', f'{web_user}:{web_user}', str(tmp_dir)], check=False)
+
         return [f"[green]phpMyAdmin {pma_version} installed successfully![/green]",
                 f"[yellow]Access at: https://{site_name}{self.tld}[/yellow]"]
+
+    @staticmethod
+    def _download_phpmyadmin(pma_url: str, pma_tar_path: str,
+                             pma_version: str, web_root: Path) -> None:
+        """Download phpMyAdmin for non-Omarchy platforms."""
+
+        def download_command(url: str) -> List[str]:
+            if shutil.which('wget'):
+                return ['wget', '-q', '-O', pma_tar_path, url]
+            if shutil.which('curl'):
+                return ['curl', '-fsSL', '-o', pma_tar_path, url]
+            raise Exception("phpMyAdmin download requires curl or wget")
+
+        # Download
+        result = subprocess.run(
+            download_command(pma_url),
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            # Fallback to .tar.gz
+            pma_url_gz = f'https://files.phpmyadmin.net/phpMyAdmin/{pma_version}/phpMyAdmin-{pma_version}-all-languages.tar.gz'
+            result = subprocess.run(
+                download_command(pma_url_gz),
+                capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                raise Exception(f"Failed to download phpMyAdmin: {result.stderr}")
+
+        # Extract
+        result = subprocess.run(
+            ['tar', '-xf', pma_tar_path, '-C', '/tmp'],
+            capture_output=True, text=True,
+            cwd='/tmp'
+        )
+        if result.returncode != 0:
+            raise Exception(f"Failed to extract phpMyAdmin: {result.stderr}")
+
+        # Find extracted directory
+        pma_extracted = Path(f'/tmp/phpMyAdmin-{pma_version}-all-languages')
+        if not pma_extracted.exists():
+            # Try to find it
+            pma_dirs = list(Path('/tmp').glob('phpMyAdmin-*-all-languages'))
+            if pma_dirs:
+                pma_extracted = pma_dirs[0]
+            else:
+                raise Exception("Could not find extracted phpMyAdmin directory")
+
+        # Clear web_root and copy files
+        if web_root.exists():
+            shutil.rmtree(str(web_root))
+
+        subprocess.run(['cp', '-r', f'{pma_extracted}/.', str(web_root)], check=True)
+        subprocess.run(['rm', '-rf', str(pma_extracted)], check=False)
+        subprocess.run(['rm', '-f', pma_tar_path], check=False)
+
 
 
 class DefaultSiteCreator(SiteCreator):

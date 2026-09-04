@@ -1,7 +1,7 @@
-import subprocess
 import logging
+import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -139,10 +139,14 @@ class NginxManager:
             # PHP-FPM part
             php_config = ""
             if php:
+                fpm_listen = self.config.get(
+                    'php.fpm_listen',
+                    f"unix:/var/run/php/php{self.config.get('php.version')}-fpm.sock"
+                )
                 php_config = f"""
     location ~ \\.php$ {{
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/var/run/php/php{self.config.get('php.version')}-fpm.sock;
+        include fastcgi_params;
+        fastcgi_pass {fpm_listen};
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         client_max_body_size {self.config.get('nginx.client_max_body_size', '128M')};
     }}"""
@@ -191,8 +195,9 @@ class NginxManager:
 }}
 
 server {{
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
     server_name {domain};
 {common_config}
 
@@ -228,7 +233,7 @@ server {{
             site_name = self._normalize_site_name(site_name)
             domain = f"{site_name}{self.tld}"
             config_file = self.sites_available / f"{domain}.conf"
-            
+
             # Write configuration using sudo tee
             process = subprocess.Popen(['sudo', 'tee', str(config_file)], 
                                      stdin=subprocess.PIPE, 

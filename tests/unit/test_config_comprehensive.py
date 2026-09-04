@@ -9,6 +9,13 @@ import pytest
 from wslaragon.core.config import Config
 
 
+@pytest.fixture(autouse=True)
+def stable_platform_defaults():
+    """Keep legacy config expectations independent from the host running tests."""
+    with patch('wslaragon.core.config.detect_platform', return_value='wsl'):
+        yield
+
+
 class TestConfigInit:
     """Test Config initialization."""
 
@@ -234,7 +241,7 @@ class TestLoadConfig:
     @patch('wslaragon.core.config.Path.home')
     @patch('wslaragon.core.config.load_dotenv')
     def test_load_config_empty_file(self, mock_load_dotenv, mock_home, tmp_path):
-        """Test _load_config handles empty config file - currently raises TypeError."""
+        """Test _load_config treats an empty config file as defaults."""
         mock_home.return_value = tmp_path
         config_dir = tmp_path / ".wslaragon"
         config_dir.mkdir(parents=True)
@@ -242,10 +249,9 @@ class TestLoadConfig:
         
         config_file.touch()  # Create empty file
         
-        # Empty YAML returnsNone, code expects dict - this is a known limitation
         with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(TypeError):
-                Config()
+            config = Config()
+        assert config.get('platform.name') == 'wsl'
 
 
 class TestSave:

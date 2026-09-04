@@ -5,13 +5,26 @@ from typing import Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 class ServiceManager:
-    def __init__(self):
+    def __init__(self, config=None):
+        php_service = config.get('php.fpm_service', 'php8.3-fpm') if config else 'php8.3-fpm'
+        platform = config.get('platform.name') if config else None
+        redis_service = 'redis' if platform in {'arch', 'omarchy'} else 'redis-server'
         self.services = {
             'nginx': {'service': 'nginx', 'port': 80},
             'mysql': {'service': 'mariadb', 'port': 3306},
-            'php-fpm': {'service': 'php8.3-fpm', 'port': 9000},
-            'redis': {'service': 'redis-server', 'port': 6379}
+            'php-fpm': {'service': php_service, 'port': 9000},
+            'redis': {'service': redis_service, 'port': 6379}
         }
+        self.mysql = None
+        if config:
+            try:
+                from ..services.mysql import MySQLManager
+                self.mysql = MySQLManager(config)
+                if self.mysql.backend == 'docker':
+                    self.services['mysql']['service'] = f'docker:{self.mysql.container}'
+            except (TypeError, ValueError):
+                # Invalid/mocked configuration falls back to systemd conventions.
+                self.mysql = None
     
     def is_running(self, service_name: str) -> bool:
         """Check if a service is running"""
@@ -19,6 +32,8 @@ class ServiceManager:
             service = self.services.get(service_name)
             if not service:
                 return False
+            if service_name == 'mysql' and self.mysql:
+                return self.mysql.is_running()
             
             # Check systemd service
             result = subprocess.run(
@@ -36,6 +51,8 @@ class ServiceManager:
             service = self.services.get(service_name)
             if not service:
                 return False
+            if service_name == 'mysql' and self.mysql:
+                return self.mysql.start()
             
             result = subprocess.run(
                 ['sudo', 'systemctl', 'start', service['service']],
@@ -52,6 +69,8 @@ class ServiceManager:
             service = self.services.get(service_name)
             if not service:
                 return False
+            if service_name == 'mysql' and self.mysql:
+                return self.mysql.stop()
             
             result = subprocess.run(
                 ['sudo', 'systemctl', 'stop', service['service']],
@@ -68,6 +87,8 @@ class ServiceManager:
             service = self.services.get(service_name)
             if not service:
                 return False
+            if service_name == 'mysql' and self.mysql:
+                return self.mysql.restart()
             
             result = subprocess.run(
                 ['sudo', 'systemctl', 'restart', service['service']],
@@ -84,6 +105,9 @@ class ServiceManager:
             service = self.services.get(service_name)
             if not service:
                 return False
+            if service_name == 'mysql' and self.mysql and self.mysql.backend == 'docker':
+                # Docker containers are intentionally on-demand in Omarchy.
+                return True
             
             result = subprocess.run(
                 ['sudo', 'systemctl', 'enable', service['service']],

@@ -52,7 +52,7 @@ class TestPM2ManagerRunPM2:
         assert result['error'] is None
         mock_run.assert_called_once()
         call_args = mock_run.call_args
-        assert call_args[0][0] == ['pm2', 'list', '--json']
+        assert call_args[0][0] == ['pm2', 'list']
 
     @patch('subprocess.run')
     def test_run_pm2_success_with_empty_stdout(self, mock_run, pm2_manager):
@@ -137,7 +137,7 @@ class TestPM2ManagerRunPM2:
 
         assert result['success'] is False
         assert "PM2 not found" in result['error']
-        assert "npm install -g pm2" in result['error']
+        assert "setup-omarchy-node.sh" in result['error']
 
     @patch('subprocess.run')
     def test_run_pm2_generic_exception(self, mock_run, pm2_manager):
@@ -290,8 +290,8 @@ class TestPM2ManagerStartProcess:
         assert '/path/to/app.js' in call_args
         assert '--name' in call_args
         assert 'testapp' in call_args
-        assert '--env' in call_args
-        assert 'PORT=3000' in call_args
+        assert '--env' not in call_args
+        assert mock_run.call_args.kwargs['env']['PORT'] == '3000'
 
     @patch('subprocess.run')
     def test_start_process_with_cwd(self, mock_run, pm2_manager):
@@ -411,6 +411,23 @@ class TestPM2ManagerStartProcess:
 
         assert result['success'] is False
         assert "PM2 not found" in result['error']
+
+
+class TestPM2ManagerStartProject:
+    def test_package_project_uses_pnpm_start_and_port(self, tmp_path):
+        from wslaragon.services.node.pm2 import PM2Manager
+
+        (tmp_path / "package.json").write_text("{}")
+        manager = PM2Manager()
+        manager._run_pm2 = MagicMock(return_value={"success": True})
+
+        result = manager.start_project("app", str(tmp_path), 3010)
+
+        assert result["success"] is True
+        manager._run_pm2.assert_called_once_with(
+            ["start", "pnpm", "--name", "app", "--cwd", str(tmp_path), "--", "start"],
+            env={"PORT": "3010"},
+        )
 
 
 class TestPM2ManagerStopProcess:

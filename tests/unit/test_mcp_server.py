@@ -1123,7 +1123,7 @@ class TestNewProjectPrompt:
         result = new_project("myapp", stack="laravel")
 
         assert "composer install" in result
-        assert "npm install" in result
+        assert "pnpm install" in result
 
 
 class TestRunInteractive:

@@ -40,6 +40,8 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 ## 🚀 Próximos Pasos (En Progreso)
 
 ### Fase 1: Estabilización y Monitoreo (Completado)
+- [x] **Instalador único de Omarchygon**: Un solo script idempotente instala CLI, HTTPS, Nginx, PHP, base de datos seleccionada, phpMyAdmin, Composer, WordPress, Node.js, pnpm y PM2, y deja el runtime apagado hasta ejecutar `wslaragon on`.
+- [x] **Doctor y servicios nativos de Omarchy**: Estado y ciclo de vida con `php-fpm`, socket Unix, Redis nativo y MariaDB en Docker, sin falsos nombres de Ubuntu.
 - [x] **WSLaragon Service Monitor**: Comando `wslaragon services status` mejorado para ver estado real de Nginx, PHP, MariaDB y Redis.
 - [x] **WSLaragon Doctor Extendido**: Diagnóstico más profundo para problemas de SSL y conectividad de base de datos.
 - [x] **Integración de .agent/skills**: Nuevo comando `wslaragon agent init [preset]` para inicializar estructura de skills en proyectos.
@@ -65,9 +67,22 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [x] **Advanced Scaffolding**: Integración con Vite para crear proyectos React, Vue, Svelte, etc. (`--vite <template>`) con configuración automática de puertos y SSL.
 - [x] **Astro SSG**: Sitios Astro estáticos compilados a `dist/` y servidos directamente por Nginx, sin proxy ni proceso corriendo (`--astro`, con templates `basics`/`blog`/`minimal`).
 - [x] **Astro Headless (Islands)**: Template `--astro=headless` para sitios API-driven con island architecture, combinado con `site api add/remove/list` para gestionar los proxies reversos hacia APIs externas.
+- [ ] **Astro SSR con Node**: Integrar `@astrojs/node`, renderizado bajo demanda, puerto automático, PM2 y proxy Nginx con HTTPS.
+- [ ] **Astro API routes**: Preparar endpoints dinámicos y variables privadas para formularios, webhooks y backends ligeros.
+- [ ] **Astro + WordPress headless**: Preset declarado con URL del backend, REST API y elección entre contenido generado durante el build o renderizado dinámicamente.
 - [x] **Gestión de API Proxies**: Comando `site api` (add/remove/list) para configurar proxies reversos Nginx por sitio, con persistencia en `sites.json` y regeneración automática de la configuración.
 - [x] **Sitios Headless Pareados**: Flag `--headless --backend=<wordpress|laravel> --frontend=<sveltekit|astro> --url=<name>` crea un frontend y un backend/API vinculados, compartiendo una raíz de proyecto (`~/web/<name>/front` y `~/web/<name>/back`). Borrar cualquiera de las dos mitades elimina ambas (con aviso previo) y la raíz compartida.
 - [ ] **Project Templates**: Plantillas personalizadas para arrancar proyectos rápidos.
+
+### Fase 7: Workspaces y ciclo de vida de proyectos (Futuro)
+- [x] **Clonado y preparación de proyectos**: `site clone` detecta el stack y configura dominio, SSL, Nginx, base y proxy; opcionalmente prepara `.env`, instala, compila, importa SQL, migra Laravel e inicia PM2.
+- [ ] **Proyectos agrupados**: Administrar varios sitios como una sola aplicación o workspace (por ejemplo, `instagol.test` y `dash.instagol.test`).
+- [ ] **Subdominios declarativos**: Añadir frontend, panel, API y otros subdominios con su propio stack, raíz web, proxy y certificado.
+- [ ] **Directorio compartido**: Organizar componentes relacionados bajo una raíz común (`~/web/<proyecto>/front`, `back`, `dash`, etc.).
+- [ ] **Operaciones por workspace**: Listar, respaldar, habilitar, deshabilitar y eliminar conjuntamente todos los sitios vinculados.
+- [x] **Eliminación integral de sitios**: Al borrar un sitio, detener y retirar procesos PM2, certificados SSL y entradas de hosts además de Nginx, archivos y bases de datos. La operación conjunta para workspaces llegará con su gestión agrupada.
+- [x] **Permisos conscientes del framework**: Aplicar una base segura de archivos `644` y directorios `755`, preservar ejecutables y limitar la escritura de `http` a las rutas necesarias (`storage/`, `bootstrap/cache/`, `wp-content/`, etc.).
+- [x] **Diagnóstico de permisos**: Mostrar propietario, grupo y rutas sin escritura mediante `site fix-permissions --check`, con reparaciones específicas para Laravel, WordPress y proyectos JavaScript.
 
 ### Fase 6: Calidad y CI/CD (Completado)
 - [x] **Cobertura de Tests 99.85%**: 1,114 tests (1,083 unitarios + 31 integración)
@@ -76,4 +91,3 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [x] **CI/CD Pipeline**: GitHub Actions con lint + test + build por versión de Python
 - [x] **Pre-commit Hooks**: ruff + black + isort + mypy
 - [x] **Coverage Threshold**: Mínimo 90% para pasar CI
-

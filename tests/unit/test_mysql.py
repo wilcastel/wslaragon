@@ -164,6 +164,66 @@ class TestMySQLManagerIsRunning:
         
         assert result is False
 
+    @patch('wslaragon.services.mysql.subprocess.run')
+    def test_is_running_checks_omarchy_container(self, mock_run, mysql_manager):
+        mysql_manager.backend = 'docker'
+        mysql_manager.container = 'mariadb11'
+        mysql_manager.get_connection = MagicMock(return_value=None)
+        mock_run.return_value = MagicMock(returncode=0, stdout='true\n')
+
+        assert mysql_manager.is_running() is False
+        mock_run.assert_not_called()
+
+    def test_is_running_prefers_sql_health_check_for_docker(self, mysql_manager):
+        mysql_manager.backend = 'docker'
+        connection = MagicMock()
+        mysql_manager.get_connection = MagicMock(return_value=connection)
+
+        assert mysql_manager.is_running() is True
+        connection.close.assert_called_once()
+
+
+class TestMySQLManagerDockerLifecycle:
+    @pytest.fixture
+    def mysql_manager(self, mock_config):
+        from wslaragon.services.mysql import MySQLManager
+        manager = MySQLManager(mock_config)
+        manager.backend = 'docker'
+        manager.container = 'mariadb11'
+        return manager
+
+    @patch('wslaragon.services.mysql.subprocess.run')
+    def test_start_uses_docker_container(self, mock_run, mysql_manager):
+        mock_run.return_value = MagicMock(returncode=0)
+        mysql_manager.get_version = MagicMock(return_value=None)
+        mysql_manager.wait_until_ready = MagicMock(return_value=True)
+        assert mysql_manager.start() is True
+        mock_run.assert_called_once_with(
+            ['sudo', 'docker', 'start', 'mariadb11'], capture_output=True,
+            text=True, timeout=30
+        )
+
+    @patch('wslaragon.services.mysql.subprocess.run')
+    def test_restart_uses_docker_container(self, mock_run, mysql_manager):
+        mock_run.return_value = MagicMock(returncode=0)
+        mysql_manager.get_version = MagicMock(return_value='11.8.3-MariaDB')
+        mysql_manager.wait_until_ready = MagicMock(return_value=True)
+        assert mysql_manager.restart() is True
+        mock_run.assert_called_once_with(
+            ['sudo', 'docker', 'restart', 'mariadb11'], capture_output=True,
+            text=True, timeout=30
+        )
+
+    @patch('wslaragon.services.mysql.subprocess.run')
+    def test_stop_detects_mysql_container(self, mock_run, mysql_manager):
+        mock_run.return_value = MagicMock(returncode=0)
+        mysql_manager.container = 'mysql8'
+        assert mysql_manager.stop() is True
+        mock_run.assert_called_once_with(
+            ['sudo', 'docker', 'stop', 'mysql8'], capture_output=True,
+            text=True, timeout=30
+        )
+
 
 class TestMySQLManagerStart:
     """Test suite for start method"""

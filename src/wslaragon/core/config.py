@@ -1,7 +1,21 @@
-import yaml
 import os
 from pathlib import Path
+
+import yaml
 from dotenv import load_dotenv
+
+from .platform import detect_platform, platform_defaults
+
+
+def _deep_merge(defaults, overrides):
+    """Merge user configuration onto defaults without losing new keys."""
+    result = defaults.copy()
+    for key, value in (overrides or {}).items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 class Config:
     def __init__(self):
@@ -37,41 +51,14 @@ class Config:
     def _load_config(self):
         default_document_root = os.getenv('DOCUMENT_ROOT', str(self.home_dir / "web"))
         
-        default_config = {
-            "php": {
-                "version": "8.3",
-                "ini_file": "/etc/php/8.3/fpm/php.ini",
-                "extensions_dir": "/usr/lib/php/20230831"
-            },
-            "nginx": {
-                "config_dir": "/etc/nginx",
-                "sites_available": "/etc/nginx/sites-available",
-                "sites_enabled": "/etc/nginx/sites-enabled",
-                "client_max_body_size": "512M"
-            },
-            "mysql": {
-                "data_dir": "/var/lib/mysql",
-                "config_file": "/etc/mysql/mariadb.conf.d/50-server.cnf",
-                "user": os.getenv('DB_USER', 'root'),
-                "password": os.getenv('DB_PASSWORD', '')
-            },
-            "ssl": {
-                "dir": str(self.ssl_dir),
-                "ca_file": str(self.ssl_dir / "rootCA.pem"),
-                "ca_key": str(self.ssl_dir / "rootCA-key.pem")
-            },
-            "sites": {
-                "tld": ".test",
-                "document_root": default_document_root
-            },
-            "windows": {
-                "hosts_file": "/mnt/c/Windows/System32/drivers/etc/hosts"
-            }
-        }
+        default_config = platform_defaults(detect_platform(), self.home_dir)
+        default_config["sites"]["document_root"] = default_document_root
+        default_config["mysql"]["user"] = os.getenv('DB_USER', 'root')
+        default_config["mysql"]["password"] = os.getenv('DB_PASSWORD', '')
         
         if self.config_file.exists():
             with open(self.config_file, 'r') as f:
-                self.config = yaml.safe_load(f)
+                self.config = _deep_merge(default_config, yaml.safe_load(f) or {})
                 
                 # Ensure new keys from .env are respected even if config.yaml exists
                 if 'mysql' in self.config:

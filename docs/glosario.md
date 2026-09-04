@@ -2,6 +2,15 @@
 
 Este documento sirve como referencia completa de todos los comandos disponibles en el CLI de `wslaragon`.
 
+## ⚡ Entorno centralizado
+
+| Comando | Argumentos / Opciones | Descripción |
+| :--- | :--- | :--- |
+| `on` | - | Inicia Nginx, PHP-FPM, MariaDB, Redis opcional y los procesos PM2 guardados. |
+| `off` | - | Detiene el runtime y deshabilita el arranque automático de los servicios web. |
+| `status` | - | Consulta el estado central sin iniciar componentes. |
+| `mysql use` | `<mysql8|mariadb11>` | Fija el único contenedor de base de datos administrado por `on`, `off` y los comandos `service`. |
+
 ## 🏗️ Gestión de Sitios (`wslaragon site`)
 
 Comando principal para la creación y administración de proyectos web.
@@ -14,7 +23,8 @@ Comando principal para la creación y administración de proyectos web.
 | `site enable` | `<name>` | Habilita un sitio previamente deshabilitado en Nginx. |
 | `site disable` | `<name>` | Deshabilita un sitio en Nginx (no borra archivos). |
 | `site public` | `<name>` <br> `--enable` / `--disable` | Cambia el document root entre `./` y `./public` (útil para Laravel/Symfony). |
-| `site fix-permissions` | `<name>` | Repara propietario y permisos de archivos (útil tras copiar ficheros desde Windows). |
+| `site fix-permissions` | `<name>` <br> `--check` | Diagnostica o repara propietario y permisos según el framework. `--check` no modifica archivos. |
+| `site clone` | `[repository] [name]` <br> `--stack` / `--branch` / `--mysql` / `--database` / `--proxy` / `--env` / `--install` / `--build` / `--start` / `--import-db <sql>` / `--migrate` | Clona y configura dominio, HTTPS, Nginx, base de datos y proxy. Opcionalmente prepara `.env`, instala, compila, importa MySQL, migra Laravel e inicia proyectos con proxy mediante PM2. |
 | `site ssl` | `<name>` | Habilita HTTPS/SSL para un sitio existente que no lo tenía. |
 | `site api add` | `<name> <path> <backend_url>` | Agrega un proxy reverso Nginx en `<path>` hacia `<backend_url>` para el sitio (útil en Astro headless / sitios API-driven). |
 | `site api remove` | `<name> <path>` | Elimina un proxy reverso previamente agregado. |
@@ -29,7 +39,7 @@ Gestión de aplicaciones back-end (Node, Python) con PM2.
 | Comando | Argumentos | Descripción |
 | :--- | :--- | :--- |
 | `node list` | - | Lista procesos activos en PM2. |
-| `node start` | `<site_name>` | Inicia la aplicación del sitio (app.js, npm start, main.py). |
+| `node start` | `<site_name>` | Inicia la aplicación del sitio (app.js, pnpm start, main.py). |
 | `node stop` | `<site_name>` | Detiene el proceso del sitio. |
 | `node restart` | `<site_name>` | Reinicia el proceso del sitio. |
 | `node delete` | `<site_name>` | Elimina el proceso de la lista y lo detiene. |
@@ -67,6 +77,8 @@ Herramientas rápidas para gestión de bases de datos MariaDB/MySQL.
 
 | Comando | Argumentos | Descripción |
 | :--- | :--- | :--- |
+| `mysql use` | `<mysql8\|mariadb11>` | Selecciona el contenedor persistente que controlarán `on`, `off` y `service`. Debe ejecutarse antes de `wslaragon on`; no migra datos entre volúmenes. |
+| `mysql status` | - | Comprueba que el servidor seleccionado acepta conexiones SQL y muestra su versión. |
 | `mysql databases` | - | Lista todas las bases de datos existentes y su tamaño. |
 | `mysql create-db` | `<name>` | Crea una nueva base de datos vacía. |
 | `mysql drop-db` | `<name>` | Elimina permanentemente una base de datos. |

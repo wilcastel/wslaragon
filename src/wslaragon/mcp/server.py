@@ -16,7 +16,7 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP(
     "wslaragon",
     instructions=(
-        "WSLaragon is a Laragon-style dev environment manager for WSL2. "
+        "WSLaragon is a Laragon-style dev environment manager for Omarchy and WSL2. "
         "It manages Nginx, PHP-FPM, MariaDB, Redis and local .test domains with SSL. "
         "Sites live in ~/web/ and are accessible at <name>.test (HTTPS). "
         "Use the available tools to create projects, check services, and manage infrastructure."
@@ -889,7 +889,7 @@ def list_node_processes() -> str:
 def start_node_process(site_name: str) -> str:
     """
     Start the app process for a node/python site under PM2 (auto-detects
-    app.js, main.py, or falls back to `npm start`).
+    app.js, main.py, or falls back to `pnpm start`).
 
     Parameters
     ----------
@@ -1006,7 +1006,7 @@ def new_project(
         f"3. Create the site using create_site with the right flags for '{stack}'.\n"
         "4. Confirm the URL and document root when done.\n"
         "5. If the stack is Laravel or a JS framework, suggest the next commands to run "
-        "   inside the project directory (composer install, npm install, etc.)."
+        "   inside the project directory (composer install, pnpm install, etc.)."
     )
 
 

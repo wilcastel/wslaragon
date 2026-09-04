@@ -262,6 +262,9 @@ class TestCreateSiteWithProxyPort:
 
         assert result["success"] is True
         assert result["site"]["proxy_port"] == 3000
+        document_root = Path(result["site"]["document_root"])
+        assert (document_root / "app.js").exists()
+        assert (document_root / "package.json").exists()
 
     @patch("subprocess.run")
     def test_create_site_with_python_auto_assigns_port(self, mock_run, site_manager):
@@ -272,6 +275,7 @@ class TestCreateSiteWithProxyPort:
 
         assert result["success"] is True
         assert result["site"]["proxy_port"] == 8000
+        assert (Path(result["site"]["document_root"]) / "main.py").exists()
 
     @patch("subprocess.run")
     def test_create_site_with_explicit_proxy_port(self, mock_run, site_manager):
@@ -357,6 +361,23 @@ class TestCreateSiteWithSiteTypes:
 
         assert result["success"] is True
         assert result["site"]["proxy_port"] is not None
+
+    @patch("subprocess.run")
+    def test_create_site_with_sveltekit_type(self, mock_run, site_manager):
+        site_manager.nginx.add_site.return_value = (True, None)
+
+        with patch("wslaragon.services.sites.get_site_creator") as mock_get_creator:
+            mock_creator = MagicMock()
+            mock_creator.create.return_value = ["SvelteKit created"]
+            mock_get_creator.return_value = mock_creator
+
+            with patch.object(site_manager, "_find_next_free_port", return_value=3002):
+                result = site_manager.create_site("kitsite", site_type="sveltekit", ssl=False)
+
+        assert result["success"] is True
+        assert result["site"]["proxy_port"] == 3002
+        assert result["site"]["php"] is False
+        mock_get_creator.assert_called_once()
 
     @patch("subprocess.run")
     def test_create_site_with_laravel_type(self, mock_run, site_manager):
@@ -446,6 +467,164 @@ class TestCreateSiteNginxFailure:
         assert "Failed to create Nginx configuration" in result["error"]
 
 
+class TestCloneSite:
+    @pytest.fixture
+    def site_manager(self, tmp_path, mock_nginx_manager, mock_mysql_manager):
+        sm = create_site_manager(tmp_path, mock_nginx_manager, mock_mysql_manager)
+        sm.nginx.add_site.return_value = (True, None)
+        return sm
+
+    @patch("subprocess.run")
+    def test_clone_detects_laravel_and_registers_existing_files(self, mock_run, site_manager):
+        def clone_side_effect(command, **kwargs):
+            destination = Path(command[-1])
+            destination.mkdir(parents=True)
+            (destination / "artisan").touch()
+            (destination / "public").mkdir()
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = clone_side_effect
+        site_manager.mysql.database_exists.return_value = True
+
+        with patch.object(site_manager, "fix_permissions", return_value={"success": True}):
+            result = site_manager.clone_site(
+                "https://example.test/acme.git", "acme", ssl=False
+            )
+
+        assert result["success"] is True
+        assert result["detected_stack"] == "laravel"
+        assert result["site"]["stack"] == "laravel"
+        assert result["site"]["web_root"].endswith("/acme/public")
+        assert result["site"]["database"] == "acme_db"
+        assert (site_manager.document_root / "acme" / "artisan").exists()
+
+    @patch("subprocess.run")
+    def test_clone_failure_does_not_register_site(self, mock_run, site_manager):
+        mock_run.return_value = MagicMock(
+            returncode=128, stdout="", stderr="repository not found"
+        )
+
+        result = site_manager.clone_site("bad-url", "broken", ssl=False)
+
+        assert result["success"] is False
+        assert "repository not found" in result["error"]
+        assert "broken" not in site_manager.sites
+
+    def test_setup_clone_creates_and_configures_laravel_env(self, site_manager, tmp_path):
+        root = tmp_path / "laravel"
+        root.mkdir()
+        (root / ".env.example").write_text("APP_URL=http://localhost\nDB_CONNECTION=sqlite\n")
+        site = {"stack": "laravel", "domain": "app.test", "database": "app_db"}
+
+        actions = site_manager._setup_cloned_project(root, site, False, True)
+
+        content = (root / ".env").read_text()
+        assert "APP_URL=https://app.test" in content
+        assert "DB_CONNECTION=mysql" in content
+        assert "DB_DATABASE=app_db" in content
+        assert all(action["success"] for action in actions)
+
+    def test_setup_clone_preserves_existing_env(self, site_manager, tmp_path):
+        root = tmp_path / "node"
+        root.mkdir()
+        (root / ".env").write_text("SECRET=keep-me\n")
+        (root / ".env.example").write_text("SECRET=replace-me\n")
+
+        actions = site_manager._setup_cloned_project(
+            root, {"stack": "node", "domain": "node.test"}, False, True
+        )
+
+        assert (root / ".env").read_text() == "SECRET=keep-me\n"
+        assert actions[0]["message"] == "Existing .env preserved"
+
+    def test_setup_clone_imports_database_backup(self, site_manager, tmp_path):
+        backup = tmp_path / "backup.sql"
+        backup.write_text("SELECT 1;")
+        site_manager.mysql.restore_database.return_value = True
+
+        actions = site_manager._setup_cloned_project(
+            tmp_path, {"stack": "laravel", "database": "app_db"},
+            False, False, str(backup)
+        )
+
+        site_manager.mysql.restore_database.assert_called_once_with("app_db", str(backup))
+        assert actions == [{"success": True, "message": "Database imported into app_db"}]
+
+    @patch("wslaragon.services.sites.subprocess.run")
+    def test_setup_clone_generates_key_and_runs_explicit_migrations(
+        self, mock_run, site_manager, tmp_path
+    ):
+        root = tmp_path / "laravel"
+        root.mkdir()
+        (root / "artisan").touch()
+        (root / "composer.json").write_text("{}")
+        (root / ".env.example").write_text("APP_KEY=\n")
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        actions = site_manager._setup_cloned_project(
+            root, {"stack": "laravel", "domain": "app.test", "database": "app_db"},
+            True, True, run_migrations=True
+        )
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        assert ["composer", "install"] in commands
+        assert ["php", "artisan", "key:generate"] in commands
+        assert ["php", "artisan", "migrate"] in commands
+        assert all(action["success"] for action in actions)
+
+    @patch("wslaragon.services.sites.subprocess.run")
+    def test_setup_clone_builds_frontend_with_pnpm(self, mock_run, site_manager, tmp_path):
+        (tmp_path / "package.json").write_text("{}")
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        actions = site_manager._setup_cloned_project(
+            tmp_path, {"stack": "vite", "domain": "app.test"},
+            False, False, build_assets=True
+        )
+
+        mock_run.assert_called_once_with(
+            ["pnpm", "build"], cwd=tmp_path, check=False,
+            capture_output=True, text=True, timeout=600
+        )
+        assert actions == [{"success": True, "message": "Frontend assets built"}]
+
+    @patch("wslaragon.services.sites.PM2Manager")
+    def test_setup_clone_starts_and_saves_proxy_runtime(self, mock_pm2, site_manager, tmp_path):
+        manager = mock_pm2.return_value
+        manager.start_project.return_value = {"success": True}
+        site = {"name": "app", "stack": "node", "domain": "app.test", "proxy_port": 3005}
+
+        actions = site_manager._setup_cloned_project(
+            tmp_path, site, False, False, start_runtime=True
+        )
+
+        manager.start_project.assert_called_once_with("app", str(tmp_path), 3005)
+        manager.save.assert_called_once_with()
+        assert actions == [{"success": True, "message": "PM2 process started on port 3005"}]
+
+    @pytest.mark.parametrize(
+        ("marker", "expected"),
+        [
+            ("wp-content", "wordpress"),
+            ("astro.config.mjs", "astro"),
+            ("svelte.config.js", "sveltekit"),
+            ("vite.config.ts", "vite"),
+            ("package.json", "node"),
+            ("index.php", "php"),
+        ],
+    )
+    def test_detect_project_stack(self, tmp_path, marker, expected):
+        marker_path = tmp_path / marker
+        if marker == "wp-content":
+            marker_path.mkdir()
+        else:
+            marker_path.touch()
+
+        from wslaragon.services.sites import SiteManager
+
+        assert SiteManager.detect_project_stack(tmp_path) == expected
+
+
 class TestDeleteSite:
     """Test suite for delete_site scenarios."""
 
@@ -496,6 +675,37 @@ class TestDeleteSite:
 
         assert result["success"] is True
         site_manager.mysql.drop_database.assert_not_called()
+
+    @patch("wslaragon.services.sites.SSLManager")
+    @patch("wslaragon.services.sites.PM2Manager")
+    def test_delete_proxy_site_removes_pm2_ssl_and_hosts(self, mock_pm2_class, mock_ssl_class, site_manager):
+        site_manager.sites["todelete"].update({
+            "domain": "todelete.test",
+            "proxy_port": 3000,
+            "ssl": True,
+        })
+        mock_pm2 = mock_pm2_class.return_value
+        mock_pm2.delete_process.return_value = {"success": True}
+
+        result = site_manager.delete_site("todelete")
+
+        assert result["success"] is True
+        mock_pm2.delete_process.assert_called_once_with("todelete")
+        mock_pm2.save.assert_called_once_with()
+        mock_ssl_class.return_value.revoke_certificate.assert_called_once_with("todelete.test")
+
+    @patch("wslaragon.services.sites.SSLManager")
+    @patch("wslaragon.services.sites.PM2Manager")
+    def test_delete_continues_when_pm2_process_is_absent(self, mock_pm2_class, mock_ssl_class, site_manager):
+        site_manager.sites["todelete"].update({"proxy_port": 3000, "ssl": True})
+        mock_pm2 = mock_pm2_class.return_value
+        mock_pm2.delete_process.return_value = {"success": False, "error": "not found"}
+
+        result = site_manager.delete_site("todelete")
+
+        assert result["success"] is True
+        mock_pm2.save.assert_not_called()
+        mock_ssl_class.return_value.revoke_certificate.assert_called_once_with("todelete.test")
 
     @patch("subprocess.run")
     def test_delete_site_handles_exception(self, mock_run, site_manager):
@@ -724,6 +934,50 @@ class TestFixPermissions:
         calls = [str(call) for call in mock_run.call_args_list]
         assert any("chown" in call for call in calls)
         assert any("chmod" in call for call in calls)
+        assert any("'!', '-perm', '/111'" in call and "'644'" in call for call in calls)
+        assert any("'-perm', '/111'" in call and "'755'" in call for call in calls)
+
+    @patch("subprocess.run")
+    @patch.dict("os.environ", {"USER": "testuser"})
+    def test_fix_permissions_laravel_only_opens_runtime_paths(self, mock_run, site_manager):
+        doc_root = Path(site_manager.sites["permsite"]["document_root"])
+        (doc_root / "storage").mkdir(parents=True)
+        (doc_root / "bootstrap" / "cache").mkdir(parents=True)
+        (doc_root / "artisan").touch()
+
+        with patch.object(site_manager, "diagnose_permissions", return_value={"success": True, "issues": []}):
+            result = site_manager.fix_permissions("permsite")
+
+        assert result["success"] is True
+        assert result["framework"] == "laravel"
+        calls = [call.args[0] for call in mock_run.call_args_list]
+        writable_calls = [command for command in calls if "g+rwX" in command]
+        assert len(writable_calls) == 2
+        assert any(str(doc_root / "storage") in command for command in writable_calls)
+        assert any(str(doc_root / "bootstrap" / "cache") in command for command in writable_calls)
+
+    def test_diagnose_permissions_reports_runtime_group_problems(self, site_manager):
+        doc_root = Path(site_manager.sites["permsite"]["document_root"])
+        (doc_root / "wp-content").mkdir(parents=True)
+        (doc_root / "wp-config.php").touch()
+
+        result = site_manager.diagnose_permissions("permsite")
+
+        assert result["success"] is True
+        assert result["framework"] == "wordpress"
+        assert result["writable_paths"] == [str(doc_root / "wp-content")]
+        assert result["issues"]
+
+    def test_diagnose_permissions_detects_javascript_without_runtime_paths(self, site_manager):
+        doc_root = Path(site_manager.sites["permsite"]["document_root"])
+        doc_root.mkdir(parents=True)
+        (doc_root / "package.json").write_text("{}")
+
+        result = site_manager.diagnose_permissions("permsite")
+
+        assert result["success"] is True
+        assert result["framework"] == "javascript"
+        assert result["writable_paths"] == []
 
     @patch("subprocess.run")
     @patch.dict("os.environ", {"USER": "testuser"})

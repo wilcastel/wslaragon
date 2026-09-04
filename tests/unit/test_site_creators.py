@@ -177,11 +177,12 @@ class TestWordPressSiteCreator:
         )
 
     def test_wp_creator_calls_wget_for_download(self, wp_creator, tmp_path):
-        """Test that WordPressSiteCreator downloads WordPress via wget"""
+        """Test that WordPressSiteCreator prefers wget when available"""
         web_root = tmp_path / "web" / "wpsite"
         web_root.mkdir(parents=True, exist_ok=True)
 
-        with patch('subprocess.run') as mock_run:
+        with patch('subprocess.run') as mock_run, \
+             patch('wslaragon.services.site_creators.shutil.which', side_effect=lambda name: name == 'wget'):
             mock_run.return_value = MagicMock(returncode=0)
 
             wp_creator.create()
@@ -190,6 +191,53 @@ class TestWordPressSiteCreator:
             calls = [str(c) for c in mock_run.call_args_list]
             wget_called = any('wget' in str(call) for call in calls)
             assert wget_called
+
+    def test_wp_creator_falls_back_to_curl(self, wp_creator, tmp_path):
+        """Test that WordPressSiteCreator uses curl when wget is unavailable"""
+        web_root = tmp_path / "web" / "wpsite"
+        web_root.mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run, \
+             patch('wslaragon.services.site_creators.shutil.which', side_effect=lambda name: name == 'curl'):
+            mock_run.return_value = MagicMock(returncode=0)
+
+            wp_creator.create()
+
+        calls = [str(call) for call in mock_run.call_args_list]
+        assert any('curl' in call and 'latest.tar.gz' in call for call in calls)
+
+    def test_wp_creator_copies_arch_package_on_omarchy(self, tmp_path, mock_config):
+        """Test that Omarchy sites are copied from the installed Arch package"""
+        source = tmp_path / "system-wordpress"
+        source.mkdir()
+        (source / "wp-settings.php").write_text("<?php // WordPress")
+        web_root = tmp_path / "web" / "wpsite"
+        creator = WordPressSiteCreator(
+            config=mock_config,
+            site_name="wpsite",
+            web_root=web_root,
+            site_base_dir=tmp_path / "sites" / "wpsite",
+            tld=".test"
+        )
+        creator.SYSTEM_WORDPRESS_DIR = source
+        original_get = mock_config.get.side_effect
+        mock_config.get.side_effect = lambda key, default=None: (
+            'omarchy' if key == 'platform.name' else
+            '127.0.0.1' if key == 'mysql.host' else
+            3306 if key == 'mysql.port' else
+            'http' if key == 'nginx.user' else
+            original_get(key, default)
+        )
+
+        with patch('subprocess.run'):
+            creator.create()
+
+        assert (web_root / "wp-settings.php").exists()
+        config = (web_root / "wp-config.php").read_text()
+        assert "define( 'DB_HOST', '127.0.0.1:3306' );" in config
+        assert "define( 'FORCE_SSL_ADMIN', true );" in config
+        assert config.count("_KEY'") == 4
+        assert config.count("_SALT'") == 4
 
     def test_wp_creator_creates_wp_config(self, wp_creator, tmp_path):
         """Test that WordPressSiteCreator creates wp-config.php"""
@@ -371,6 +419,38 @@ class TestLaravelSiteCreator:
 
         env_content = (site_base_dir / ".env").read_text()
         assert "DB_CONNECTION=mysql" in env_content
+
+    def test_laravel_creator_uses_omarchy_database_and_web_user(self, tmp_path, mock_config):
+        """Test Laravel uses configured MySQL and Nginx identities on Omarchy"""
+        site_base_dir = tmp_path / "sites" / "laravel.omarchy"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        creator = LaravelSiteCreator(
+            config=mock_config,
+            site_name="laravel.omarchy",
+            web_root=site_base_dir / "public",
+            site_base_dir=site_base_dir,
+            tld=".test"
+        )
+        original_get = mock_config.get.side_effect
+        mock_config.get.side_effect = lambda key, default=None: {
+            'platform.name': 'omarchy',
+            'mysql.host': '127.0.0.1',
+            'mysql.port': 3306,
+            'mysql.user': 'root',
+            'nginx.user': 'http',
+        }.get(key, original_get(key, default))
+
+        with patch('subprocess.run') as mock_run, \
+             patch('wslaragon.services.site_creators.shutil.which', return_value='/usr/bin/composer'):
+            mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+            creator.create()
+
+        env_content = (site_base_dir / ".env").read_text()
+        assert "APP_URL=https://laravel.omarchy.test" in env_content
+        assert "DB_HOST=127.0.0.1" in env_content
+        assert "DB_PORT=3306" in env_content
+        assert "DB_DATABASE=laravel_omarchy_db" in env_content
+        assert any('wil:http' in str(call) or ':http' in str(call) for call in mock_run.call_args_list)
 
     def test_laravel_creator_with_postgres(self, tmp_path, mock_config):
         """Test that LaravelSiteCreator configures PostgreSQL correctly"""
@@ -675,7 +755,7 @@ class TestViteSiteCreator:
         )
 
     def test_vite_creator_calls_npm_create(self, vite_creator, tmp_path):
-        """Test that ViteSiteCreator calls npm create vite"""
+        """Test that ViteSiteCreator calls pnpm create vite"""
         site_base_dir = tmp_path / "sites" / "vitesite"
         site_base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -685,14 +765,14 @@ class TestViteSiteCreator:
 
         with patch('subprocess.run') as mock_run:
             with patch('os.geteuid', return_value=1000):  # Non-root user
-                with patch('shutil.which', return_value='/usr/bin/npm'):
+                with patch('shutil.which', return_value='/usr/bin/pnpm'):
                     mock_run.return_value = MagicMock(returncode=0)
 
                     vite_creator.create()
 
-                    # Check npm create vite was called
+                    # Check pnpm create vite was called
                     calls = [str(c) for c in mock_run.call_args_list]
-                    create_called = any('npm' in str(call) and 'create' in str(call) for call in calls)
+                    create_called = any('pnpm' in str(call) and 'create' in str(call) for call in calls)
                     assert create_called
 
     def test_vite_creator_uses_template(self, vite_creator, tmp_path):
@@ -706,7 +786,7 @@ class TestViteSiteCreator:
 
         with patch('subprocess.run') as mock_run:
             with patch('os.geteuid', return_value=1000):
-                with patch('shutil.which', return_value='/usr/bin/npm'):
+                with patch('shutil.which', return_value='/usr/bin/pnpm'):
                     mock_run.return_value = MagicMock(returncode=0)
 
                     vite_creator.create()
@@ -717,7 +797,7 @@ class TestViteSiteCreator:
                     assert template_used
 
     def test_vite_creator_calls_npm_install(self, vite_creator, tmp_path):
-        """Test that ViteSiteCreator calls npm install"""
+        """Test that ViteSiteCreator calls pnpm install"""
         site_base_dir = tmp_path / "sites" / "vitesite"
         site_base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -727,14 +807,14 @@ class TestViteSiteCreator:
 
         with patch('subprocess.run') as mock_run:
             with patch('os.geteuid', return_value=1000):
-                with patch('shutil.which', return_value='/usr/bin/npm'):
+                with patch('shutil.which', return_value='/usr/bin/pnpm'):
                     mock_run.return_value = MagicMock(returncode=0)
 
                     vite_creator.create()
 
-                    # Check npm install was called
+                    # Check pnpm install was called
                     calls = [str(c) for c in mock_run.call_args_list]
-                    install_called = any('npm' in str(call) and 'install' in str(call) for call in calls)
+                    install_called = any('pnpm' in str(call) and 'install' in str(call) for call in calls)
                     assert install_called
 
     def test_vite_creator_modifies_package_json(self, vite_creator, tmp_path):
@@ -748,7 +828,7 @@ class TestViteSiteCreator:
 
         with patch('subprocess.run') as mock_run:
             with patch('os.geteuid', return_value=1000):
-                with patch('shutil.which', return_value='/usr/bin/npm'):
+                with patch('shutil.which', return_value='/usr/bin/pnpm'):
                     mock_run.return_value = MagicMock(returncode=0)
 
                     vite_creator.create()
@@ -756,6 +836,9 @@ class TestViteSiteCreator:
         # Check package.json was modified
         pkg = json.loads((site_base_dir / "package.json").read_text())
         assert "5173" in pkg["scripts"]["dev"]
+        assert "--host 0.0.0.0" in pkg["scripts"]["dev"]
+        assert "--strictPort" in pkg["scripts"]["dev"]
+        assert pkg["scripts"]["start"] == pkg["scripts"]["dev"]
 
     def test_vite_creator_with_vanilla_template(self, tmp_path, mock_config):
         """Test ViteSiteCreator with vanilla template"""
@@ -778,7 +861,7 @@ class TestViteSiteCreator:
 
         with patch('subprocess.run') as mock_run:
             with patch('os.geteuid', return_value=1000):
-                with patch('shutil.which', return_value='/usr/bin/npm'):
+                with patch('shutil.which', return_value='/usr/bin/pnpm'):
                     mock_run.return_value = MagicMock(returncode=0)
 
                     creator.create()
@@ -798,7 +881,7 @@ class TestViteSiteCreator:
 
         with patch('subprocess.run') as mock_run:
             with patch('os.geteuid', return_value=1000):
-                with patch('shutil.which', return_value='/usr/bin/npm'):
+                with patch('shutil.which', return_value='/usr/bin/pnpm'):
                     mock_run.return_value = MagicMock(returncode=0)
 
                     messages = vite_creator.create()
@@ -813,8 +896,8 @@ class TestViteSiteCreator:
 
         with patch('subprocess.run') as mock_run:
             with patch('os.geteuid', return_value=1000):
-                with patch('shutil.which', return_value='/usr/bin/npm'):
-                    mock_run.side_effect = subprocess.CalledProcessError(1, 'npm create')
+                with patch('shutil.which', return_value='/usr/bin/pnpm'):
+                    mock_run.side_effect = subprocess.CalledProcessError(1, 'pnpm create')
 
                     with pytest.raises(Exception, match="Vite scaffolding failed"):
                         vite_creator.create()
@@ -1209,7 +1292,7 @@ class TestViteEdgeCases:
             with patch('os.geteuid', return_value=0):
                 with patch.dict(os.environ, {'SUDO_USER': 'testuser'}):
                     with patch('shutil.which', return_value=None):
-                        mock_run.return_value = MagicMock(returncode=0, stdout="/home/test/.nvm/versions/node/v18/bin/npm\n", stderr="")
+                        mock_run.return_value = MagicMock(returncode=0, stdout="/home/test/.nvm/versions/node/v18/bin/pnpm\n", stderr="")
 
                         creator.create()
 
@@ -1218,7 +1301,7 @@ class TestViteEdgeCases:
                         assert runuser_called
 
     def test_vite_creator_npm_fallback_runuser_failure(self, tmp_path, mock_config):
-        """Test ViteSiteCreator falls back to 'npm' when runuser returns non-zero"""
+        """Test ViteSiteCreator falls back to 'pnpm' when runuser returns non-zero"""
         site_base_dir = tmp_path / "sites" / "vitesite"
         site_base_dir.mkdir(parents=True, exist_ok=True)
         (site_base_dir / "package.json").write_text('{"name": "test", "scripts": {"dev": "vite"}}')
@@ -1295,13 +1378,13 @@ class TestViteEdgeCases:
 
         with patch('subprocess.run') as mock_run:
             with patch('os.geteuid', return_value=1000):
-                with patch('shutil.which', return_value='/usr/bin/npm'):
+                with patch('shutil.which', return_value='/usr/bin/pnpm'):
                     mock_run.return_value = MagicMock(returncode=0)
 
                     creator.create()
 
                     config_content = (site_base_dir / "vite.config.js").read_text()
-                    assert "allowedHosts: true" in config_content
+                    assert "allowedHosts: ['vitesite.test']" in config_content
                     assert "server: {" in config_content
 
     def test_vite_creator_modifies_vite_config_ts(self, tmp_path, mock_config):
@@ -1325,13 +1408,13 @@ class TestViteEdgeCases:
 
         with patch('subprocess.run') as mock_run:
             with patch('os.geteuid', return_value=1000):
-                with patch('shutil.which', return_value='/usr/bin/npm'):
+                with patch('shutil.which', return_value='/usr/bin/pnpm'):
                     mock_run.return_value = MagicMock(returncode=0)
 
                     creator.create()
 
                     config_content = (site_base_dir / "vite.config.ts").read_text()
-                    assert "allowedHosts: true" in config_content
+                    assert "allowedHosts: ['vitesite.test']" in config_content
 
     def test_vite_creator_skips_config_if_allowedhosts_exists(self, tmp_path, mock_config):
         """Test ViteSiteCreator skips modification if allowedHosts already exists"""
@@ -1354,7 +1437,7 @@ class TestViteEdgeCases:
 
         with patch('subprocess.run') as mock_run:
             with patch('os.geteuid', return_value=1000):
-                with patch('shutil.which', return_value='/usr/bin/npm'):
+                with patch('shutil.which', return_value='/usr/bin/pnpm'):
                     mock_run.return_value = MagicMock(returncode=0)
 
                     creator.create()
@@ -1384,7 +1467,7 @@ class TestViteEdgeCases:
 
         with patch('subprocess.run') as mock_run:
             with patch('os.geteuid', return_value=1000):
-                with patch('shutil.which', return_value='/usr/bin/npm'):
+                with patch('shutil.which', return_value='/usr/bin/pnpm'):
                     mock_run.return_value = MagicMock(returncode=0)
 
                     creator.create()
@@ -1593,6 +1676,7 @@ class TestSvelteKitSiteCreator:
         pkg = json.loads((site_base_dir / "package.json").read_text())
         assert "5174" in pkg["scripts"]["dev"]
         assert "5174" in pkg["scripts"]["start"]
+        assert "--strictPort" in pkg["scripts"]["dev"]
         assert pkg["scripts"]["build"] == "vite build"
 
         vite_config_content = (site_base_dir / "vite.config.ts").read_text()
@@ -1600,7 +1684,7 @@ class TestSvelteKitSiteCreator:
         assert "sveltekitsite.test" in vite_config_content
 
     def test_sveltekit_creator_falls_back_to_npm_create_svelte(self, sveltekit_creator, tmp_path):
-        """Test SvelteKitSiteCreator falls back when 'npx sv create' fails."""
+        """Test SvelteKitSiteCreator falls back when 'pnpm dlx sv create' fails."""
         site_base_dir = tmp_path / "sites" / "sveltekitsite"
         site_base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1610,7 +1694,7 @@ class TestSvelteKitSiteCreator:
                     MagicMock(returncode=0),  # chown from _prepare_run_as_user
                     MagicMock(returncode=1, stdout="", stderr="sv create not found"),  # primary scaffold
                     MagicMock(returncode=0, stdout="", stderr=""),  # fallback scaffold
-                    MagicMock(returncode=0, stdout="", stderr=""),  # npm install
+                    MagicMock(returncode=0, stdout="", stderr=""),  # pnpm install
                 ]
 
                 messages = sveltekit_creator.create()
@@ -1635,7 +1719,7 @@ class TestSvelteKitSiteCreator:
                     sveltekit_creator.create()
 
     def test_sveltekit_creator_raises_on_npm_install_failure(self, sveltekit_creator, tmp_path):
-        """Test SvelteKitSiteCreator raises when npm install fails."""
+        """Test SvelteKitSiteCreator raises when pnpm install fails."""
         site_base_dir = tmp_path / "sites" / "sveltekitsite"
         site_base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1644,10 +1728,10 @@ class TestSvelteKitSiteCreator:
                 mock_run.side_effect = [
                     MagicMock(returncode=0),  # chown
                     MagicMock(returncode=0, stdout="", stderr=""),  # scaffold ok
-                    MagicMock(returncode=1, stdout="", stderr="install boom"),  # npm install
+                    MagicMock(returncode=1, stdout="", stderr="install boom"),  # pnpm install
                 ]
 
-                with pytest.raises(Exception, match="SvelteKit npm install failed"):
+                with pytest.raises(Exception, match="SvelteKit pnpm install failed"):
                     sveltekit_creator.create()
 
     def test_sveltekit_creator_skips_vite_config_if_allowed_hosts_present(self, sveltekit_creator, tmp_path):
@@ -1691,7 +1775,7 @@ class TestSvelteKitSiteCreator:
 
         def side_effect(*args, **kwargs):
             if 'sv create' in str(args):
-                raise subprocess.CalledProcessError(1, 'npx sv create')
+                raise subprocess.CalledProcessError(1, 'pnpm dlx sv create')
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch('subprocess.run', side_effect=side_effect):
@@ -1774,8 +1858,8 @@ class TestAstroSiteCreator:
                     MagicMock(returncode=0),  # chown
                     MagicMock(returncode=1, stdout="", stderr="template flag unsupported"),  # primary scaffold
                     MagicMock(returncode=0, stdout="", stderr=""),  # interactive fallback scaffold
-                    MagicMock(returncode=0, stdout="", stderr=""),  # npm install
-                    MagicMock(returncode=0, stdout="", stderr=""),  # npm run build
+                    MagicMock(returncode=0, stdout="", stderr=""),  # pnpm install
+                    MagicMock(returncode=0, stdout="", stderr=""),  # pnpm run build
                 ]
 
                 messages = astro_creator.create()
@@ -1800,7 +1884,7 @@ class TestAstroSiteCreator:
                     astro_creator.create()
 
     def test_astro_creator_raises_on_npm_install_failure(self, astro_creator, tmp_path):
-        """Test AstroSiteCreator raises when npm install fails."""
+        """Test AstroSiteCreator raises when pnpm install fails."""
         site_base_dir = tmp_path / "sites" / "astrosite"
         site_base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1809,14 +1893,14 @@ class TestAstroSiteCreator:
                 mock_run.side_effect = [
                     MagicMock(returncode=0),  # chown
                     MagicMock(returncode=0, stdout="", stderr=""),  # scaffold ok
-                    MagicMock(returncode=1, stdout="", stderr="install boom"),  # npm install
+                    MagicMock(returncode=1, stdout="", stderr="install boom"),  # pnpm install
                 ]
 
-                with pytest.raises(Exception, match="Astro npm install failed"):
+                with pytest.raises(Exception, match="Astro pnpm install failed"):
                     astro_creator.create()
 
     def test_astro_creator_raises_on_build_failure(self, astro_creator, tmp_path):
-        """Test AstroSiteCreator raises when npm run build fails."""
+        """Test AstroSiteCreator raises when pnpm run build fails."""
         site_base_dir = tmp_path / "sites" / "astrosite"
         site_base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1825,8 +1909,8 @@ class TestAstroSiteCreator:
                 mock_run.side_effect = [
                     MagicMock(returncode=0),  # chown
                     MagicMock(returncode=0, stdout="", stderr=""),  # scaffold ok
-                    MagicMock(returncode=0, stdout="", stderr=""),  # npm install ok
-                    MagicMock(returncode=1, stdout="", stderr="build boom"),  # npm run build
+                    MagicMock(returncode=0, stdout="", stderr=""),  # pnpm install ok
+                    MagicMock(returncode=1, stdout="", stderr="build boom"),  # pnpm run build
                 ]
 
                 with pytest.raises(Exception, match="Astro build failed"):
@@ -1850,8 +1934,8 @@ class TestAstroSiteCreator:
         site_base_dir.mkdir(parents=True, exist_ok=True)
 
         def side_effect(*args, **kwargs):
-            if 'npm create astro' in str(args):
-                raise subprocess.CalledProcessError(1, 'npm create astro')
+            if 'pnpm create astro' in str(args):
+                raise subprocess.CalledProcessError(1, 'pnpm create astro')
             return MagicMock(returncode=0, stdout="", stderr="")
 
         with patch('subprocess.run', side_effect=side_effect):
@@ -1935,11 +2019,11 @@ class TestAstroHeadlessSiteCreator:
                     headless_creator.create()
 
         calls = [str(c) for c in mock_run.call_args_list]
-        assert any('runuser' in c and 'npm install' in c for c in calls)
-        assert any('runuser' in c and 'npm run build' in c for c in calls)
+        assert any('runuser' in c and 'pnpm install' in c for c in calls)
+        assert any('runuser' in c and 'pnpm run build' in c for c in calls)
 
     def test_headless_creator_non_root_uses_plain_npm(self, headless_creator, tmp_path):
-        """Test AstroHeadlessSiteCreator calls plain npm when not root."""
+        """Test AstroHeadlessSiteCreator calls plain pnpm when not root."""
         site_base_dir = tmp_path / "sites" / "headlesssite"
 
         with patch('subprocess.run') as mock_run:
@@ -1950,8 +2034,8 @@ class TestAstroHeadlessSiteCreator:
                     headless_creator.create()
 
         calls = [c.args[0] for c in mock_run.call_args_list if c.args]
-        assert any(c == ['npm', 'install'] for c in calls)
-        assert any(c == ['npm', 'run', 'build'] for c in calls)
+        assert any(c == ['pnpm', 'install'] for c in calls)
+        assert any(c == ['pnpm', 'run', 'build'] for c in calls)
 
     def test_headless_creator_removes_existing_site_base_dir(self, headless_creator, tmp_path):
         """Test AstroHeadlessSiteCreator removes an existing site_base_dir first."""
@@ -1970,7 +2054,7 @@ class TestAstroHeadlessSiteCreator:
         assert any('rm' in c and '-rf' in c and 'headlesssite' in c for c in calls)
 
     def test_headless_creator_npm_install_warning_message(self, headless_creator, tmp_path):
-        """Test AstroHeadlessSiteCreator reports a warning when npm install fails."""
+        """Test AstroHeadlessSiteCreator reports a warning when pnpm install fails."""
         site_base_dir = tmp_path / "sites" / "headlesssite"
 
         with patch('subprocess.run') as mock_run:
@@ -1980,7 +2064,7 @@ class TestAstroHeadlessSiteCreator:
 
                     messages = headless_creator.create()
 
-        assert any("npm install had warnings" in msg for msg in messages)
+        assert any("pnpm install had warnings" in msg for msg in messages)
 
     def test_headless_creator_build_failure_message(self, headless_creator, tmp_path):
         """Test AstroHeadlessSiteCreator reports a manual-build message when build fails."""

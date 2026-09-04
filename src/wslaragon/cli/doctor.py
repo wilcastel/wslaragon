@@ -10,6 +10,7 @@ from rich.panel import Panel
 from typing import Tuple
 
 from ..core.config import Config
+from ..core.services import ServiceManager
 from ..services.php import PHPManager
 
 logger = logging.getLogger(__name__)
@@ -58,15 +59,15 @@ def doctor_command():
     """Diagnose WSLaragon environment issues"""
     config = Config()
     php_mgr = PHPManager(config)
+    service_mgr = ServiceManager(config)
     
     console.print(Panel("[bold cyan]WSLaragon Doctor[/bold cyan]", subtitle="Diagnosing your environment"))
     
     # 1. System Services
     console.print("\n[bold]1. System Services[/bold]")
     services = {
-        'Nginx': 'nginx',
-        'MariaDB': 'mariadb',
-        'Redis': 'redis-server'
+        'Nginx': service_mgr.services['nginx']['service'],
+        'Redis': service_mgr.services['redis']['service'],
     }
     
     # Determine PHP version service name
@@ -76,18 +77,29 @@ def doctor_command():
         v_match = re.search(r'(\d+\.\d+)', current_php_version)
         if v_match:
             short_version = v_match.group(1)
-            services[f'PHP {short_version} FPM'] = f'php{short_version}-fpm'
+            services[f'PHP {short_version} FPM'] = service_mgr.services['php-fpm']['service']
     
     # If detection failed or we want to be safe, check generic if specific not found?
     # Actually php-fpm usually aliases to specific version, but let's stick to detected one.
     if not short_version:
-         services['PHP FPM'] = 'php-fpm'
+         services['PHP FPM'] = service_mgr.services['php-fpm']['service']
          
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("Service")
     table.add_column("Systemd Name")
     table.add_column("Status")
     
+    mysql_label = service_mgr.services['mysql']['service']
+    if service_mgr.mysql:
+        mysql_running = service_mgr.mysql.is_running()
+        mysql_state = 'active' if mysql_running else 'inactive'
+        mysql_details = 'Running' if mysql_running else 'Stopped'
+        mysql_color = 'green' if mysql_running else 'yellow'
+        table.add_row('MariaDB/MySQL', mysql_label,
+                      f"[{mysql_color}]{mysql_details} ({mysql_state})[/{mysql_color}]")
+    else:
+        services['MariaDB/MySQL'] = mysql_label
+
     for label, name in services.items():
         state, details = get_service_status(name)
         
@@ -113,9 +125,10 @@ def doctor_command():
         6379: 'Redis'
     }
     
-    # Add PHP FPM port if relevant (default 9000, or 9000+ based on config, usually 9000 for main)
-    # Checking 9000 is good practice
-    ports[9000] = 'PHP-FPM'
+    # Arch/Omarchy PHP-FPM uses a Unix socket, not TCP port 9000.
+    fpm_listen = config.get('php.fpm_listen', '')
+    if not str(fpm_listen).startswith('unix:'):
+        ports[9000] = 'PHP-FPM'
     
     port_table = Table(show_header=True, header_style="bold magenta")
     port_table.add_column("Port")
@@ -129,7 +142,7 @@ def doctor_command():
         else:
             # If service is stopped, closed is expected (yellow). If service running but closed -> red.
             # Simple logic for now:
-            status = "[yellow]Broadcasting/Closed[/yellow]"
+            status = "[yellow]○ Not listening[/yellow]"
             
         port_table.add_row(str(port), service, status)
         
@@ -153,6 +166,13 @@ def doctor_command():
          checks.append((f"PHP Configuration ({php_ini})", "[green]✓ Found[/green]"))
     else:
          checks.append(("PHP Configuration", f"[red]✗ Missing at {php_ini}[/red]"))
+
+    if str(fpm_listen).startswith('unix:'):
+        socket_path = str(fpm_listen)[5:]
+        if os.path.exists(socket_path):
+            checks.append((f"PHP-FPM socket ({socket_path})", "[green]✓ Found[/green]"))
+        else:
+            checks.append((f"PHP-FPM socket ({socket_path})", "[yellow]○ Not active[/yellow]"))
          
     sec_table = Table(show_header=False, box=None)
     for check in checks:

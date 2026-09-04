@@ -8,7 +8,8 @@ from typing import Dict, List, Optional
 from datetime import datetime
 
 from ..services.ssl import SSLManager
-from .site_creators import get_site_creator
+from .node.pm2 import PM2Manager
+from .site_creators import database_name_for_site, get_site_creator
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,8 @@ class SiteManager:
                    database_name: str = None, public_dir: bool = False,
                    proxy_port: int = None, site_type: str = None, 
                    db_type: str = None, recreate: bool = False,
-                   vite_template: str = None, astro_template: str = None) -> Dict:
+                   vite_template: str = None, astro_template: str = None,
+                   existing_files: bool = False, stack: str = None) -> Dict:
         """Create a new site"""
         site_base_dir: Optional[Path] = None
         cleanup_on_failure = False
@@ -95,20 +97,24 @@ class SiteManager:
             if not site_name or not self._is_valid_site_name(site_name):
                 return {'success': False, 'error': 'Invalid site name. Use letters, numbers, hyphens, underscores and dots (e.g. dash.misitio)'}
             
-            # Auto-enable mysql for WordPress (WP requires a database)
-            if site_type == 'wordpress' and mysql is None:
+            is_laravel_request = site_type is not None and (
+                site_type == 'laravel' or site_type.isdigit()
+            )
+
+            # WordPress and Laravel require a database by default.
+            if (site_type == 'wordpress' or is_laravel_request) and mysql is None and not db_type:
                 mysql = True
             
             # Default mysql to False if still None (user didn't specify)
             if mysql is None:
                 mysql = False
             
-            # Auto-configure for Node/Python/Vite (Astro SSG does NOT need a proxy)
+            # Auto-configure for Node/Python/Vite/SvelteKit (Astro SSG does NOT need a proxy)
             is_astro_ssg = bool(astro_template)
-            if site_type in ('node', 'python') or vite_template:
+            if site_type in ('node', 'python', 'sveltekit') or vite_template:
                 if not proxy_port:
                     # Find next free port
-                    start_port = 3000 if site_type == 'node' or vite_template else 8000
+                    start_port = 8000 if site_type == 'python' else 3000
                     proxy_port = self._find_next_free_port(start_port)
             
             if site_name in self.sites and not recreate:
@@ -131,13 +137,14 @@ class SiteManager:
 
             if site_exists:
                 if recreate or site_name not in self.sites:
-                    # recreate=True OR site was deleted but directory left behind.
-                    # Clean it so the creator gets a fresh directory.
-                    subprocess.run(['sudo', 'rm', '-rf', str(site_base_dir)], check=True)
-                    messages.append(f"[yellow]Cleaned existing directory: {site_base_dir}[/yellow]")
+                    if not existing_files:
+                        # recreate=True OR site was deleted but directory left behind.
+                        # Clean it so the creator gets a fresh directory.
+                        subprocess.run(['sudo', 'rm', '-rf', str(site_base_dir)], check=True)
+                        messages.append(f"[yellow]Cleaned existing directory: {site_base_dir}[/yellow]")
             
-            # Astro SSG: no PHP
-            if is_astro_ssg:
+            # Proxy-based JavaScript/Python sites and Astro SSG do not use PHP.
+            if site_type in ('node', 'python', 'sveltekit') or vite_template or is_astro_ssg:
                 php = False
             
             site_base_dir.mkdir(exist_ok=True, parents=True)
@@ -157,18 +164,17 @@ class SiteManager:
                 web_root.mkdir(exist_ok=True, parents=True)
                 messages.append(f"[green]Created public folder: {web_root}[/green]")
             # IMPORTANT: For Astro SSG we must NOT pre-create dist/ before scaffolding.
-            # `npm create astro@latest .` writes to a random subfolder when cwd is not empty.
+            # `pnpm create astro@latest .` writes to a random subfolder when cwd is not empty.
             elif not use_public and not web_root.exists() and not is_astro_ssg:
                 web_root.mkdir(exist_ok=True, parents=True)
 
 # Use Strategy pattern for site creation
-            # Run creator for all sites that have a site_type or template.
-            # Generic proxy-only sites (node/python without template) skip scaffolding.
-            needs_scaffolding = site_type in ('html', 'wordpress', 'phpmyadmin', 'laravel') or \
+            # Run creator for all sites that have a site type or template.
+            needs_scaffolding = site_type in ('html', 'wordpress', 'phpmyadmin', 'laravel', 'node', 'python', 'sveltekit') or \
                                 site_type and site_type.isdigit() or \
                                 vite_template or astro_template
             
-            if needs_scaffolding or (not proxy_port):
+            if not existing_files and (needs_scaffolding or (not proxy_port)):
                 # Directory is fresh or user explicitly asked to recreate — run creator
                 laravel_version = None
                 if is_laravel:
@@ -196,7 +202,7 @@ class SiteManager:
             if db_type_final in ('mysql', 'postgres', 'supabase'):
                 if not database_name:
                     # Sanitize: replace dots with underscores for DB names
-                    database_name = f"{site_name.replace('.', '_')}_db"
+                    database_name = database_name_for_site(site_name)
                 
                 if db_type_final == 'mysql':
                     if self.mysql.database_exists(database_name):
@@ -259,6 +265,7 @@ class SiteManager:
                 'database': database_name if db_type_final else None,
                 'api_proxies': api_proxies,
                 'astro_template': astro_template,
+                'stack': stack,
                 'created_at': datetime.now().isoformat(),
                 'enabled': True
             }
@@ -266,7 +273,7 @@ class SiteManager:
             self.sites[site_name] = site_info
             self._save_sites()
             
-            self.fix_permissions(site_name)
+            self.fix_permissions(site_name, configure_wordpress=not existing_files)
             
             panel_content = f"[bold green]Site created successfully![/bold green]\n\n"
             panel_content += f"Domain: {site_info['domain']}\n"
@@ -286,6 +293,203 @@ class SiteManager:
                 self._cleanup_failed_site_directory(site_base_dir)
             logger.error(f"Failed to create site {site_name}: {e}")
             return {'success': False, 'error': str(e)}
+
+    def clone_site(self, repository: str, site_name: str, stack: str = 'auto',
+                   branch: str = None, mysql: bool = None, ssl: bool = True,
+                   database_name: str = None, proxy_port: int = None,
+                   install_dependencies: bool = False, prepare_env: bool = False,
+                   database_backup: str = None, run_migrations: bool = False,
+                   build_assets: bool = False, start_runtime: bool = False) -> Dict:
+        """Clone a Git repository and register it as a configured local site."""
+        site_name = self._normalize_site_name(site_name)
+        if not site_name or not self._is_valid_site_name(site_name):
+            return {'success': False, 'error': 'Invalid site name'}
+        if site_name in self.sites:
+            return {'success': False, 'error': 'Site already exists'}
+
+        destination = self.document_root / site_name
+        if destination.exists():
+            return {'success': False, 'error': f'Destination already exists: {destination}'}
+
+        clone_command = ['git', 'clone']
+        if branch:
+            clone_command.extend(['--branch', branch, '--single-branch'])
+        clone_command.extend([repository, str(destination)])
+
+        try:
+            clone_result = subprocess.run(
+                clone_command, check=False, capture_output=True, text=True, timeout=300
+            )
+            if clone_result.returncode != 0:
+                error = clone_result.stderr.strip() or clone_result.stdout.strip()
+                return {'success': False, 'error': f'Git clone failed: {error}'}
+
+            detected_stack = self.detect_project_stack(destination)
+            selected_stack = detected_stack if stack == 'auto' else stack
+            profiles = {
+                'static': {'php': False, 'site_type': None, 'public_dir': False},
+                'php': {'php': True, 'site_type': None, 'public_dir': False},
+                'wordpress': {'php': True, 'site_type': None, 'public_dir': False},
+                'laravel': {'php': True, 'site_type': None, 'public_dir': True},
+                'node': {'php': False, 'site_type': 'node', 'public_dir': False},
+                'vite': {'php': False, 'site_type': 'node', 'public_dir': False},
+                'sveltekit': {'php': False, 'site_type': 'node', 'public_dir': False},
+                'astro': {'php': False, 'site_type': 'node', 'public_dir': False},
+            }
+            if selected_stack not in profiles:
+                self._cleanup_failed_site_directory(destination)
+                return {'success': False, 'error': f'Unsupported stack: {selected_stack}'}
+
+            if mysql is None:
+                mysql = selected_stack in ('wordpress', 'laravel')
+            profile = profiles[selected_stack]
+            result = self.create_site(
+                site_name, php=profile['php'], mysql=mysql, ssl=ssl,
+                database_name=database_name, public_dir=profile['public_dir'],
+                proxy_port=proxy_port, site_type=profile['site_type'],
+                existing_files=True, stack=selected_stack
+            )
+            if result.get('success'):
+                result['detected_stack'] = detected_stack
+                result['site']['repository'] = repository
+                result['site']['branch'] = branch
+                self._save_sites()
+                result['setup_actions'] = self._setup_cloned_project(
+                    destination, result['site'], install_dependencies,
+                    prepare_env, database_backup, run_migrations, build_assets,
+                    start_runtime
+                )
+            return result
+        except subprocess.TimeoutExpired:
+            self._cleanup_failed_site_directory(destination)
+            return {'success': False, 'error': 'Git clone timed out after 5 minutes'}
+        except Exception as e:
+            self._cleanup_failed_site_directory(destination)
+            return {'success': False, 'error': str(e)}
+
+    def _setup_cloned_project(self, root: Path, site: Dict, install: bool,
+                              prepare_env: bool, backup: str = None,
+                              run_migrations: bool = False,
+                              build_assets: bool = False,
+                              start_runtime: bool = False) -> List[Dict]:
+        """Run optional setup without replacing an existing environment file."""
+        actions = []
+        env_file = root / '.env'
+        env_created = False
+        if prepare_env:
+            example = root / '.env.example'
+            if env_file.exists():
+                actions.append({'success': True, 'message': 'Existing .env preserved'})
+            elif example.exists():
+                shutil.copy2(example, env_file)
+                env_created = True
+                actions.append({'success': True, 'message': '.env created from .env.example'})
+            else:
+                actions.append({'success': False, 'message': 'No .env.example found'})
+            if env_created and site.get('stack') == 'laravel':
+                values = {
+                    'APP_URL': f"https://{site['domain']}",
+                    'DB_CONNECTION': 'mysql',
+                    'DB_HOST': str(self.config.get('mysql.host', '127.0.0.1')),
+                    'DB_PORT': str(self.config.get('mysql.port', 3306)),
+                    'DB_DATABASE': site.get('database') or '',
+                    'DB_USERNAME': str(self.config.get('mysql.user', 'root')),
+                    'DB_PASSWORD': str(self.config.get('mysql.password', '')),
+                }
+                lines = env_file.read_text().splitlines()
+                for key, value in values.items():
+                    new_line = f'{key}={value}'
+                    matches = [i for i, line in enumerate(lines) if line.startswith(f'{key}=')]
+                    if matches:
+                        lines[matches[0]] = new_line
+                    else:
+                        lines.append(new_line)
+                env_file.write_text('\n'.join(lines) + '\n')
+                actions.append({'success': True, 'message': 'Laravel .env configured'})
+
+        if install:
+            commands = []
+            if (root / 'composer.json').exists():
+                commands.append((['composer', 'install'], 'Composer dependencies installed'))
+            if (root / 'package.json').exists():
+                commands.append((['pnpm', 'install'], 'pnpm dependencies installed'))
+            for command, success_message in commands:
+                try:
+                    result = subprocess.run(command, cwd=root, check=False, capture_output=True,
+                                            text=True, timeout=600)
+                    message = success_message if result.returncode == 0 else (
+                        result.stderr.strip() or result.stdout.strip() or f'{command[0]} failed')
+                    actions.append({'success': result.returncode == 0, 'message': message})
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    actions.append({'success': False, 'message': f'{command[0]} failed: {exc}'})
+
+        if env_created and install and site.get('stack') == 'laravel':
+            result = subprocess.run(['php', 'artisan', 'key:generate'], cwd=root, check=False,
+                                    capture_output=True, text=True, timeout=60)
+            actions.append({'success': result.returncode == 0, 'message':
+                            'Laravel application key generated' if result.returncode == 0
+                            else 'Laravel application key could not be generated'})
+
+        if build_assets:
+            if not (root / 'package.json').exists():
+                actions.append({'success': False, 'message': 'No package.json found; build skipped'})
+            else:
+                try:
+                    result = subprocess.run(['pnpm', 'build'], cwd=root, check=False,
+                                            capture_output=True, text=True, timeout=600)
+                    actions.append({'success': result.returncode == 0, 'message':
+                                    'Frontend assets built' if result.returncode == 0
+                                    else (result.stderr.strip() or 'Frontend build failed')})
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    actions.append({'success': False, 'message': f'pnpm build failed: {exc}'})
+
+        if backup:
+            database = site.get('database')
+            restored = bool(database) and self.mysql.restore_database(database, backup)
+            actions.append({'success': restored, 'message':
+                            f'Database imported into {database}' if restored
+                            else 'Database backup could not be imported'})
+        if run_migrations:
+            if site.get('stack') != 'laravel' or not env_file.exists():
+                actions.append({'success': False, 'message': 'Laravel migrations are not applicable'})
+            else:
+                result = subprocess.run(['php', 'artisan', 'migrate'], cwd=root, check=False,
+                                        capture_output=True, text=True, timeout=600)
+                actions.append({'success': result.returncode == 0, 'message':
+                                'Laravel migrations completed' if result.returncode == 0
+                                else (result.stderr.strip() or 'Laravel migrations failed')})
+        if start_runtime:
+            port = site.get('proxy_port')
+            if not port:
+                actions.append({'success': False, 'message': 'Site has no proxy runtime; PM2 start skipped'})
+            else:
+                pm2 = PM2Manager(self.config)
+                result = pm2.start_project(site['name'], str(root), port)
+                if result.get('success'):
+                    pm2.save()
+                actions.append({'success': bool(result.get('success')), 'message':
+                                f"PM2 process started on port {port}" if result.get('success')
+                                else f"PM2 start failed: {result.get('error') or 'unknown error'}"})
+        return actions
+
+    @staticmethod
+    def detect_project_stack(project_root: Path) -> str:
+        """Detect a cloned project's stack from its conventional files."""
+        if (project_root / 'artisan').exists():
+            return 'laravel'
+        if (project_root / 'wp-config.php').exists() or (project_root / 'wp-content').exists():
+            return 'wordpress'
+        if (project_root / 'astro.config.mjs').exists() or (project_root / 'astro.config.ts').exists():
+            return 'astro'
+        if (project_root / 'svelte.config.js').exists() or (project_root / 'svelte.config.ts').exists():
+            return 'sveltekit'
+        if any((project_root / name).exists() for name in ('vite.config.js', 'vite.config.ts', 'vite.config.mjs')):
+            return 'vite'
+        if (project_root / 'package.json').exists():
+            return 'node'
+        if any(project_root.glob('*.php')):
+            return 'php'
+        return 'static'
 
     def create_headless_site(self, site_name: str, backend: str, frontend: str,
                              ssl: bool = True, database_name: str = None,
@@ -534,8 +738,21 @@ class SiteManager:
             for name in names_to_delete:
                 info = self.sites[name]
 
+                # Stop and unregister proxy processes before removing Nginx.
+                # A missing PM2 process is harmless: the site may already be stopped.
+                if info.get('proxy_port'):
+                    pm2 = PM2Manager(self.config)
+                    pm2_result = pm2.delete_process(name)
+                    if pm2_result.get('success'):
+                        pm2.save()
+
                 # Remove Nginx configuration
                 self.nginx.remove_site(name)
+
+                # Remove the certificate and local hosts entry together.
+                if info.get('ssl'):
+                    domain = info.get('domain') or f"{name}{self.tld}"
+                    SSLManager(self.config).revoke_certificate(domain)
 
                 # Remove database if requested
                 if remove_database and info.get('database'):
@@ -687,8 +904,8 @@ class SiteManager:
             return f"{protocol}://{site_name}{self.tld}"
         return None
 
-    def fix_permissions(self, site_name: str) -> Dict:
-        """Fix file owner and permissions for a site"""
+    def fix_permissions(self, site_name: str, configure_wordpress: bool = True) -> Dict:
+        """Repair ownership and apply framework-aware filesystem permissions."""
         try:
             site_name = self._normalize_site_name(site_name)
             if site_name not in self.sites:
@@ -699,27 +916,53 @@ class SiteManager:
             
             # Get current user
             current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+            web_user = self.config.get('nginx.user', 'www-data')
+
+            if not current_user:
+                return {'success': False, 'error': 'Could not determine the current user'}
+
+            framework, writable_paths = self._permission_profile(Path(doc_root))
+            before = self.diagnose_permissions(site_name)
             
             # Set owner to current_user:www-data
-            cmd_chown = ['sudo', 'chown', '-R', f'{current_user}:www-data', doc_root]
+            cmd_chown = ['sudo', 'chown', '-R', f'{current_user}:{web_user}', doc_root]
             subprocess.run(cmd_chown, check=True, capture_output=True)
             
-            # Set permissions to 775 (rwxrwxr-x)
-            # User: rwx (Full)
-            # Group (Web Server): rwx (Full) - Needed for writing logs, caching, storage
-            # Others: r-x (Read/Execute)
-            cmd_chmod = ['sudo', 'chmod', '-R', '775', doc_root]
-            subprocess.run(cmd_chmod, check=True, capture_output=True)
-            
-            # Additional fix for storage folders commonly used in frameworks (Laravel, etc)
-            # This ensures even new files created inherit the group 'www-data'
-            cmd_guid = ['sudo', 'find', doc_root, '-type', 'd', '-exec', 'chmod', 'g+s', '{}', '+']
-            subprocess.run(cmd_guid, check=True, capture_output=True)
+            # Safe baseline: directories are traversable, regular files are not
+            # executable, and files that were executable remain executable.
+            subprocess.run(
+                ['sudo', 'find', doc_root, '-type', 'd', '-exec', 'chmod', '755', '{}', '+'],
+                check=True, capture_output=True
+            )
+            subprocess.run(
+                ['sudo', 'find', doc_root, '-type', 'f', '!', '-perm', '/111',
+                 '-exec', 'chmod', '644', '{}', '+'],
+                check=True, capture_output=True
+            )
+            subprocess.run(
+                ['sudo', 'find', doc_root, '-type', 'f', '-perm', '/111',
+                 '-exec', 'chmod', '755', '{}', '+'],
+                check=True, capture_output=True
+            )
+
+            # Only framework runtime paths are writable by the web-server group.
+            for writable_path in writable_paths:
+                if not writable_path.exists():
+                    continue
+                subprocess.run(
+                    ['sudo', 'chmod', '-R', 'g+rwX', str(writable_path)],
+                    check=True, capture_output=True
+                )
+                subprocess.run(
+                    ['sudo', 'find', str(writable_path), '-type', 'd',
+                     '-exec', 'chmod', 'g+s', '{}', '+'],
+                    check=True, capture_output=True
+                )
             
             # WordPress specific fix: FS_METHOD direct
             # This prevents WP from asking for FTP credentials
             wp_config = Path(doc_root) / 'wp-config.php'
-            if wp_config.exists():
+            if configure_wordpress and wp_config.exists():
                 try:
                     with open(wp_config, 'r') as f:
                         content = f.read()
@@ -738,11 +981,16 @@ class SiteManager:
                             f.write(new_content)
                             
                         # Re-apply ownership to wp-config.php just in case
-                        subprocess.run(['sudo', 'chown', f'{current_user}:www-data', str(wp_config)], check=True)
+                        subprocess.run(['sudo', 'chown', f'{current_user}:{web_user}', str(wp_config)], check=True)
                 except Exception:
                     pass # Non-critical failure, continue
             
-            return {'success': True}
+            return {
+                'success': True,
+                'framework': framework,
+                'writable_paths': [str(path) for path in writable_paths if path.exists()],
+                'before': before.get('issues', []) if before.get('success') else [],
+            }
             
         except subprocess.CalledProcessError as e:
             logger.error(f"Command failed while fixing permissions for {site_name}: {e}")
@@ -750,6 +998,80 @@ class SiteManager:
         except Exception as e:
             logger.error(f"Failed to fix permissions for {site_name}: {e}")
             return {'success': False, 'error': str(e)}
+
+    def diagnose_permissions(self, site_name: str) -> Dict:
+        """Inspect ownership and framework runtime paths without changing files."""
+        try:
+            site_name = self._normalize_site_name(site_name)
+            if site_name not in self.sites:
+                return {'success': False, 'error': 'Site not found'}
+
+            doc_root = Path(self.sites[site_name]['document_root'])
+            if not doc_root.exists():
+                return {'success': False, 'error': f'Document root does not exist: {doc_root}'}
+
+            current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+            web_user = self.config.get('nginx.user', 'www-data')
+            framework, writable_paths = self._permission_profile(doc_root)
+            root_stat = doc_root.stat()
+
+            import grp
+            import pwd
+            owner = pwd.getpwuid(root_stat.st_uid).pw_name
+            group = grp.getgrgid(root_stat.st_gid).gr_name
+            issues = []
+            if current_user and owner != current_user:
+                issues.append(f'Project owner is {owner}, expected {current_user}')
+
+            for path in writable_paths:
+                if not path.exists():
+                    issues.append(f'Runtime path is missing: {path}')
+                    continue
+                path_stat = path.stat()
+                path_group = grp.getgrgid(path_stat.st_gid).gr_name
+                if path_group != web_user:
+                    issues.append(f'{path} belongs to group {path_group}, expected {web_user}')
+                if not path_stat.st_mode & 0o020:
+                    issues.append(f'{path} is not group-writable')
+                if not path_stat.st_mode & 0o2000:
+                    issues.append(f'{path} does not inherit the {web_user} group')
+
+            return {
+                'success': True,
+                'framework': framework,
+                'document_root': str(doc_root),
+                'owner': owner,
+                'group': group,
+                'mode': oct(root_stat.st_mode & 0o7777),
+                'web_user': web_user,
+                'writable_paths': [str(path) for path in writable_paths],
+                'issues': issues,
+            }
+        except Exception as e:
+            logger.error(f"Failed to diagnose permissions for {site_name}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def _permission_profile(doc_root: Path):
+        """Detect the framework and return paths that need web-server writes."""
+        if (doc_root / 'artisan').exists():
+            paths = [doc_root / 'storage', doc_root / 'bootstrap' / 'cache']
+            env_file = doc_root / '.env'
+            if env_file.exists() and 'DB_CONNECTION=sqlite' in env_file.read_text(errors='ignore'):
+                paths.append(doc_root / 'database')
+            return 'laravel', paths
+        if (doc_root / 'wp-config.php').exists() or (doc_root / 'wp-content').exists():
+            return 'wordpress', [doc_root / 'wp-content']
+        if (doc_root / 'package.json').exists():
+            if (doc_root / 'astro.config.mjs').exists():
+                return 'astro', []
+            if (doc_root / 'svelte.config.js').exists():
+                return 'sveltekit', []
+            return 'javascript', []
+        if any(doc_root.glob('*.php')):
+            runtime_names = ('storage', 'cache', 'logs', 'uploads')
+            return 'php', [doc_root / name for name in runtime_names if (doc_root / name).exists()]
+        return 'static', []
     
     def add_api_proxy(self, site_name: str, path: str, backend: str) -> Dict:
         """Add an API proxy to a site (e.g. /api -> https://api.example.test)"""

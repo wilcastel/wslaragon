@@ -295,6 +295,25 @@ class TestSiteCreateCommand:
         assert result.exit_code == 0
         assert mock_deps['site_mgr'].create_site.call_args.kwargs['php'] is False
 
+    def test_site_create_sveltekit_forces_php_off(self, runner, mock_deps):
+        """Test standalone SvelteKit sites use the Node proxy stack."""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].create_site.return_value = {
+            'success': True,
+            'site': {
+                'name': 'kit', 'domain': 'kit.test', 'document_root': '/test/web/kit',
+                'php': False, 'mysql': False, 'ssl': True, 'proxy_port': 3000,
+            }
+        }
+
+        result = runner.invoke(site, ['create', 'kit', '--sveltekit'])
+
+        assert result.exit_code == 0
+        call_kwargs = mock_deps['site_mgr'].create_site.call_args.kwargs
+        assert call_kwargs['php'] is False
+        assert call_kwargs['site_type'] == 'sveltekit'
+
     def test_site_create_phpmyadmin_disables_mysql_by_default(self, runner, mock_deps):
         """Test that --phpmyadmin defaults mysql to False since it manages existing DBs."""
         from wslaragon.cli.site_commands import site
@@ -498,7 +517,6 @@ class TestSiteListCommand:
 
             mock_site_mgr_instance = MagicMock()
             mock_site_mgr.return_value = mock_site_mgr_instance
-
             yield {
                 'config': mock_config_instance,
                 'site_mgr': mock_site_mgr_instance,
@@ -875,6 +893,15 @@ class TestSiteFixPermissionsCommand:
 
             mock_site_mgr_instance = MagicMock()
             mock_site_mgr.return_value = mock_site_mgr_instance
+            mock_site_mgr_instance.diagnose_permissions.return_value = {
+                'success': True,
+                'framework': 'static',
+                'document_root': '/tmp/testsite',
+                'owner': 'testuser',
+                'group': 'testuser',
+                'mode': '0o755',
+                'issues': [],
+            }
 
             mock_run.return_value = MagicMock(returncode=0)
 
@@ -914,6 +941,16 @@ class TestSiteFixPermissionsCommand:
         result = runner.invoke(site, ['fix-permissions', 'testsite'])
 
         assert 'sudo' in result.output.lower() or result.exit_code != 0
+
+    def test_fix_permissions_check_does_not_request_sudo(self, runner, mock_deps):
+        from wslaragon.cli.site_commands import site
+
+        result = runner.invoke(site, ['fix-permissions', 'testsite', '--check'])
+
+        assert result.exit_code == 0
+        assert 'No permission problems detected' in result.output
+        mock_deps['site_mgr'].fix_permissions.assert_not_called()
+        mock_deps['run'].assert_not_called()
 
 
 class TestSiteExportCommand:

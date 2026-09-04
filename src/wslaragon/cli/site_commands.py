@@ -32,7 +32,7 @@ def site():
 @site.command()
 @click.argument('name', required=False)
 @click.option('--php/--no-php', default=True, help='Enable PHP')
-@click.option('--mysql/--no-mysql', default=None, help='Create MySQL database (default: True for WordPress)')
+@click.option('--mysql/--no-mysql', default=None, help='Create MySQL database (default: True for WordPress and Laravel)')
 @click.option('--ssl/--no-ssl', default=True, help='Enable SSL (default: True)')
 @click.option('--database', help='Custom database name')
 @click.option('--public/--no-public', default=False, help='Point document root to public/ directory')
@@ -44,6 +44,7 @@ def site():
 @click.option('--node', 'site_type', flag_value='node', help='Create Node.js app (auto-port starting 3000)')
 @click.option('--python', 'site_type', flag_value='python', help='Create Python app (auto-port starting 8000)')
 @click.option('--vite', help='Create Vite app with template (react, vue, svelte, vanilla, etc.)')
+@click.option('--sveltekit', 'site_type', flag_value='sveltekit', help='Create a SvelteKit app (auto-port starting 3000)')
 @click.option('--astro', is_flag=False, flag_value='basics', default=None,
               help='Create Astro app. Use bare --astro for basics, or --astro=blog/minimal/headless')
 @click.option('--headless', 'is_headless', is_flag=True, default=False,
@@ -58,7 +59,7 @@ def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astr
     """Create a new site"""
     # Override defaults for Node/Python/Vite/Astro if not explicitly set
     
-    if site_type in ('node', 'python') or vite:
+    if site_type in ('node', 'python', 'sveltekit') or vite:
         if php:
             php = False
             
@@ -137,6 +138,102 @@ def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astr
              console.print(f"[green]✓ SSL configured for {site_info['domain']}[/green]")
     else:
         console.print(f"[red]✗ Failed to create site: {result['error']}[/red]")
+
+
+@site.command('clone')
+@click.argument('repository', required=False)
+@click.argument('name', required=False)
+@click.option('--stack', type=click.Choice([
+    'auto', 'static', 'php', 'wordpress', 'laravel', 'node', 'vite',
+    'sveltekit', 'astro'
+]), help='Project stack (default: detect automatically)')
+@click.option('--branch', help='Git branch or tag to clone')
+@click.option('--mysql/--no-mysql', default=None, help='Create a MySQL database')
+@click.option('--database', help='Custom database name')
+@click.option('--ssl/--no-ssl', default=True, help='Enable local HTTPS')
+@click.option('--proxy', type=int, help='Custom proxy port for JavaScript projects')
+@click.option('--install/--no-install', default=False, help='Install Composer/pnpm dependencies')
+@click.option('--env/--no-env', 'prepare_env', default=False, help='Prepare .env without overwriting it')
+@click.option('--import-db', type=click.Path(exists=True, dir_okay=False), help='Import a MySQL SQL backup')
+@click.option('--migrate', is_flag=True, help='Run Laravel migrations after setup')
+@click.option('--build', 'build_assets', is_flag=True, help='Run pnpm build after installation')
+@click.option('--start', 'start_runtime', is_flag=True, help='Start proxy project with PM2')
+def clone(repository, name, stack, branch, mysql, database, ssl, proxy,
+          install, prepare_env, import_db, migrate, build_assets, start_runtime):
+    """Clone a Git repository and configure it as a local site."""
+    guided = repository is None
+    repository = repository or click.prompt('Git repository URL')
+    suggested_name = repository.rstrip('/').rsplit('/', 1)[-1]
+    if suggested_name.endswith('.git'):
+        suggested_name = suggested_name[:-4]
+    name = name or click.prompt('Local domain/name', default=suggested_name)
+    stack = stack or click.prompt(
+        'Project stack',
+        type=click.Choice([
+            'auto', 'static', 'php', 'wordpress', 'laravel', 'node', 'vite',
+            'sveltekit', 'astro'
+        ]),
+        default='auto',
+    )
+    if guided:
+        prepare_env = click.confirm('Prepare .env from .env.example?', default=True)
+        install = click.confirm('Install Composer/pnpm dependencies?', default=True)
+        build_assets = install and click.confirm('Build frontend assets?', default=False)
+        start_runtime = click.confirm('Start proxy projects with PM2?', default=False)
+        migrate = click.confirm('Run Laravel migrations when applicable?', default=False)
+
+    config = Config()
+    nginx = NginxManager(config)
+    mysql_mgr = MySQLManager(config)
+    site_mgr = SiteManager(config, nginx, mysql_mgr)
+
+    try:
+        subprocess.run(['sudo', '-v'], check=True)
+    except subprocess.CalledProcessError:
+        console.print("[red]✗ This command requires sudo privileges[/red]")
+        return
+
+    with console.status(f"[bold green]Cloning and configuring {name}..."):
+        result = site_mgr.clone_site(
+            repository, name, stack=stack, branch=branch, mysql=mysql,
+            ssl=ssl, database_name=database, proxy_port=proxy,
+            install_dependencies=install, prepare_env=prepare_env,
+            database_backup=import_db, run_migrations=migrate,
+            build_assets=build_assets, start_runtime=start_runtime
+        )
+
+    if not result['success']:
+        console.print(f"[red]✗ Failed to clone site: {result['error']}[/red]")
+        return
+
+    site_info = result['site']
+    console.print(Panel(
+        "[bold green]Repository cloned and site configured![/bold green]\n\n"
+        f"Domain: {site_info['domain']}\n"
+        f"Directory: {site_info['document_root']}\n"
+        f"Stack: {site_info['stack']}"
+        + (f" (detected: {result['detected_stack']})" if stack != 'auto' else '')
+        + f"\nProxy: {site_info.get('proxy_port') or 'No'}\n"
+        f"Database: {site_info.get('database') or 'No'}\n"
+        f"SSL: {'Yes' if site_info['ssl'] else 'No'}",
+        title=f"Cloned Site: {name}",
+    ))
+
+    for action in result.get('setup_actions', []):
+        style = 'green' if action['success'] else 'yellow'
+        marker = '✓' if action['success'] else '○'
+        console.print(f"[{style}]{marker} {action['message']}[/{style}]")
+
+    if site_info.get('proxy_port') and not install:
+        console.print(f"[yellow]Next: cd {site_info['document_root']} && pnpm install[/yellow]")
+        console.print(f"[yellow]Then: wslaragon node start {name}[/yellow]")
+    elif site_info['stack'] == 'laravel' and not install:
+        console.print(f"[yellow]Next: cd {site_info['document_root']} && composer install[/yellow]")
+        if site_info.get('database'):
+            console.print(
+                "[yellow]Configure DB_CONNECTION=mysql and the generated database "
+                f"({site_info['database']}) in .env, then run php artisan migrate.[/yellow]"
+            )
 
 
 @site.command()
@@ -310,14 +407,34 @@ def disable(name):
 
 @site.command('fix-permissions')
 @click.argument('name')
-def fix_permissions(name):
-    """Fix file permissions for a site"""
+@click.option('--check', is_flag=True, help='Diagnose permissions without changing them')
+def fix_permissions(name, check):
+    """Diagnose or repair file permissions for a site."""
     config = Config()
     nginx = NginxManager(config)
     mysql_mgr = MySQLManager(config)
     site_mgr = SiteManager(config, nginx, mysql_mgr)
     
-    # Validate sudo permissions
+    diagnosis = site_mgr.diagnose_permissions(name)
+    if not diagnosis['success']:
+        console.print(f"[red]✗ Failed to diagnose permissions: {diagnosis['error']}[/red]")
+        return
+
+    console.print(f"Framework: [cyan]{diagnosis['framework']}[/cyan]")
+    console.print(
+        f"Root: {diagnosis['document_root']} "
+        f"([cyan]{diagnosis['owner']}:{diagnosis['group']}[/cyan], {diagnosis['mode']})"
+    )
+    if diagnosis['issues']:
+        for issue in diagnosis['issues']:
+            console.print(f"[yellow]• {issue}[/yellow]")
+    else:
+        console.print("[green]✓ No permission problems detected[/green]")
+
+    if check:
+        return
+
+    # Validate sudo permissions only when a repair was requested.
     try:
         subprocess.run(['sudo', '-v'], check=True)
     except subprocess.CalledProcessError:
@@ -329,7 +446,9 @@ def fix_permissions(name):
     
     if result['success']:
         console.print(f"[green]✓ Permissions fixed for '{name}'[/green]")
-        console.print(f"[dim]Owner set to current user, Group set to www-data (775)[/dim]")
+        console.print("[dim]Directories: 755 · files: 644 · executables preserved[/dim]")
+        if result.get('writable_paths'):
+            console.print(f"[dim]Writable runtime paths: {', '.join(result['writable_paths'])}[/dim]")
     else:
         console.print(f"[red]✗ Failed to fix permissions: {result['error']}[/red]")
 

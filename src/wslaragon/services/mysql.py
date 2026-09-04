@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 import pymysql
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -39,13 +40,37 @@ class MySQLManager:
         self.mysql_config_file = Path(config.get('mysql.config_file'))
         self.default_user = config.get('mysql.user', 'root')
         self.default_password = config.get('mysql.password', '')
+        self.host = config.get('mysql.host', 'localhost')
+        self.port = int(config.get('mysql.port', 3306))
+        self.backend = config.get('mysql.backend', 'systemd')
+        self.container = config.get('mysql.container', 'mariadb11')
+        self.service = config.get('mysql.service', 'mysql')
+
+    def _lifecycle_command(self, action: str) -> List[str]:
+        """Build the platform-specific service lifecycle command."""
+        if self.backend == 'docker':
+            return ['sudo', 'docker', action, self._resolve_container()]
+        return ['sudo', 'systemctl', action, self.service]
+
+    def _resolve_container(self) -> str:
+        """Return the explicitly configured container without engine guessing."""
+        return self.container
     
     def is_running(self) -> bool:
         """Check if MySQL service is running"""
         try:
+            if self.backend == 'docker':
+                # A successful SQL handshake is the authoritative health check
+                # and does not require Docker socket permissions or sudo. A
+                # merely running container may still be booting or may have
+                # failed before MariaDB opened its port.
+                connection = self.get_connection(log_errors=False)
+                if connection:
+                    connection.close()
+                    return True
+                return False
             result = subprocess.run(
-                ['systemctl', 'is-active', 'mysql'],
-                capture_output=True, text=True
+                ['systemctl', 'is-active', self.service], capture_output=True, text=True
             )
             return result.stdout.strip() == 'active'
         except FileNotFoundError:
@@ -59,12 +84,15 @@ class MySQLManager:
         """Start MySQL service"""
         try:
             result = subprocess.run(
-                ['sudo', 'systemctl', 'start', 'mysql'],
-                capture_output=True, text=True
+                self._lifecycle_command('start'), capture_output=True, text=True, timeout=30
             )
             if result.returncode != 0:
                 logger.error(f"Failed to start MySQL: {result.stderr}")
-            return result.returncode == 0
+                return False
+            if self.backend == 'docker' and not self.wait_until_ready():
+                logger.error("MariaDB container started but SQL was not ready within 30 seconds")
+                return False
+            return True
         except Exception as e:
             logger.error(f"Error starting MySQL: {e}")
             return False
@@ -73,8 +101,7 @@ class MySQLManager:
         """Stop MySQL service"""
         try:
             result = subprocess.run(
-                ['sudo', 'systemctl', 'stop', 'mysql'],
-                capture_output=True, text=True
+                self._lifecycle_command('stop'), capture_output=True, text=True, timeout=30
             )
             if result.returncode != 0:
                 logger.error(f"Failed to stop MySQL: {result.stderr}")
@@ -87,18 +114,33 @@ class MySQLManager:
         """Restart MySQL service"""
         try:
             result = subprocess.run(
-                ['sudo', 'systemctl', 'restart', 'mysql'],
-                capture_output=True, text=True
+                self._lifecycle_command('restart'), capture_output=True, text=True, timeout=30
             )
             if result.returncode != 0:
                 logger.error(f"Failed to restart MySQL: {result.stderr}")
-            return result.returncode == 0
+                return False
+            if self.backend == 'docker' and not self.wait_until_ready():
+                logger.error("MariaDB container restarted but SQL was not ready within 30 seconds")
+                return False
+            return True
         except Exception as e:
             logger.error(f"Error restarting MySQL: {e}")
             return False
+
+    def wait_until_ready(self, timeout: int = 30, interval: float = 1.0) -> bool:
+        """Wait until MariaDB accepts authenticated SQL connections."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            connection = self.get_connection(log_errors=False)
+            if connection:
+                connection.close()
+                return True
+            time.sleep(interval)
+        return False
     
-    def get_connection(self, user: str = None, password: str = None, 
-                       database: str = None) -> Optional[pymysql.Connection]:
+    def get_connection(self, user: str = None, password: str = None,
+                       database: str = None,
+                       log_errors: bool = True) -> Optional[pymysql.Connection]:
         """Get MySQL database connection
         
         Args:
@@ -114,26 +156,32 @@ class MySQLManager:
             password = password or self.default_password
             
             connection = pymysql.connect(
-                host='localhost',
+                host=self.host,
+                port=self.port,
                 user=user,
                 password=password,
                 database=database,
                 charset='utf8mb4',
+                connect_timeout=3,
+                read_timeout=5,
+                write_timeout=5,
                 cursorclass=pymysql.cursors.DictCursor
             )
             return connection
         except pymysql.Error as e:
-            logger.error(f"MySQL connection error: {e}")
+            if log_errors:
+                logger.error(f"MySQL connection error: {e}")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error connecting to MySQL: {e}")
+            if log_errors:
+                logger.error(f"Unexpected error connecting to MySQL: {e}")
             return None
     
-    def get_version(self) -> Optional[str]:
+    def get_version(self, log_errors: bool = True) -> Optional[str]:
         """Get MySQL version"""
         connection = None
         try:
-            connection = self.get_connection()
+            connection = self.get_connection(log_errors=log_errors)
             if connection:
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT VERSION()")
