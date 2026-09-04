@@ -776,6 +776,50 @@ class TestFixPermissions:
         calls = [str(call) for call in mock_run.call_args_list]
         assert any("chown" in call for call in calls)
         assert any("chmod" in call for call in calls)
+        assert any("'!', '-perm', '/111'" in call and "'644'" in call for call in calls)
+        assert any("'-perm', '/111'" in call and "'755'" in call for call in calls)
+
+    @patch("subprocess.run")
+    @patch.dict("os.environ", {"USER": "testuser"})
+    def test_fix_permissions_laravel_only_opens_runtime_paths(self, mock_run, site_manager):
+        doc_root = Path(site_manager.sites["permsite"]["document_root"])
+        (doc_root / "storage").mkdir(parents=True)
+        (doc_root / "bootstrap" / "cache").mkdir(parents=True)
+        (doc_root / "artisan").touch()
+
+        with patch.object(site_manager, "diagnose_permissions", return_value={"success": True, "issues": []}):
+            result = site_manager.fix_permissions("permsite")
+
+        assert result["success"] is True
+        assert result["framework"] == "laravel"
+        calls = [call.args[0] for call in mock_run.call_args_list]
+        writable_calls = [command for command in calls if "g+rwX" in command]
+        assert len(writable_calls) == 2
+        assert any(str(doc_root / "storage") in command for command in writable_calls)
+        assert any(str(doc_root / "bootstrap" / "cache") in command for command in writable_calls)
+
+    def test_diagnose_permissions_reports_runtime_group_problems(self, site_manager):
+        doc_root = Path(site_manager.sites["permsite"]["document_root"])
+        (doc_root / "wp-content").mkdir(parents=True)
+        (doc_root / "wp-config.php").touch()
+
+        result = site_manager.diagnose_permissions("permsite")
+
+        assert result["success"] is True
+        assert result["framework"] == "wordpress"
+        assert result["writable_paths"] == [str(doc_root / "wp-content")]
+        assert result["issues"]
+
+    def test_diagnose_permissions_detects_javascript_without_runtime_paths(self, site_manager):
+        doc_root = Path(site_manager.sites["permsite"]["document_root"])
+        doc_root.mkdir(parents=True)
+        (doc_root / "package.json").write_text("{}")
+
+        result = site_manager.diagnose_permissions("permsite")
+
+        assert result["success"] is True
+        assert result["framework"] == "javascript"
+        assert result["writable_paths"] == []
 
     @patch("subprocess.run")
     @patch.dict("os.environ", {"USER": "testuser"})

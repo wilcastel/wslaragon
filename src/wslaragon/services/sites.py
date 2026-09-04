@@ -705,7 +705,7 @@ class SiteManager:
         return None
 
     def fix_permissions(self, site_name: str) -> Dict:
-        """Fix file owner and permissions for a site"""
+        """Repair ownership and apply framework-aware filesystem permissions."""
         try:
             site_name = self._normalize_site_name(site_name)
             if site_name not in self.sites:
@@ -717,22 +717,47 @@ class SiteManager:
             # Get current user
             current_user = os.getenv('SUDO_USER') or os.getenv('USER')
             web_user = self.config.get('nginx.user', 'www-data')
+
+            if not current_user:
+                return {'success': False, 'error': 'Could not determine the current user'}
+
+            framework, writable_paths = self._permission_profile(Path(doc_root))
+            before = self.diagnose_permissions(site_name)
             
             # Set owner to current_user:www-data
             cmd_chown = ['sudo', 'chown', '-R', f'{current_user}:{web_user}', doc_root]
             subprocess.run(cmd_chown, check=True, capture_output=True)
             
-            # Set permissions to 775 (rwxrwxr-x)
-            # User: rwx (Full)
-            # Group (Web Server): rwx (Full) - Needed for writing logs, caching, storage
-            # Others: r-x (Read/Execute)
-            cmd_chmod = ['sudo', 'chmod', '-R', '775', doc_root]
-            subprocess.run(cmd_chmod, check=True, capture_output=True)
-            
-            # Additional fix for storage folders commonly used in frameworks (Laravel, etc)
-            # This ensures even new files created inherit the group 'www-data'
-            cmd_guid = ['sudo', 'find', doc_root, '-type', 'd', '-exec', 'chmod', 'g+s', '{}', '+']
-            subprocess.run(cmd_guid, check=True, capture_output=True)
+            # Safe baseline: directories are traversable, regular files are not
+            # executable, and files that were executable remain executable.
+            subprocess.run(
+                ['sudo', 'find', doc_root, '-type', 'd', '-exec', 'chmod', '755', '{}', '+'],
+                check=True, capture_output=True
+            )
+            subprocess.run(
+                ['sudo', 'find', doc_root, '-type', 'f', '!', '-perm', '/111',
+                 '-exec', 'chmod', '644', '{}', '+'],
+                check=True, capture_output=True
+            )
+            subprocess.run(
+                ['sudo', 'find', doc_root, '-type', 'f', '-perm', '/111',
+                 '-exec', 'chmod', '755', '{}', '+'],
+                check=True, capture_output=True
+            )
+
+            # Only framework runtime paths are writable by the web-server group.
+            for writable_path in writable_paths:
+                if not writable_path.exists():
+                    continue
+                subprocess.run(
+                    ['sudo', 'chmod', '-R', 'g+rwX', str(writable_path)],
+                    check=True, capture_output=True
+                )
+                subprocess.run(
+                    ['sudo', 'find', str(writable_path), '-type', 'd',
+                     '-exec', 'chmod', 'g+s', '{}', '+'],
+                    check=True, capture_output=True
+                )
             
             # WordPress specific fix: FS_METHOD direct
             # This prevents WP from asking for FTP credentials
@@ -760,7 +785,12 @@ class SiteManager:
                 except Exception:
                     pass # Non-critical failure, continue
             
-            return {'success': True}
+            return {
+                'success': True,
+                'framework': framework,
+                'writable_paths': [str(path) for path in writable_paths if path.exists()],
+                'before': before.get('issues', []) if before.get('success') else [],
+            }
             
         except subprocess.CalledProcessError as e:
             logger.error(f"Command failed while fixing permissions for {site_name}: {e}")
@@ -768,6 +798,80 @@ class SiteManager:
         except Exception as e:
             logger.error(f"Failed to fix permissions for {site_name}: {e}")
             return {'success': False, 'error': str(e)}
+
+    def diagnose_permissions(self, site_name: str) -> Dict:
+        """Inspect ownership and framework runtime paths without changing files."""
+        try:
+            site_name = self._normalize_site_name(site_name)
+            if site_name not in self.sites:
+                return {'success': False, 'error': 'Site not found'}
+
+            doc_root = Path(self.sites[site_name]['document_root'])
+            if not doc_root.exists():
+                return {'success': False, 'error': f'Document root does not exist: {doc_root}'}
+
+            current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+            web_user = self.config.get('nginx.user', 'www-data')
+            framework, writable_paths = self._permission_profile(doc_root)
+            root_stat = doc_root.stat()
+
+            import grp
+            import pwd
+            owner = pwd.getpwuid(root_stat.st_uid).pw_name
+            group = grp.getgrgid(root_stat.st_gid).gr_name
+            issues = []
+            if current_user and owner != current_user:
+                issues.append(f'Project owner is {owner}, expected {current_user}')
+
+            for path in writable_paths:
+                if not path.exists():
+                    issues.append(f'Runtime path is missing: {path}')
+                    continue
+                path_stat = path.stat()
+                path_group = grp.getgrgid(path_stat.st_gid).gr_name
+                if path_group != web_user:
+                    issues.append(f'{path} belongs to group {path_group}, expected {web_user}')
+                if not path_stat.st_mode & 0o020:
+                    issues.append(f'{path} is not group-writable')
+                if not path_stat.st_mode & 0o2000:
+                    issues.append(f'{path} does not inherit the {web_user} group')
+
+            return {
+                'success': True,
+                'framework': framework,
+                'document_root': str(doc_root),
+                'owner': owner,
+                'group': group,
+                'mode': oct(root_stat.st_mode & 0o7777),
+                'web_user': web_user,
+                'writable_paths': [str(path) for path in writable_paths],
+                'issues': issues,
+            }
+        except Exception as e:
+            logger.error(f"Failed to diagnose permissions for {site_name}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def _permission_profile(doc_root: Path):
+        """Detect the framework and return paths that need web-server writes."""
+        if (doc_root / 'artisan').exists():
+            paths = [doc_root / 'storage', doc_root / 'bootstrap' / 'cache']
+            env_file = doc_root / '.env'
+            if env_file.exists() and 'DB_CONNECTION=sqlite' in env_file.read_text(errors='ignore'):
+                paths.append(doc_root / 'database')
+            return 'laravel', paths
+        if (doc_root / 'wp-config.php').exists() or (doc_root / 'wp-content').exists():
+            return 'wordpress', [doc_root / 'wp-content']
+        if (doc_root / 'package.json').exists():
+            if (doc_root / 'astro.config.mjs').exists():
+                return 'astro', []
+            if (doc_root / 'svelte.config.js').exists():
+                return 'sveltekit', []
+            return 'javascript', []
+        if any(doc_root.glob('*.php')):
+            runtime_names = ('storage', 'cache', 'logs', 'uploads')
+            return 'php', [doc_root / name for name in runtime_names if (doc_root / name).exists()]
+        return 'static', []
     
     def add_api_proxy(self, site_name: str, path: str, backend: str) -> Dict:
         """Add an API proxy to a site (e.g. /api -> https://api.example.test)"""

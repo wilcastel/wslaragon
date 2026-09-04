@@ -14,7 +14,7 @@ Comando principal para la creación y administración de proyectos web.
 | `site enable` | `<name>` | Habilita un sitio previamente deshabilitado en Nginx. |
 | `site disable` | `<name>` | Deshabilita un sitio en Nginx (no borra archivos). |
 | `site public` | `<name>` <br> `--enable` / `--disable` | Cambia el document root entre `./` y `./public` (útil para Laravel/Symfony). |
-| `site fix-permissions` | `<name>` | Repara propietario y permisos de archivos (útil tras copiar ficheros desde Windows). |
+| `site fix-permissions` | `<name>` <br> `--check` | Diagnostica o repara propietario y permisos según el framework. `--check` no modifica archivos. |
 | `site ssl` | `<name>` | Habilita HTTPS/SSL para un sitio existente que no lo tenía. |
 | `site api add` | `<name> <path> <backend_url>` | Agrega un proxy reverso Nginx en `<path>` hacia `<backend_url>` para el sitio (útil en Astro headless / sitios API-driven). |
 | `site api remove` | `<name> <path>` | Elimina un proxy reverso previamente agregado. |

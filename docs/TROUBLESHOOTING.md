@@ -103,8 +103,8 @@ sudo systemctl start mi-app-worker
 | Jobs no se procesan | Queue worker detenido | `sudo systemctl restart mi-app-worker` |
 | SSL no funciona | Puerto 443 ocupado | Verificar que no haya otro nginx |
 | "Permission denied" en Nginx | Home directory sin permisos | `chmod 755 $HOME` o `wslaragon site fix-permissions mi-sitio` |
-| WordPress no puede subir archivos | Permisos incorrectos | `sudo wslaragon site fix-permissions mi-sitio` |
-| VSCode no puede guardar archivos | Permisos incorrectos | `sudo wslaragon site fix-permissions mi-sitio` |
+| WordPress no puede subir archivos | Permisos incorrectos | `wslaragon site fix-permissions mi-sitio --check` y luego `wslaragon site fix-permissions mi-sitio` |
+| VSCode no puede guardar archivos | Permisos incorrectos | `wslaragon site fix-permissions mi-sitio --check` y luego `wslaragon site fix-permissions mi-sitio` |
 | SSL muestra "No seguro" en navegador | CA root no instalada en Windows | Ver [Guía de Instalación → Paso 4](INSTALL.md#4-instalar-la-ca-root-para-ssl-️-importante) |
 | Certificado CN dice "mkcert development" | Certificado viejo generado con mkcert puro | Regenerar con `wslaragon ssl generate dominio.test` |
 | WordPress muestra "Error establishing a database" | Base de datos no creada | `wslaragon site create blog --wordpress` (ya crea la DB automáticamente) |

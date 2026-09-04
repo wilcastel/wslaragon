@@ -78,8 +78,8 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [ ] **Directorio compartido**: Organizar componentes relacionados bajo una raíz común (`~/web/<proyecto>/front`, `back`, `dash`, etc.).
 - [ ] **Operaciones por workspace**: Listar, respaldar, habilitar, deshabilitar y eliminar conjuntamente todos los sitios vinculados.
 - [x] **Eliminación integral de sitios**: Al borrar un sitio, detener y retirar procesos PM2, certificados SSL y entradas de hosts además de Nginx, archivos y bases de datos. La operación conjunta para workspaces llegará con su gestión agrupada.
-- [ ] **Permisos conscientes del framework**: Aplicar archivos `664` y directorios `775`, preservando ejecutables y limitando la escritura de `http` a las rutas necesarias (`storage/`, `bootstrap/cache/`, `wp-content/`, etc.).
-- [ ] **Diagnóstico de permisos**: Mostrar propietario, grupo y rutas sin escritura antes de realizar cambios, con reparaciones específicas para Laravel, WordPress y proyectos JavaScript.
+- [x] **Permisos conscientes del framework**: Aplicar una base segura de archivos `644` y directorios `755`, preservar ejecutables y limitar la escritura de `http` a las rutas necesarias (`storage/`, `bootstrap/cache/`, `wp-content/`, etc.).
+- [x] **Diagnóstico de permisos**: Mostrar propietario, grupo y rutas sin escritura mediante `site fix-permissions --check`, con reparaciones específicas para Laravel, WordPress y proyectos JavaScript.
 
 ### Fase 6: Calidad y CI/CD (Completado)
 - [x] **Cobertura de Tests 99.85%**: 1,114 tests (1,083 unitarios + 31 integración)

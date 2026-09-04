@@ -517,7 +517,6 @@ class TestSiteListCommand:
 
             mock_site_mgr_instance = MagicMock()
             mock_site_mgr.return_value = mock_site_mgr_instance
-
             yield {
                 'config': mock_config_instance,
                 'site_mgr': mock_site_mgr_instance,
@@ -894,6 +893,15 @@ class TestSiteFixPermissionsCommand:
 
             mock_site_mgr_instance = MagicMock()
             mock_site_mgr.return_value = mock_site_mgr_instance
+            mock_site_mgr_instance.diagnose_permissions.return_value = {
+                'success': True,
+                'framework': 'static',
+                'document_root': '/tmp/testsite',
+                'owner': 'testuser',
+                'group': 'testuser',
+                'mode': '0o755',
+                'issues': [],
+            }
 
             mock_run.return_value = MagicMock(returncode=0)
 
@@ -933,6 +941,16 @@ class TestSiteFixPermissionsCommand:
         result = runner.invoke(site, ['fix-permissions', 'testsite'])
 
         assert 'sudo' in result.output.lower() or result.exit_code != 0
+
+    def test_fix_permissions_check_does_not_request_sudo(self, runner, mock_deps):
+        from wslaragon.cli.site_commands import site
+
+        result = runner.invoke(site, ['fix-permissions', 'testsite', '--check'])
+
+        assert result.exit_code == 0
+        assert 'No permission problems detected' in result.output
+        mock_deps['site_mgr'].fix_permissions.assert_not_called()
+        mock_deps['run'].assert_not_called()
 
 
 class TestSiteExportCommand:

@@ -150,10 +150,19 @@ wslaragon site enable mi-web
 Si tienes problemas de escritura (ej. WordPress no sube archivos, VSCode no puede guardar, logs, cache, uploads) o has copiado archivos desde Windows, usa este comando para reasignar el propietario y permisos.
 
 ```bash
+# Diagnosticar propietario, grupo y rutas de escritura sin modificar nada
+wslaragon site fix-permissions mi-web --check
+
+# Aplicar la reparación
 wslaragon site fix-permissions mi-web
 ```
 
-> Los permisos se corrigen automáticamente al crear un sitio. Usá este comando solo en sitios existentes que necesiten reparación.
+El comando detecta Laravel, WordPress, Astro, SvelteKit, JavaScript, PHP y sitios
+estáticos. Aplica `755` a directorios, `644` a archivos y conserva los archivos
+que ya eran ejecutables. La escritura del grupo del servidor web se limita a
+rutas de ejecución como `storage/`, `bootstrap/cache/` o `wp-content/`.
+
+> Los permisos se corrigen automáticamente al crear un sitio. Usá este comando en sitios existentes que necesiten diagnóstico o reparación, especialmente después de copiarlos desde otra máquina.
 
 **Qué hace:**
 - `chown -R usuario:www-data` — el usuario puede editar desde VSCode, www-data (Nginx/PHP) puede leer y escribir

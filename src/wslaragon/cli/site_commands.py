@@ -311,14 +311,34 @@ def disable(name):
 
 @site.command('fix-permissions')
 @click.argument('name')
-def fix_permissions(name):
-    """Fix file permissions for a site"""
+@click.option('--check', is_flag=True, help='Diagnose permissions without changing them')
+def fix_permissions(name, check):
+    """Diagnose or repair file permissions for a site."""
     config = Config()
     nginx = NginxManager(config)
     mysql_mgr = MySQLManager(config)
     site_mgr = SiteManager(config, nginx, mysql_mgr)
     
-    # Validate sudo permissions
+    diagnosis = site_mgr.diagnose_permissions(name)
+    if not diagnosis['success']:
+        console.print(f"[red]✗ Failed to diagnose permissions: {diagnosis['error']}[/red]")
+        return
+
+    console.print(f"Framework: [cyan]{diagnosis['framework']}[/cyan]")
+    console.print(
+        f"Root: {diagnosis['document_root']} "
+        f"([cyan]{diagnosis['owner']}:{diagnosis['group']}[/cyan], {diagnosis['mode']})"
+    )
+    if diagnosis['issues']:
+        for issue in diagnosis['issues']:
+            console.print(f"[yellow]• {issue}[/yellow]")
+    else:
+        console.print("[green]✓ No permission problems detected[/green]")
+
+    if check:
+        return
+
+    # Validate sudo permissions only when a repair was requested.
     try:
         subprocess.run(['sudo', '-v'], check=True)
     except subprocess.CalledProcessError:
@@ -330,7 +350,9 @@ def fix_permissions(name):
     
     if result['success']:
         console.print(f"[green]✓ Permissions fixed for '{name}'[/green]")
-        console.print(f"[dim]Owner set to current user, Group set to www-data (775)[/dim]")
+        console.print("[dim]Directories: 755 · files: 644 · executables preserved[/dim]")
+        if result.get('writable_paths'):
+            console.print(f"[dim]Writable runtime paths: {', '.join(result['writable_paths'])}[/dim]")
     else:
         console.print(f"[red]✗ Failed to fix permissions: {result['error']}[/red]")
 
