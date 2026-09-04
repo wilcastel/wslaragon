@@ -588,6 +588,20 @@ class TestCloneSite:
         )
         assert actions == [{"success": True, "message": "Frontend assets built"}]
 
+    @patch("wslaragon.services.sites.PM2Manager")
+    def test_setup_clone_starts_and_saves_proxy_runtime(self, mock_pm2, site_manager, tmp_path):
+        manager = mock_pm2.return_value
+        manager.start_project.return_value = {"success": True}
+        site = {"name": "app", "stack": "node", "domain": "app.test", "proxy_port": 3005}
+
+        actions = site_manager._setup_cloned_project(
+            tmp_path, site, False, False, start_runtime=True
+        )
+
+        manager.start_project.assert_called_once_with("app", str(tmp_path), 3005)
+        manager.save.assert_called_once_with()
+        assert actions == [{"success": True, "message": "PM2 process started on port 3005"}]
+
     @pytest.mark.parametrize(
         ("marker", "expected"),
         [

@@ -78,44 +78,26 @@ def start_node(site_name):
         return
         
     pm2 = PM2Manager()
-    
-    # Heuristic to find entry point
     web_root = Path(site['document_root'])
-    script_to_run = "pnpm"
-    
-    # Simplified logic: 
-    # If package.json exists -> pm2 start pnpm --name "site" -- start
-    # If app.js exists -> pm2 start app.js --name "site"
-    
-    if (web_root / "app.js").exists():
-        script_to_run = str(web_root / "app.js")
-    elif (web_root / "main.py").exists():
-        script_to_run = str(web_root / "main.py")
-        # For python we need interpreter
-        # This will be handled by auto-detection or we can force it
-        
-    # We'll use the generic PM2 start logic we built, but we need to refine it for 'pnpm' case vs 'file' case
-    # The current PM2Manager.start_process assumes a file path.
-    
-    # Let's trust PM2 to be smart or just point to the likely entry file if we created it.
-    # Since we created 'app.js' in our create_site logic, let's look for that first.
     
     with console.status(f"[bold green]Starting process for {site_name}..."):
-        # Set PORT env via config environment of PM2
-        # For now, let's try starting app.js directly if it exists, as it's our standard
         if (web_root / "app.js").exists():
-             result = pm2.start_process(site_name, str(web_root / "app.js"), site['proxy_port'], cwd=str(web_root))
+            result = pm2.start_process(
+                site_name, str(web_root / "app.js"), site['proxy_port'], cwd=str(web_root)
+            )
         elif (web_root / "package.json").exists():
-             # Fallback to pnpm start
-             console.print("[yellow]Notice: package.json found but no app.js. Attempting to start 'pnpm start' via PM2...[/yellow]")
-             # We must pass --cwd so PM2 finds package.json
-             # Also --port env var is good practice
-             result = pm2._run_pm2(['start', 'pnpm', '--name', site_name, '--cwd', str(web_root), '--', 'start'])
+            console.print("[yellow]Notice: package.json found but no app.js. Attempting to start 'pnpm start' via PM2...[/yellow]")
+            result = pm2._run_pm2([
+                'start', 'pnpm', '--name', site_name, '--cwd', str(web_root), '--', 'start'
+            ])
         elif (web_root / "main.py").exists():
-             result = pm2.start_process(site_name, str(web_root / "main.py"), site['proxy_port'], interpreter='python3', cwd=str(web_root))
+            result = pm2.start_process(
+                site_name, str(web_root / "main.py"), site['proxy_port'],
+                interpreter='python3', cwd=str(web_root)
+            )
         else:
-             console.print("[red]✗ No entry point (app.js, main.py) found.[/red]")
-             return
+            console.print("[red]✗ No entry point (app.js, main.py) found.[/red]")
+            return
 
     if result['success']:
         console.print(f"[green]✓ Process '{site_name}' started on port {site['proxy_port']}[/green]")

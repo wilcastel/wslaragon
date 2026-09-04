@@ -299,7 +299,7 @@ class SiteManager:
                    database_name: str = None, proxy_port: int = None,
                    install_dependencies: bool = False, prepare_env: bool = False,
                    database_backup: str = None, run_migrations: bool = False,
-                   build_assets: bool = False) -> Dict:
+                   build_assets: bool = False, start_runtime: bool = False) -> Dict:
         """Clone a Git repository and register it as a configured local site."""
         site_name = self._normalize_site_name(site_name)
         if not site_name or not self._is_valid_site_name(site_name):
@@ -356,7 +356,8 @@ class SiteManager:
                 self._save_sites()
                 result['setup_actions'] = self._setup_cloned_project(
                     destination, result['site'], install_dependencies,
-                    prepare_env, database_backup, run_migrations, build_assets
+                    prepare_env, database_backup, run_migrations, build_assets,
+                    start_runtime
                 )
             return result
         except subprocess.TimeoutExpired:
@@ -369,7 +370,8 @@ class SiteManager:
     def _setup_cloned_project(self, root: Path, site: Dict, install: bool,
                               prepare_env: bool, backup: str = None,
                               run_migrations: bool = False,
-                              build_assets: bool = False) -> List[Dict]:
+                              build_assets: bool = False,
+                              start_runtime: bool = False) -> List[Dict]:
         """Run optional setup without replacing an existing environment file."""
         actions = []
         env_file = root / '.env'
@@ -456,6 +458,18 @@ class SiteManager:
                 actions.append({'success': result.returncode == 0, 'message':
                                 'Laravel migrations completed' if result.returncode == 0
                                 else (result.stderr.strip() or 'Laravel migrations failed')})
+        if start_runtime:
+            port = site.get('proxy_port')
+            if not port:
+                actions.append({'success': False, 'message': 'Site has no proxy runtime; PM2 start skipped'})
+            else:
+                pm2 = PM2Manager(self.config)
+                result = pm2.start_project(site['name'], str(root), port)
+                if result.get('success'):
+                    pm2.save()
+                actions.append({'success': bool(result.get('success')), 'message':
+                                f"PM2 process started on port {port}" if result.get('success')
+                                else f"PM2 start failed: {result.get('error') or 'unknown error'}"})
         return actions
 
     @staticmethod

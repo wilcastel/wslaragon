@@ -413,6 +413,23 @@ class TestPM2ManagerStartProcess:
         assert "PM2 not found" in result['error']
 
 
+class TestPM2ManagerStartProject:
+    def test_package_project_uses_pnpm_start_and_port(self, tmp_path):
+        from wslaragon.services.node.pm2 import PM2Manager
+
+        (tmp_path / "package.json").write_text("{}")
+        manager = PM2Manager()
+        manager._run_pm2 = MagicMock(return_value={"success": True})
+
+        result = manager.start_project("app", str(tmp_path), 3010)
+
+        assert result["success"] is True
+        manager._run_pm2.assert_called_once_with(
+            ["start", "pnpm", "--name", "app", "--cwd", str(tmp_path), "--", "start"],
+            env={"PORT": "3010"},
+        )
+
+
 class TestPM2ManagerStopProcess:
     """Test suite for stop_process method"""
 
