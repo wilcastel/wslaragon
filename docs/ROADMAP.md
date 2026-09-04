@@ -75,7 +75,7 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [ ] **Project Templates**: Plantillas personalizadas para arrancar proyectos rápidos.
 
 ### Fase 7: Workspaces y ciclo de vida de proyectos (Futuro)
-- [x] **Clonado y registro de proyectos**: `site clone` clona repositorios Git, detecta el stack y configura dominio, SSL, Nginx, base de datos y proxy sin generar scaffolding ni tocar `.env`.
+- [x] **Clonado y preparación de proyectos**: `site clone` detecta el stack y configura dominio, SSL, Nginx, base y proxy; opcionalmente prepara `.env`, instala, compila, importa SQL, migra Laravel e inicia PM2.
 - [ ] **Proyectos agrupados**: Administrar varios sitios como una sola aplicación o workspace (por ejemplo, `instagol.test` y `dash.instagol.test`).
 - [ ] **Subdominios declarativos**: Añadir frontend, panel, API y otros subdominios con su propio stack, raíz web, proxy y certificado.
 - [ ] **Directorio compartido**: Organizar componentes relacionados bajo una raíz común (`~/web/<proyecto>/front`, `back`, `dash`, etc.).

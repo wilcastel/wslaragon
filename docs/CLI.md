@@ -156,19 +156,15 @@ wslaragon site clone https://github.com/equipo/api.git api \
 Stacks admitidos: `static`, `php`, `wordpress`, `laravel`, `node`, `vite`,
 `sveltekit` y `astro`. Con `auto`, WSLaragon inspecciona los archivos del
 repositorio. WordPress y Laravel crean una base MySQL por defecto; se puede
-evitar con `--no-mysql`. Los proyectos JavaScript reciben un puerto y luego se
-preparan con:
+evitar con `--no-mysql`. Los proyectos JavaScript reciben un puerto y pueden
+prepararse automáticamente:
 
 ```bash
-cd ~/web/proyecto
-pnpm install
-wslaragon node start proyecto
+wslaragon site clone URL proyecto --env --install --build --start
 ```
 
-El comando no ejecuta migraciones ni modifica `.env`: esas decisiones siguen
-perteneciendo a cada repositorio. En Laravel 11/12, verificá especialmente
-`DB_CONNECTION`: si falta o está comentado, Laravel usa SQLite aunque
-WSLaragon haya creado una base MariaDB/MySQL.
+`--env` no sobrescribe un archivo existente y `--migrate` es siempre explícito.
+Consulta la [guía completa de clonación](CLONE.md) para opciones y ejemplos.
 
 ### 3. Borrar un Sitio
 Elimina la configuración Nginx, el certificado SSL y las entradas locales de

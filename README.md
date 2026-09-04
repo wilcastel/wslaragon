@@ -30,6 +30,7 @@ WSLaragon es una herramienta de gestión de entorno de desarrollo estilo Laragon
 - **SSL/TLS**: Certificados válidos con mkcert
 - **Windows Hosts**: Integración con el archivo hosts de Windows
 - **Backup/Restore**: Exportar e importar sitios completos (`site export` / `site import`)
+- **Migración desde Git**: `site clone` puede preparar `.env`, dependencias, assets, base y PM2 — ver [guía de clonación](docs/CLONE.md)
 
 ### 🔐 SSL con mkcert
 - **Certificados locales**: Certificados SSL válidos para desarrollo

@@ -31,6 +31,9 @@ Optional components can be omitted with `--skip-database`, `--skip-laravel`,
 skips its dependent Laravel, WordPress and phpMyAdmin setup checks. See all
 options with `./scripts/install-omarchygon.sh --help`.
 
+To bring projects from another machine, follow the
+[clone and migration guide](CLONE.md).
+
 ## Centralized runtime
 
 Keep the development stack stopped when it is not needed:
