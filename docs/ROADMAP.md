@@ -69,6 +69,15 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [x] **Sitios Headless Pareados**: Flag `--headless --backend=<wordpress|laravel> --frontend=<sveltekit|astro> --url=<name>` crea un frontend y un backend/API vinculados, compartiendo una raíz de proyecto (`~/web/<name>/front` y `~/web/<name>/back`). Borrar cualquiera de las dos mitades elimina ambas (con aviso previo) y la raíz compartida.
 - [ ] **Project Templates**: Plantillas personalizadas para arrancar proyectos rápidos.
 
+### Fase 7: Workspaces y ciclo de vida de proyectos (Futuro)
+- [ ] **Proyectos agrupados**: Administrar varios sitios como una sola aplicación o workspace (por ejemplo, `instagol.test` y `dash.instagol.test`).
+- [ ] **Subdominios declarativos**: Añadir frontend, panel, API y otros subdominios con su propio stack, raíz web, proxy y certificado.
+- [ ] **Directorio compartido**: Organizar componentes relacionados bajo una raíz común (`~/web/<proyecto>/front`, `back`, `dash`, etc.).
+- [ ] **Operaciones por workspace**: Listar, respaldar, habilitar, deshabilitar y eliminar conjuntamente todos los sitios vinculados.
+- [ ] **Eliminación integral**: Al borrar un sitio o workspace, detener y retirar procesos PM2, certificados SSL y entradas de hosts además de Nginx, archivos y bases de datos.
+- [ ] **Permisos conscientes del framework**: Aplicar archivos `664` y directorios `775`, preservando ejecutables y limitando la escritura de `http` a las rutas necesarias (`storage/`, `bootstrap/cache/`, `wp-content/`, etc.).
+- [ ] **Diagnóstico de permisos**: Mostrar propietario, grupo y rutas sin escritura antes de realizar cambios, con reparaciones específicas para Laravel, WordPress y proyectos JavaScript.
+
 ### Fase 6: Calidad y CI/CD (Completado)
 - [x] **Cobertura de Tests 99.85%**: 1,114 tests (1,083 unitarios + 31 integración)
 - [x] **Strategy Pattern**: Refactor de SiteManager.create_site() — de God Object a 8 creadores
@@ -76,4 +85,3 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [x] **CI/CD Pipeline**: GitHub Actions con lint + test + build por versión de Python
 - [x] **Pre-commit Hooks**: ruff + black + isort + mypy
 - [x] **Coverage Threshold**: Mínimo 90% para pasar CI
-

@@ -5,6 +5,19 @@ local `.test` domains, trusted HTTPS, Nginx virtual hosts, and static or generic
 PHP document roots. Database provisioning and framework scaffolding remain out
 of scope until later phases.
 
+## Global command
+
+Expose the editable virtual-environment installation through the user-local
+binary directory:
+
+```bash
+./scripts/install-omarchy-cli.sh
+```
+
+Afterward, use `wslaragon` directly instead of `.venv/bin/wslaragon`. The
+launcher remains linked to this repository, so code changes in the editable
+installation are immediately available.
+
 ## Phase 1 setup
 
 Run the setup from an interactive terminal so `sudo` and `mkcert` can request
