@@ -40,6 +40,7 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 ## 🚀 Próximos Pasos (En Progreso)
 
 ### Fase 1: Estabilización y Monitoreo (Completado)
+- [x] **Doctor y servicios nativos de Omarchy**: Estado y ciclo de vida con `php-fpm`, socket Unix, Redis nativo y MariaDB en Docker, sin falsos nombres de Ubuntu.
 - [x] **WSLaragon Service Monitor**: Comando `wslaragon services status` mejorado para ver estado real de Nginx, PHP, MariaDB y Redis.
 - [x] **WSLaragon Doctor Extendido**: Diagnóstico más profundo para problemas de SSL y conectividad de base de datos.
 - [x] **Integración de .agent/skills**: Nuevo comando `wslaragon agent init [preset]` para inicializar estructura de skills en proyectos.

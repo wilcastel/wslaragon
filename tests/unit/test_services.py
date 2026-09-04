@@ -34,6 +34,48 @@ class TestServiceManager:
         assert service_manager.services['mysql']['service'] == 'mariadb'
         assert service_manager.services['php-fpm']['service'] == 'php8.3-fpm'
 
+    def test_omarchy_uses_native_services_and_docker_database(self):
+        from wslaragon.core.services import ServiceManager
+
+        config = MagicMock()
+        config.get.side_effect = lambda key, default=None: {
+            'platform.name': 'omarchy',
+            'php.fpm_service': 'php-fpm',
+            'mysql.config_file': '/etc/my.cnf',
+            'mysql.backend': 'docker',
+            'mysql.container': 'mariadb11',
+            'mysql.port': 3306,
+        }.get(key, default)
+
+        manager = ServiceManager(config)
+
+        assert manager.services['php-fpm']['service'] == 'php-fpm'
+        assert manager.services['redis']['service'] == 'redis'
+        assert manager.services['mysql']['service'] == 'docker:mariadb11'
+
+    def test_omarchy_mysql_lifecycle_delegates_to_docker_manager(self):
+        from wslaragon.core.services import ServiceManager
+
+        config = MagicMock()
+        config.get.side_effect = lambda key, default=None: {
+            'platform.name': 'omarchy',
+            'php.fpm_service': 'php-fpm',
+            'mysql.config_file': '/etc/my.cnf',
+            'mysql.backend': 'docker',
+            'mysql.container': 'mariadb11',
+            'mysql.port': 3306,
+        }.get(key, default)
+        manager = ServiceManager(config)
+        manager.mysql.start = MagicMock(return_value=True)
+        manager.mysql.stop = MagicMock(return_value=True)
+        manager.mysql.restart = MagicMock(return_value=True)
+        manager.mysql.is_running = MagicMock(return_value=True)
+
+        assert manager.start('mysql') is True
+        assert manager.stop('mysql') is True
+        assert manager.restart('mysql') is True
+        assert manager.is_running('mysql') is True
+
 
 class TestServiceManagerIsRunning:
     """Test suite for is_running method"""

@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ..core.services import ServiceManager
+from ..core.config import Config
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -22,7 +23,7 @@ def service():
 @service.command()
 def status():
     """Show service status"""
-    service_mgr = ServiceManager()
+    service_mgr = ServiceManager(Config())
     services = service_mgr.status()
     
     table = Table(title="Service Status")
@@ -33,7 +34,10 @@ def status():
     for name, info in services.items():
         status_text = "✓ Running" if info['running'] else "✗ Stopped"
         status_style = "green" if info['running'] else "red"
-        table.add_row(name, f"[{status_style}]{status_text}[/{status_style}]", str(info['port']))
+        endpoint = str(info['port'])
+        if name == 'php-fpm' and info['service'] == 'php-fpm':
+            endpoint = 'Unix socket'
+        table.add_row(name, f"[{status_style}]{status_text}[/{status_style}]", endpoint)
     
     console.print(table)
 
@@ -42,7 +46,7 @@ def status():
 @click.argument('service_name')
 def start(service_name):
     """Start a service"""
-    service_mgr = ServiceManager()
+    service_mgr = ServiceManager(Config())
     
     with console.status(f"[bold green]Starting {service_name}..."):
         result = service_mgr.start(service_name)
@@ -57,7 +61,7 @@ def start(service_name):
 @click.argument('service_name')
 def stop(service_name):
     """Stop a service"""
-    service_mgr = ServiceManager()
+    service_mgr = ServiceManager(Config())
     
     with console.status(f"[bold red]Stopping {service_name}..."):
         result = service_mgr.stop(service_name)
@@ -72,7 +76,7 @@ def stop(service_name):
 @click.argument('service_name')
 def restart(service_name):
     """Restart a service"""
-    service_mgr = ServiceManager()
+    service_mgr = ServiceManager(Config())
     
     with console.status(f"[bold yellow]Restarting {service_name}..."):
         result = service_mgr.restart(service_name)

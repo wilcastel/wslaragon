@@ -64,12 +64,12 @@ class MySQLManager:
             if self.backend == 'docker':
                 # A successful SQL handshake is the authoritative health check
                 # and does not require Docker socket permissions or sudo.
-                connection = self.get_connection()
+                connection = self.get_connection(log_errors=False)
                 if connection:
                     connection.close()
                     return True
                 result = subprocess.run(
-                    ['sudo', 'docker', 'inspect', '-f', '{{.State.Running}}', self.container],
+                    ['sudo', '-n', 'docker', 'inspect', '-f', '{{.State.Running}}', self.container],
                     capture_output=True, text=True
                 )
                 return result.returncode == 0 and result.stdout.strip() == 'true'
@@ -123,8 +123,9 @@ class MySQLManager:
             logger.error(f"Error restarting MySQL: {e}")
             return False
     
-    def get_connection(self, user: str = None, password: str = None, 
-                       database: str = None) -> Optional[pymysql.Connection]:
+    def get_connection(self, user: str = None, password: str = None,
+                       database: str = None,
+                       log_errors: bool = True) -> Optional[pymysql.Connection]:
         """Get MySQL database connection
         
         Args:
@@ -153,10 +154,12 @@ class MySQLManager:
             )
             return connection
         except pymysql.Error as e:
-            logger.error(f"MySQL connection error: {e}")
+            if log_errors:
+                logger.error(f"MySQL connection error: {e}")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error connecting to MySQL: {e}")
+            if log_errors:
+                logger.error(f"Unexpected error connecting to MySQL: {e}")
             return None
     
     def get_version(self) -> Optional[str]:

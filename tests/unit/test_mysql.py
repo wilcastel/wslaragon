@@ -173,7 +173,7 @@ class TestMySQLManagerIsRunning:
 
         assert mysql_manager.is_running() is True
         mock_run.assert_called_once_with(
-            ['sudo', 'docker', 'inspect', '-f', '{{.State.Running}}', 'mariadb11'],
+            ['sudo', '-n', 'docker', 'inspect', '-f', '{{.State.Running}}', 'mariadb11'],
             capture_output=True, text=True
         )
 
