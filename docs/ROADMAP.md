@@ -65,6 +65,9 @@ Este documento detalla las funciones implementadas y las mejoras planificadas pa
 - [x] **Advanced Scaffolding**: Integración con Vite para crear proyectos React, Vue, Svelte, etc. (`--vite <template>`) con configuración automática de puertos y SSL.
 - [x] **Astro SSG**: Sitios Astro estáticos compilados a `dist/` y servidos directamente por Nginx, sin proxy ni proceso corriendo (`--astro`, con templates `basics`/`blog`/`minimal`).
 - [x] **Astro Headless (Islands)**: Template `--astro=headless` para sitios API-driven con island architecture, combinado con `site api add/remove/list` para gestionar los proxies reversos hacia APIs externas.
+- [ ] **Astro SSR con Node**: Integrar `@astrojs/node`, renderizado bajo demanda, puerto automático, PM2 y proxy Nginx con HTTPS.
+- [ ] **Astro API routes**: Preparar endpoints dinámicos y variables privadas para formularios, webhooks y backends ligeros.
+- [ ] **Astro + WordPress headless**: Preset declarado con URL del backend, REST API y elección entre contenido generado durante el build o renderizado dinámicamente.
 - [x] **Gestión de API Proxies**: Comando `site api` (add/remove/list) para configurar proxies reversos Nginx por sitio, con persistencia en `sites.json` y regeneración automática de la configuración.
 - [x] **Sitios Headless Pareados**: Flag `--headless --backend=<wordpress|laravel> --frontend=<sveltekit|astro> --url=<name>` crea un frontend y un backend/API vinculados, compartiendo una raíz de proyecto (`~/web/<name>/front` y `~/web/<name>/back`). Borrar cualquiera de las dos mitades elimina ambas (con aviso previo) y la raíz compartida.
 - [ ] **Project Templates**: Plantillas personalizadas para arrancar proyectos rápidos.

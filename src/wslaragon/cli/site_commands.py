@@ -44,6 +44,7 @@ def site():
 @click.option('--node', 'site_type', flag_value='node', help='Create Node.js app (auto-port starting 3000)')
 @click.option('--python', 'site_type', flag_value='python', help='Create Python app (auto-port starting 8000)')
 @click.option('--vite', help='Create Vite app with template (react, vue, svelte, vanilla, etc.)')
+@click.option('--sveltekit', 'site_type', flag_value='sveltekit', help='Create a SvelteKit app (auto-port starting 3000)')
 @click.option('--astro', is_flag=False, flag_value='basics', default=None,
               help='Create Astro app. Use bare --astro for basics, or --astro=blog/minimal/headless')
 @click.option('--headless', 'is_headless', is_flag=True, default=False,
@@ -58,7 +59,7 @@ def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astr
     """Create a new site"""
     # Override defaults for Node/Python/Vite/Astro if not explicitly set
     
-    if site_type in ('node', 'python') or vite:
+    if site_type in ('node', 'python', 'sveltekit') or vite:
         if php:
             php = False
             

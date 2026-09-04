@@ -11,6 +11,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import yaml
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,6 +56,23 @@ class SiteCreator(ABC):
                 return subprocess.run(cmd, shell=True, **kwargs)
 
         return run_as_user
+
+    @staticmethod
+    def _allow_pnpm_builds(site_base_dir: Path, packages: List[str]) -> None:
+        """Allow a minimal set of trusted dependency build scripts for pnpm 11+."""
+        workspace_file = site_base_dir / 'pnpm-workspace.yaml'
+        workspace = {}
+        if workspace_file.exists():
+            workspace = yaml.safe_load(workspace_file.read_text(encoding='utf-8')) or {}
+
+        allow_builds = workspace.setdefault('allowBuilds', {})
+        for package in packages:
+            allow_builds[package] = True
+
+        workspace_file.write_text(
+            yaml.safe_dump(workspace, sort_keys=False),
+            encoding='utf-8'
+        )
 
 
 class HtmlSiteCreator(SiteCreator):
@@ -648,7 +667,8 @@ class ViteSiteCreator(SiteCreator):
 
             run_as_user(f"pnpm create vite@latest . --template {vite_template}",
                        cwd=str(site_base_dir), check=True, input="\nn\n", text=True)
-            
+
+            self._allow_pnpm_builds(site_base_dir, ['esbuild'])
             run_as_user("pnpm install", cwd=str(site_base_dir), check=True)
             
             pkg_path = site_base_dir / "package.json"
@@ -707,9 +727,11 @@ class SvelteKitSiteCreator(SiteCreator):
                 if result.returncode != 0:
                     raise Exception(f"SvelteKit scaffolding failed: {result.stderr}")
 
+            self._allow_pnpm_builds(site_base_dir, ['esbuild'])
             result = run_as_user("pnpm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
-                raise Exception(f"SvelteKit pnpm install failed: {result.stderr}")
+                details = result.stderr.strip() or result.stdout.strip()
+                raise Exception(f"SvelteKit pnpm install failed: {details}")
 
             pkg_path = site_base_dir / "package.json"
             if pkg_path.exists():
@@ -718,8 +740,8 @@ class SvelteKitSiteCreator(SiteCreator):
 
                 if 'scripts' not in pkg:
                     pkg['scripts'] = {}
-                pkg['scripts']['dev'] = f"vite dev --host 0.0.0.0 --port {proxy_port}"
-                pkg['scripts']['start'] = f"vite dev --host 0.0.0.0 --port {proxy_port}"
+                pkg['scripts']['dev'] = f"vite dev --host 0.0.0.0 --port {proxy_port} --strictPort"
+                pkg['scripts']['start'] = f"vite dev --host 0.0.0.0 --port {proxy_port} --strictPort"
                 pkg['scripts'].setdefault('build', 'vite build')
 
                 with open(pkg_path, 'w') as f:
@@ -778,9 +800,11 @@ class AstroSiteCreator(SiteCreator):
                 if result.returncode != 0:
                     raise Exception(f"Astro scaffolding failed: {result.stderr}")
             
+            self._allow_pnpm_builds(site_base_dir, ['esbuild'])
             result = run_as_user("pnpm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
-                raise Exception(f"Astro pnpm install failed: {result.stderr}")
+                details = result.stderr.strip() or result.stdout.strip()
+                raise Exception(f"Astro pnpm install failed: {details}")
             
             pkg_path = site_base_dir / "package.json"
             if pkg_path.exists():
@@ -923,6 +947,8 @@ SITE_URL=https://{domain}
             }
             with open(site_base_dir / "package.json", 'w') as f:
                 json.dump(pkg, f, indent=2)
+
+            self._allow_pnpm_builds(site_base_dir, ['esbuild'])
             
             # --- astro.config.mjs ---
             astro_config = f"""import {{ defineConfig }} from 'astro/config';

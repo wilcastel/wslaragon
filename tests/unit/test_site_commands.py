@@ -295,6 +295,25 @@ class TestSiteCreateCommand:
         assert result.exit_code == 0
         assert mock_deps['site_mgr'].create_site.call_args.kwargs['php'] is False
 
+    def test_site_create_sveltekit_forces_php_off(self, runner, mock_deps):
+        """Test standalone SvelteKit sites use the Node proxy stack."""
+        from wslaragon.cli.site_commands import site
+
+        mock_deps['site_mgr'].create_site.return_value = {
+            'success': True,
+            'site': {
+                'name': 'kit', 'domain': 'kit.test', 'document_root': '/test/web/kit',
+                'php': False, 'mysql': False, 'ssl': True, 'proxy_port': 3000,
+            }
+        }
+
+        result = runner.invoke(site, ['create', 'kit', '--sveltekit'])
+
+        assert result.exit_code == 0
+        call_kwargs = mock_deps['site_mgr'].create_site.call_args.kwargs
+        assert call_kwargs['php'] is False
+        assert call_kwargs['site_type'] == 'sveltekit'
+
     def test_site_create_phpmyadmin_disables_mysql_by_default(self, runner, mock_deps):
         """Test that --phpmyadmin defaults mysql to False since it manages existing DBs."""
         from wslaragon.cli.site_commands import site

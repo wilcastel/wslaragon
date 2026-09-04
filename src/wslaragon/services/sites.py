@@ -107,12 +107,12 @@ class SiteManager:
             if mysql is None:
                 mysql = False
             
-            # Auto-configure for Node/Python/Vite (Astro SSG does NOT need a proxy)
+            # Auto-configure for Node/Python/Vite/SvelteKit (Astro SSG does NOT need a proxy)
             is_astro_ssg = bool(astro_template)
-            if site_type in ('node', 'python') or vite_template:
+            if site_type in ('node', 'python', 'sveltekit') or vite_template:
                 if not proxy_port:
                     # Find next free port
-                    start_port = 3000 if site_type == 'node' or vite_template else 8000
+                    start_port = 8000 if site_type == 'python' else 3000
                     proxy_port = self._find_next_free_port(start_port)
             
             if site_name in self.sites and not recreate:
@@ -140,8 +140,8 @@ class SiteManager:
                     subprocess.run(['sudo', 'rm', '-rf', str(site_base_dir)], check=True)
                     messages.append(f"[yellow]Cleaned existing directory: {site_base_dir}[/yellow]")
             
-            # Astro SSG: no PHP
-            if is_astro_ssg:
+            # Proxy-based JavaScript/Python sites and Astro SSG do not use PHP.
+            if site_type in ('node', 'python', 'sveltekit') or vite_template or is_astro_ssg:
                 php = False
             
             site_base_dir.mkdir(exist_ok=True, parents=True)
@@ -167,7 +167,7 @@ class SiteManager:
 
 # Use Strategy pattern for site creation
             # Run creator for all sites that have a site type or template.
-            needs_scaffolding = site_type in ('html', 'wordpress', 'phpmyadmin', 'laravel', 'node', 'python') or \
+            needs_scaffolding = site_type in ('html', 'wordpress', 'phpmyadmin', 'laravel', 'node', 'python', 'sveltekit') or \
                                 site_type and site_type.isdigit() or \
                                 vite_template or astro_template
             

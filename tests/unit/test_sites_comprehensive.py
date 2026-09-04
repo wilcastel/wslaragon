@@ -363,6 +363,23 @@ class TestCreateSiteWithSiteTypes:
         assert result["site"]["proxy_port"] is not None
 
     @patch("subprocess.run")
+    def test_create_site_with_sveltekit_type(self, mock_run, site_manager):
+        site_manager.nginx.add_site.return_value = (True, None)
+
+        with patch("wslaragon.services.sites.get_site_creator") as mock_get_creator:
+            mock_creator = MagicMock()
+            mock_creator.create.return_value = ["SvelteKit created"]
+            mock_get_creator.return_value = mock_creator
+
+            with patch.object(site_manager, "_find_next_free_port", return_value=3002):
+                result = site_manager.create_site("kitsite", site_type="sveltekit", ssl=False)
+
+        assert result["success"] is True
+        assert result["site"]["proxy_port"] == 3002
+        assert result["site"]["php"] is False
+        mock_get_creator.assert_called_once()
+
+    @patch("subprocess.run")
     def test_create_site_with_laravel_type(self, mock_run, site_manager):
         site_manager.nginx.add_site.return_value = (True, None)
 

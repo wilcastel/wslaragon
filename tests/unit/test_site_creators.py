@@ -1676,6 +1676,7 @@ class TestSvelteKitSiteCreator:
         pkg = json.loads((site_base_dir / "package.json").read_text())
         assert "5174" in pkg["scripts"]["dev"]
         assert "5174" in pkg["scripts"]["start"]
+        assert "--strictPort" in pkg["scripts"]["dev"]
         assert pkg["scripts"]["build"] == "vite build"
 
         vite_config_content = (site_base_dir / "vite.config.ts").read_text()

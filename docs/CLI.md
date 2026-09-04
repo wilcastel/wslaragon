@@ -78,6 +78,7 @@ wslaragon site create --headless --backend=wordpress --frontend=sveltekit --url=
 - `--python`: Crear sitio para Python (asigna puerto libre automáticamente iniciando en 8000, deshabilita PHP/MySQL).
 - `--vite <template>`: Crear sitio Vite usando una plantilla (react, vue, svelte, vanilla, etc). Asigna puerto Node.
 - `--astro`: Crear sitio Astro SSG. Usa template `basics` por defecto. Especificar template: `--astro=blog`, `--astro=minimal`, `--astro=headless`. Compila a estáticos en `dist/`, nginx sirve directamente sin proxy.
+- `--sveltekit`: Crear una aplicación SvelteKit con pnpm, puerto automático, proxy Nginx y ejecución mediante PM2.
 - `--headless --backend=<wordpress|laravel> --frontend=<sveltekit|astro> --url=<nombre>`: Crear un par de sitios vinculados (frontend + backend/API), ver [sección 1.1](#11-sitios-headless-pareados---headless).
 - `--proxy [PORT]`: Configurar como Proxy Inverso para Apps manuales en el puerto especificado.
 - `--public`: Apuntar document root a directorio `public/`.

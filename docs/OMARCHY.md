@@ -155,3 +155,26 @@ Open `https://vite-demo.test`. Nginx proxies HTTP and secure WebSocket traffic
 to Vite, so hot module replacement works through the local HTTPS domain. The
 generated scripts bind to the allocated port with `--strictPort`, and Vite only
 accepts the generated `.test` hostname.
+
+## Phase 7: SvelteKit and Astro
+
+Svelte projects that only need a browser frontend can use the Vite template.
+Full SvelteKit applications receive a proxy port and run through PM2:
+
+```bash
+wslaragon site create svelte-demo --vite svelte
+wslaragon node start svelte-demo
+
+wslaragon site create kit-demo --sveltekit
+wslaragon node start kit-demo
+```
+
+Astro sites are built as static output and served directly from `dist/`, so no
+PM2 process is required:
+
+```bash
+wslaragon site create astro-demo --astro
+```
+
+Open `https://svelte-demo.test`, `https://kit-demo.test`, or
+`https://astro-demo.test` respectively.
