@@ -25,10 +25,9 @@ class SSLManager:
             ca_key = str(self.ssl_dir / "rootCA-key.pem")
         self.ca_key = Path(ca_key)
         
-        windows_hosts = config.get('windows.hosts_file')
-        if windows_hosts is None:
-            windows_hosts = "/mnt/c/Windows/System32/drivers/etc/hosts"
-        self.windows_hosts = Path(windows_hosts)
+        self.hosts_mode = config.get('hosts.mode', 'windows')
+        hosts_file = config.get('hosts.file') or config.get('windows.hosts_file')
+        self.windows_hosts = Path(hosts_file or "/mnt/c/Windows/System32/drivers/etc/hosts")
         
         self._ensure_dirs()
     
@@ -210,7 +209,7 @@ subjectAltName = {san_string}
             return {'success': False, 'error': str(e)}
     
     def add_to_windows_hosts(self, domain: str, ip: str = "127.0.0.1") -> bool:
-        """Add domain to Windows hosts file using PowerShell (handles elevation)"""
+        """Add a domain to the native hosts file or Windows hosts under WSL."""
         try:
             # Check if entry already exists (read-only is usually fine)
             if self.windows_hosts.exists():
@@ -218,6 +217,16 @@ subjectAltName = {san_string}
                     if domain in f.read():
                         return True
             
+            if self.hosts_mode == 'local':
+                entry = f"{ip}\t{domain}\n::1\t{domain}\n"
+                process = subprocess.Popen(
+                    ['sudo', 'tee', '-a', str(self.windows_hosts)],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True
+                )
+                process.communicate(input=entry)
+                return process.returncode == 0
+
             # Use PowerShell to add entries with elevated privileges
             # We add both IPv4 and IPv6 entries for better compatibility
             # We use `r`n for Windows-style newlines and clean up previous malformed entries
@@ -244,8 +253,22 @@ Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy 
             return False
     
     def remove_from_windows_hosts(self, domain: str) -> bool:
-        """Remove domain from Windows hosts file using PowerShell (handles elevation)"""
+        """Remove a domain from the native hosts file or Windows hosts under WSL."""
         try:
+            if self.hosts_mode == 'local':
+                existing = self.windows_hosts.read_text(encoding='utf-8')
+                filtered = ''.join(
+                    line for line in existing.splitlines(keepends=True)
+                    if domain not in line.split('#', 1)[0].split()[1:]
+                )
+                process = subprocess.Popen(
+                    ['sudo', 'tee', str(self.windows_hosts)],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True
+                )
+                process.communicate(input=filtered)
+                return process.returncode == 0
+
             # Use PowerShell to remove entries with elevated privileges mechanism
             # We wrap the removal logic in a script block that we execute as Admin
             ps_script = f"""

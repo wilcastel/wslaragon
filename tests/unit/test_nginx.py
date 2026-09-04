@@ -186,6 +186,17 @@ class TestNginxManagerCreateSiteConfig:
         assert "fastcgi_pass" in config
         assert "php8.3-fpm.sock" in config
 
+    def test_create_site_config_uses_configured_fpm_listener(self, nginx_manager):
+        nginx_manager.config.get.side_effect = lambda key, default=None: {
+            'sites.tld': '.test',
+            'php.fpm_listen': '127.0.0.1:9000',
+        }.get(key, default)
+
+        config = nginx_manager.create_site_config("myapp", "/var/www/myapp")
+
+        assert "include fastcgi_params;" in config
+        assert "fastcgi_pass 127.0.0.1:9000;" in config
+
     def test_create_site_config_without_php(self, nginx_manager):
         """Test static site config generation"""
         config = nginx_manager.create_site_config("myapp", "/var/www/myapp", php=False)

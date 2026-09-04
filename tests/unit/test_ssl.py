@@ -488,6 +488,23 @@ class TestSSLManagerAddToWindowsHosts:
         
         assert result is False
 
+    @patch('wslaragon.services.ssl.subprocess.Popen')
+    def test_add_to_local_hosts_uses_sudo_tee(self, mock_popen, ssl_manager, tmp_path):
+        hosts_file = tmp_path / "hosts"
+        hosts_file.write_text("127.0.0.1 localhost\n")
+        ssl_manager.windows_hosts = hosts_file
+        ssl_manager.hosts_mode = "local"
+        process = mock_popen.return_value
+        process.returncode = 0
+
+        result = ssl_manager.add_to_windows_hosts("example.test")
+
+        assert result is True
+        mock_popen.assert_called_once()
+        process.communicate.assert_called_once_with(
+            input="127.0.0.1\texample.test\n::1\texample.test\n"
+        )
+
 
 class TestSSLManagerRemoveFromWindowsHosts:
     """Test suite for remove_from_windows_hosts method"""
@@ -526,6 +543,22 @@ class TestSSLManagerRemoveFromWindowsHosts:
         result = ssl_manager.remove_from_windows_hosts("example.test")
         
         assert result is False
+
+    @patch('wslaragon.services.ssl.subprocess.Popen')
+    def test_remove_from_local_hosts_preserves_other_entries(self, mock_popen, ssl_manager, tmp_path):
+        hosts_file = tmp_path / "hosts"
+        hosts_file.write_text(
+            "127.0.0.1 localhost\n127.0.0.1 example.test\n::1 example.test\n"
+        )
+        ssl_manager.windows_hosts = hosts_file
+        ssl_manager.hosts_mode = "local"
+        process = mock_popen.return_value
+        process.returncode = 0
+
+        result = ssl_manager.remove_from_windows_hosts("example.test")
+
+        assert result is True
+        process.communicate.assert_called_once_with(input="127.0.0.1 localhost\n")
 
 
 class TestSSLManagerListCertificates:

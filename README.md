@@ -213,6 +213,9 @@ Ver **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** para más detalles del flujo 
 
 ## 📚 Documentación
 
+> **Omarchy (en desarrollo):** la primera fase para dominios `.test`, Nginx y
+> SSL local está documentada en [docs/OMARCHY.md](docs/OMARCHY.md).
+
 Este README es solo la puerta de entrada. La referencia completa vive en `docs/`:
 
 - **[docs/README.md](docs/README.md)** — índice general de la documentación
