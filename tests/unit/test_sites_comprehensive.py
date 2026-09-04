@@ -510,6 +510,46 @@ class TestCloneSite:
         assert "repository not found" in result["error"]
         assert "broken" not in site_manager.sites
 
+    def test_setup_clone_creates_and_configures_laravel_env(self, site_manager, tmp_path):
+        root = tmp_path / "laravel"
+        root.mkdir()
+        (root / ".env.example").write_text("APP_URL=http://localhost\nDB_CONNECTION=sqlite\n")
+        site = {"stack": "laravel", "domain": "app.test", "database": "app_db"}
+
+        actions = site_manager._setup_cloned_project(root, site, False, True)
+
+        content = (root / ".env").read_text()
+        assert "APP_URL=https://app.test" in content
+        assert "DB_CONNECTION=mysql" in content
+        assert "DB_DATABASE=app_db" in content
+        assert all(action["success"] for action in actions)
+
+    def test_setup_clone_preserves_existing_env(self, site_manager, tmp_path):
+        root = tmp_path / "node"
+        root.mkdir()
+        (root / ".env").write_text("SECRET=keep-me\n")
+        (root / ".env.example").write_text("SECRET=replace-me\n")
+
+        actions = site_manager._setup_cloned_project(
+            root, {"stack": "node", "domain": "node.test"}, False, True
+        )
+
+        assert (root / ".env").read_text() == "SECRET=keep-me\n"
+        assert actions[0]["message"] == "Existing .env preserved"
+
+    def test_setup_clone_imports_database_backup(self, site_manager, tmp_path):
+        backup = tmp_path / "backup.sql"
+        backup.write_text("SELECT 1;")
+        site_manager.mysql.restore_database.return_value = True
+
+        actions = site_manager._setup_cloned_project(
+            tmp_path, {"stack": "laravel", "database": "app_db"},
+            False, False, str(backup)
+        )
+
+        site_manager.mysql.restore_database.assert_called_once_with("app_db", str(backup))
+        assert actions == [{"success": True, "message": "Database imported into app_db"}]
+
     @pytest.mark.parametrize(
         ("marker", "expected"),
         [

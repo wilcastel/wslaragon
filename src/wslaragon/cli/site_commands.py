@@ -152,7 +152,11 @@ def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astr
 @click.option('--database', help='Custom database name')
 @click.option('--ssl/--no-ssl', default=True, help='Enable local HTTPS')
 @click.option('--proxy', type=int, help='Custom proxy port for JavaScript projects')
-def clone(repository, name, stack, branch, mysql, database, ssl, proxy):
+@click.option('--install/--no-install', default=False, help='Install Composer/pnpm dependencies')
+@click.option('--env/--no-env', 'prepare_env', default=False, help='Prepare .env without overwriting it')
+@click.option('--import-db', type=click.Path(exists=True, dir_okay=False), help='Import a MySQL SQL backup')
+def clone(repository, name, stack, branch, mysql, database, ssl, proxy,
+          install, prepare_env, import_db):
     """Clone a Git repository and configure it as a local site."""
     repository = repository or click.prompt('Git repository URL')
     suggested_name = repository.rstrip('/').rsplit('/', 1)[-1]
@@ -182,7 +186,9 @@ def clone(repository, name, stack, branch, mysql, database, ssl, proxy):
     with console.status(f"[bold green]Cloning and configuring {name}..."):
         result = site_mgr.clone_site(
             repository, name, stack=stack, branch=branch, mysql=mysql,
-            ssl=ssl, database_name=database, proxy_port=proxy
+            ssl=ssl, database_name=database, proxy_port=proxy,
+            install_dependencies=install, prepare_env=prepare_env,
+            database_backup=import_db
         )
 
     if not result['success']:
@@ -202,10 +208,15 @@ def clone(repository, name, stack, branch, mysql, database, ssl, proxy):
         title=f"Cloned Site: {name}",
     ))
 
-    if site_info.get('proxy_port'):
+    for action in result.get('setup_actions', []):
+        style = 'green' if action['success'] else 'yellow'
+        marker = '✓' if action['success'] else '○'
+        console.print(f"[{style}]{marker} {action['message']}[/{style}]")
+
+    if site_info.get('proxy_port') and not install:
         console.print(f"[yellow]Next: cd {site_info['document_root']} && pnpm install[/yellow]")
         console.print(f"[yellow]Then: wslaragon node start {name}[/yellow]")
-    elif site_info['stack'] == 'laravel':
+    elif site_info['stack'] == 'laravel' and not install:
         console.print(f"[yellow]Next: cd {site_info['document_root']} && composer install[/yellow]")
         if site_info.get('database'):
             console.print(

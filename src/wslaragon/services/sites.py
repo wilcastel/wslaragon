@@ -296,7 +296,9 @@ class SiteManager:
 
     def clone_site(self, repository: str, site_name: str, stack: str = 'auto',
                    branch: str = None, mysql: bool = None, ssl: bool = True,
-                   database_name: str = None, proxy_port: int = None) -> Dict:
+                   database_name: str = None, proxy_port: int = None,
+                   install_dependencies: bool = False, prepare_env: bool = False,
+                   database_backup: str = None) -> Dict:
         """Clone a Git repository and register it as a configured local site."""
         site_name = self._normalize_site_name(site_name)
         if not site_name or not self._is_valid_site_name(site_name):
@@ -351,6 +353,10 @@ class SiteManager:
                 result['site']['repository'] = repository
                 result['site']['branch'] = branch
                 self._save_sites()
+                result['setup_actions'] = self._setup_cloned_project(
+                    destination, result['site'], install_dependencies,
+                    prepare_env, database_backup
+                )
             return result
         except subprocess.TimeoutExpired:
             self._cleanup_failed_site_directory(destination)
@@ -358,6 +364,65 @@ class SiteManager:
         except Exception as e:
             self._cleanup_failed_site_directory(destination)
             return {'success': False, 'error': str(e)}
+
+    def _setup_cloned_project(self, root: Path, site: Dict, install: bool,
+                              prepare_env: bool, backup: str = None) -> List[Dict]:
+        """Run optional setup without replacing an existing environment file."""
+        actions = []
+        env_file = root / '.env'
+        if prepare_env:
+            example = root / '.env.example'
+            if env_file.exists():
+                actions.append({'success': True, 'message': 'Existing .env preserved'})
+            elif example.exists():
+                shutil.copy2(example, env_file)
+                actions.append({'success': True, 'message': '.env created from .env.example'})
+            else:
+                actions.append({'success': False, 'message': 'No .env.example found'})
+            if env_file.exists() and site.get('stack') == 'laravel':
+                values = {
+                    'APP_URL': f"https://{site['domain']}",
+                    'DB_CONNECTION': 'mysql',
+                    'DB_HOST': str(self.config.get('mysql.host', '127.0.0.1')),
+                    'DB_PORT': str(self.config.get('mysql.port', 3306)),
+                    'DB_DATABASE': site.get('database') or '',
+                    'DB_USERNAME': str(self.config.get('mysql.user', 'root')),
+                    'DB_PASSWORD': str(self.config.get('mysql.password', '')),
+                }
+                lines = env_file.read_text().splitlines()
+                for key, value in values.items():
+                    new_line = f'{key}={value}'
+                    matches = [i for i, line in enumerate(lines) if line.startswith(f'{key}=')]
+                    if matches:
+                        lines[matches[0]] = new_line
+                    else:
+                        lines.append(new_line)
+                env_file.write_text('\n'.join(lines) + '\n')
+                actions.append({'success': True, 'message': 'Laravel .env configured'})
+
+        if install:
+            commands = []
+            if (root / 'composer.json').exists():
+                commands.append((['composer', 'install'], 'Composer dependencies installed'))
+            if (root / 'package.json').exists():
+                commands.append((['pnpm', 'install'], 'pnpm dependencies installed'))
+            for command, success_message in commands:
+                try:
+                    result = subprocess.run(command, cwd=root, check=False, capture_output=True,
+                                            text=True, timeout=600)
+                    message = success_message if result.returncode == 0 else (
+                        result.stderr.strip() or result.stdout.strip() or f'{command[0]} failed')
+                    actions.append({'success': result.returncode == 0, 'message': message})
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    actions.append({'success': False, 'message': f'{command[0]} failed: {exc}'})
+
+        if backup:
+            database = site.get('database')
+            restored = bool(database) and self.mysql.restore_database(database, backup)
+            actions.append({'success': restored, 'message':
+                            f'Database imported into {database}' if restored
+                            else 'Database backup could not be imported'})
+        return actions
 
     @staticmethod
     def detect_project_stack(project_root: Path) -> str:

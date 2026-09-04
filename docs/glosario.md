@@ -24,7 +24,7 @@ Comando principal para la creación y administración de proyectos web.
 | `site disable` | `<name>` | Deshabilita un sitio en Nginx (no borra archivos). |
 | `site public` | `<name>` <br> `--enable` / `--disable` | Cambia el document root entre `./` y `./public` (útil para Laravel/Symfony). |
 | `site fix-permissions` | `<name>` <br> `--check` | Diagnostica o repara propietario y permisos según el framework. `--check` no modifica archivos. |
-| `site clone` | `[repository] [name]` <br> `--stack` / `--branch` / `--mysql` / `--database` / `--proxy` | Clona un repositorio y configura automáticamente dominio `.test`, HTTPS, Nginx, base de datos y proxy. Sin argumentos funciona de forma guiada. |
+| `site clone` | `[repository] [name]` <br> `--stack` / `--branch` / `--mysql` / `--database` / `--proxy` / `--env` / `--install` / `--import-db <sql>` | Clona y configura dominio, HTTPS, Nginx, base de datos y proxy. Opcionalmente prepara `.env`, instala con Composer/pnpm e importa MySQL. |
 | `site ssl` | `<name>` | Habilita HTTPS/SSL para un sitio existente que no lo tenía. |
 | `site api add` | `<name> <path> <backend_url>` | Agrega un proxy reverso Nginx en `<path>` hacia `<backend_url>` para el sitio (útil en Astro headless / sitios API-driven). |
 | `site api remove` | `<name> <path>` | Elimina un proxy reverso previamente agregado. |
