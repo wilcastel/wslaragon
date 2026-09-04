@@ -420,6 +420,38 @@ class TestLaravelSiteCreator:
         env_content = (site_base_dir / ".env").read_text()
         assert "DB_CONNECTION=mysql" in env_content
 
+    def test_laravel_creator_uses_omarchy_database_and_web_user(self, tmp_path, mock_config):
+        """Test Laravel uses configured MySQL and Nginx identities on Omarchy"""
+        site_base_dir = tmp_path / "sites" / "laravel.omarchy"
+        site_base_dir.mkdir(parents=True, exist_ok=True)
+        creator = LaravelSiteCreator(
+            config=mock_config,
+            site_name="laravel.omarchy",
+            web_root=site_base_dir / "public",
+            site_base_dir=site_base_dir,
+            tld=".test"
+        )
+        original_get = mock_config.get.side_effect
+        mock_config.get.side_effect = lambda key, default=None: {
+            'platform.name': 'omarchy',
+            'mysql.host': '127.0.0.1',
+            'mysql.port': 3306,
+            'mysql.user': 'root',
+            'nginx.user': 'http',
+        }.get(key, original_get(key, default))
+
+        with patch('subprocess.run') as mock_run, \
+             patch('wslaragon.services.site_creators.shutil.which', return_value='/usr/bin/composer'):
+            mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+            creator.create()
+
+        env_content = (site_base_dir / ".env").read_text()
+        assert "APP_URL=https://laravel.omarchy.test" in env_content
+        assert "DB_HOST=127.0.0.1" in env_content
+        assert "DB_PORT=3306" in env_content
+        assert "DB_DATABASE=laravel_omarchy_db" in env_content
+        assert any('wil:http' in str(call) or ':http' in str(call) for call in mock_run.call_args_list)
+
     def test_laravel_creator_with_postgres(self, tmp_path, mock_config):
         """Test that LaravelSiteCreator configures PostgreSQL correctly"""
         site_base_dir = tmp_path / "sites" / "laravelsite"

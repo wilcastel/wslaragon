@@ -32,7 +32,7 @@ def site():
 @site.command()
 @click.argument('name', required=False)
 @click.option('--php/--no-php', default=True, help='Enable PHP')
-@click.option('--mysql/--no-mysql', default=None, help='Create MySQL database (default: True for WordPress)')
+@click.option('--mysql/--no-mysql', default=None, help='Create MySQL database (default: True for WordPress and Laravel)')
 @click.option('--ssl/--no-ssl', default=True, help='Enable SSL (default: True)')
 @click.option('--database', help='Custom database name')
 @click.option('--public/--no-public', default=False, help='Point document root to public/ directory')

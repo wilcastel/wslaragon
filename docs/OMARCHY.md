@@ -89,3 +89,22 @@ Open `https://myblog.test` to complete WordPress's browser-based installation.
 On Omarchy, each project receives a copy of `/usr/share/webapps/wordpress` and
 uses the Docker database through `127.0.0.1:3306`. Generated `wp-config.php`
 files include unique authentication salts and force HTTPS for the admin area.
+
+## Phase 4: Laravel
+
+Install Composer and verify the PHP and database prerequisites:
+
+```bash
+./scripts/setup-omarchy-laravel.sh
+```
+
+Create a Laravel project (version 12 by default) with its MySQL database,
+Nginx `public/` document root, local domain, and HTTPS certificate:
+
+```bash
+.venv/bin/wslaragon site create myapp --laravel=12
+```
+
+Open `https://myapp.test`. The generated `.env` uses the configured Omarchygon
+MySQL host, port, username, and password. To suppress database creation, pass
+`--no-mysql` explicitly.

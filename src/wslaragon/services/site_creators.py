@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import re
 import subprocess
 import base64
 import secrets
@@ -11,6 +12,12 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def database_name_for_site(site_name: str) -> str:
+    """Return a MySQL-safe default database name for a local site."""
+    safe_name = re.sub(r'[^A-Za-z0-9_]', '_', site_name)
+    return f"{safe_name}_db"
 
 
 class SiteCreator(ABC):
@@ -249,7 +256,7 @@ class WordPressSiteCreator(SiteCreator):
         """Create a WordPress site."""
         web_root = self.web_root
         site_name = self.site_name
-        database_name = self.database_name or f"{site_name.replace('.', '_')}_db"
+        database_name = self.database_name or database_name_for_site(site_name)
         db_user = self.config.get('mysql.user', 'root')
         db_password = self.config.get('mysql.password')
         db_host = self.config.get('mysql.host', 'localhost')
@@ -360,7 +367,10 @@ class LaravelSiteCreator(SiteCreator):
         database_name = self.database_name
         
         if not database_name:
-            database_name = f"{site_name}_db"
+            database_name = database_name_for_site(site_name)
+
+        if self.config.get('platform.name') == 'omarchy' and not shutil.which('composer'):
+            raise Exception("Composer is not installed; run: ./scripts/setup-omarchy-laravel.sh")
         
         postgres_port = self.config.get('supabase.postgres_port', 5433)
         postgres_password = self.config.get('supabase.postgres_password', 'postgres')
@@ -404,7 +414,7 @@ class LaravelSiteCreator(SiteCreator):
 APP_ENV=local
 APP_KEY={app_key}
 APP_DEBUG=true
-APP_URL=http://{site_name}.test
+APP_URL=https://{site_name}{self.tld}
 
 LOG_CHANNEL=stack
 LOG_LEVEL=debug
@@ -467,20 +477,23 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 """
         else:
             db_password = self.config.get('mysql.password')
+            db_host = self.config.get('mysql.host', '127.0.0.1')
+            db_port = self.config.get('mysql.port', 3306)
+            db_user = self.config.get('mysql.user', 'root')
             env_content = f"""APP_NAME="{site_name}"
 APP_ENV=local
 APP_KEY={app_key}
 APP_DEBUG=true
-APP_URL=http://{site_name}.test
+APP_URL=https://{site_name}{self.tld}
 
 LOG_CHANNEL=stack
 LOG_LEVEL=debug
 
 DB_CONNECTION=mysql
-DB_HOST=127.0.0.1
-DB_PORT=3306
+DB_HOST={db_host}
+DB_PORT={db_port}
 DB_DATABASE={database_name}
-DB_USERNAME=root
+DB_USERNAME={db_user}
 DB_PASSWORD={db_password}
 
 BROADCAST_DRIVER=log
@@ -529,7 +542,8 @@ VITE_PUSHER_CLUSTER="${{PUSHER_APP_CLUSTER}}"
             f.write(env_content)
         
         current_user = os.getenv('SUDO_USER') or os.getenv('USER')
-        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:www-data', str(site_base_dir)], check=True)
+        web_user = self.config.get('nginx.user', 'www-data')
+        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{web_user}', str(site_base_dir)], check=True)
         subprocess.run(['sudo', 'chmod', '-R', '775', str(site_base_dir / 'storage')], check=True)
         subprocess.run(['sudo', 'chmod', '-R', '775', str(site_base_dir / 'bootstrap/cache')], check=True)
         

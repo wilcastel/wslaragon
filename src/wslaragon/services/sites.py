@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 from datetime import datetime
 
 from ..services.ssl import SSLManager
-from .site_creators import get_site_creator
+from .site_creators import database_name_for_site, get_site_creator
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +95,12 @@ class SiteManager:
             if not site_name or not self._is_valid_site_name(site_name):
                 return {'success': False, 'error': 'Invalid site name. Use letters, numbers, hyphens, underscores and dots (e.g. dash.misitio)'}
             
-            # Auto-enable mysql for WordPress (WP requires a database)
-            if site_type == 'wordpress' and mysql is None:
+            is_laravel_request = site_type is not None and (
+                site_type == 'laravel' or site_type.isdigit()
+            )
+
+            # WordPress and Laravel require a database by default.
+            if (site_type == 'wordpress' or is_laravel_request) and mysql is None and not db_type:
                 mysql = True
             
             # Default mysql to False if still None (user didn't specify)
@@ -196,7 +200,7 @@ class SiteManager:
             if db_type_final in ('mysql', 'postgres', 'supabase'):
                 if not database_name:
                     # Sanitize: replace dots with underscores for DB names
-                    database_name = f"{site_name.replace('.', '_')}_db"
+                    database_name = database_name_for_site(site_name)
                 
                 if db_type_final == 'mysql':
                     if self.mysql.database_exists(database_name):

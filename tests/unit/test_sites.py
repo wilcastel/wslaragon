@@ -198,6 +198,36 @@ class TestSiteManagerCreateSite:
         # Basic validation - may fail due to other deps but we check structure
         assert 'success' in result
 
+    @patch('wslaragon.services.sites.get_site_creator')
+    @patch('subprocess.run')
+    def test_create_laravel_enables_mysql_by_default(self, mock_run, mock_creator, site_manager):
+        """Test Laravel creates its MySQL database unless explicitly disabled"""
+        mock_creator.return_value.create.return_value = []
+        site_manager.mysql.database_exists.return_value = False
+        site_manager.mysql.create_database.return_value = (True, None)
+        site_manager.nginx.add_site.return_value = (True, None)
+
+        result = site_manager.create_site('myapp', site_type='12', ssl=False)
+
+        assert result['success'] is True
+        assert result['site']['mysql'] is True
+        assert result['site']['database'] == 'myapp_db'
+        site_manager.mysql.create_database.assert_called_once_with('myapp_db')
+
+    @patch('wslaragon.services.sites.get_site_creator')
+    @patch('subprocess.run')
+    def test_create_laravel_respects_no_mysql(self, mock_run, mock_creator, site_manager):
+        """Test an explicit --no-mysql choice remains effective for Laravel"""
+        mock_creator.return_value.create.return_value = []
+        site_manager.nginx.add_site.return_value = (True, None)
+
+        result = site_manager.create_site('myapp', site_type='12', mysql=False, ssl=False)
+
+        assert result['success'] is True
+        assert result['site']['mysql'] is False
+        assert result['site']['database'] is None
+        site_manager.mysql.create_database.assert_not_called()
+
     @patch('subprocess.run')
     @patch('pathlib.Path.exists')
     def test_create_site_prevents_duplicate(self, mock_exists, mock_run, site_manager):
@@ -216,6 +246,25 @@ class TestSiteManagerCreateSite:
         
         assert result['success'] is False
         assert 'already exists' in result['error']
+
+    @patch('wslaragon.services.sites.get_site_creator')
+    @patch('subprocess.run')
+    def test_create_laravel_sanitizes_database_name(self, mock_run, mock_creator, site_manager):
+        """Test hyphens and dots are converted for automatic database names"""
+        mock_creator.return_value.create.return_value = []
+        site_manager.mysql.database_exists.return_value = False
+        site_manager.mysql.create_database.return_value = (True, None)
+        site_manager.nginx.add_site.return_value = (True, None)
+
+        result = site_manager.create_site('laravel-demo.v2 Radar', site_type='12', ssl=False)
+
+        assert result['success'] is False
+
+        result = site_manager.create_site('laravel-demo.v2', site_type='12', ssl=False)
+
+        assert result['success'] is True
+        assert result['site']['database'] == 'laravel_demo_v2_db'
+        site_manager.mysql.create_database.assert_called_once_with('laravel_demo_v2_db')
 
     @patch('wslaragon.services.sites.get_site_creator', return_value=None)
     def test_create_site_rolls_back_directory_when_nginx_fails(self, _mock_creator, site_manager):
