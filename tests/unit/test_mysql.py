@@ -217,7 +217,7 @@ class TestMySQLManagerDockerLifecycle:
     @patch('wslaragon.services.mysql.subprocess.run')
     def test_stop_detects_mysql_container(self, mock_run, mysql_manager):
         mock_run.return_value = MagicMock(returncode=0)
-        mysql_manager.get_version = MagicMock(return_value='8.4.11')
+        mysql_manager.container = 'mysql8'
         assert mysql_manager.stop() is True
         mock_run.assert_called_once_with(
             ['sudo', 'docker', 'stop', 'mysql8'], capture_output=True,

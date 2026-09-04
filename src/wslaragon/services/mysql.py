@@ -53,10 +53,7 @@ class MySQLManager:
         return ['sudo', 'systemctl', action, self.service]
 
     def _resolve_container(self) -> str:
-        """Resolve Omarchy's conventional container name from the SQL engine."""
-        version = self.get_version(log_errors=False)
-        if version:
-            return 'mariadb11' if 'mariadb' in version.lower() else 'mysql8'
+        """Return the explicitly configured container without engine guessing."""
         return self.container
     
     def is_running(self) -> bool:

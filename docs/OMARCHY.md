@@ -107,6 +107,20 @@ Lifecycle commands (`mysql start`, `mysql stop`, and `mysql restart`) control
 the detected Docker engine on Omarchy and retain systemd compatibility on
 WSL/Ubuntu. The setup also enables PHP's `mysqli` extension for phpMyAdmin.
 
+If both Omarchy database containers exist, select one explicitly. WSLaragon
+will never switch engines based on whichever happens to be running:
+
+```bash
+wslaragon mysql use mysql8
+# or
+wslaragon mysql use mariadb11
+```
+
+Run the selection before `wslaragon on`. Each container can use a different
+Docker volume, so selecting another engine does not migrate its databases. If
+an unexpected empty instance appears, do not delete either container or volume;
+follow the [database runtime recovery guide](TROUBLESHOOTING.md#recuperar-bases-cuando-existen-mysql8-y-mariadb11).
+
 Create the phpMyAdmin virtual host with:
 
 ```bash

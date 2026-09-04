@@ -9,14 +9,7 @@ Este documento sirve como referencia completa de todos los comandos disponibles 
 | `on` | - | Inicia Nginx, PHP-FPM, MariaDB, Redis opcional y los procesos PM2 guardados. |
 | `off` | - | Detiene el runtime y deshabilita el arranque automático de los servicios web. |
 | `status` | - | Consulta el estado central sin iniciar componentes. |
-
-## ⚡ Entorno centralizado
-
-| Comando | Descripción |
-| :--- | :--- |
-| `on` | Inicia Nginx, PHP-FPM, MariaDB, Redis opcional y los procesos PM2 guardados. |
-| `off` | Detiene el runtime completo y deshabilita el arranque automático de los servicios web. |
-| `status` | Consulta el estado central sin iniciar componentes. |
+| `mysql use` | `<mysql8|mariadb11>` | Fija el único contenedor de base de datos administrado por `on`, `off` y los comandos `service`. |
 
 ## 🏗️ Gestión de Sitios (`wslaragon site`)
 
@@ -84,6 +77,8 @@ Herramientas rápidas para gestión de bases de datos MariaDB/MySQL.
 
 | Comando | Argumentos | Descripción |
 | :--- | :--- | :--- |
+| `mysql use` | `<mysql8\|mariadb11>` | Selecciona el contenedor persistente que controlarán `on`, `off` y `service`. Debe ejecutarse antes de `wslaragon on`; no migra datos entre volúmenes. |
+| `mysql status` | - | Comprueba que el servidor seleccionado acepta conexiones SQL y muestra su versión. |
 | `mysql databases` | - | Lista todas las bases de datos existentes y su tamaño. |
 | `mysql create-db` | `<name>` | Crea una nueva base de datos vacía. |
 | `mysql drop-db` | `<name>` | Elimina permanentemente una base de datos. |

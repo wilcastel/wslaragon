@@ -350,6 +350,18 @@ class TestMysqlRuntimeCommands:
         assert result.exit_code == 0
         assert 'started' in result.output
 
+    @patch('wslaragon.cli.mysql_commands.Config')
+    def test_use_selects_docker_container(self, mock_config, runner):
+        config = mock_config.return_value
+        config.get.return_value = 'docker'
+
+        from wslaragon.cli.mysql_commands import mysql
+        result = runner.invoke(mysql, ['use', 'mysql8'])
+
+        assert result.exit_code == 0
+        config.set.assert_called_once_with('mysql.container', 'mysql8')
+        assert 'mysql8' in result.output
+
     def test_mysql_drop_db_help(self, runner):
         from wslaragon.cli.mysql_commands import mysql
 

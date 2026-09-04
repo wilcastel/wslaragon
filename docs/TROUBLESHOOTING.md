@@ -113,6 +113,102 @@ sudo systemctl start mi-app-worker
 
 ---
 
+## Recuperar bases cuando existen `mysql8` y `mariadb11`
+
+En Omarchy pueden quedar instalados los contenedores `mysql8` y `mariadb11`.
+Cada uno puede estar conectado a un volumen Docker diferente, por lo que iniciar
+el contenedor equivocado hace que phpMyAdmin muestre una instancia vacía. Los
+datos normalmente siguen en el volumen original: cambiar de motor **no migra ni
+elimina** bases de datos.
+
+### 1. No eliminar ni recrear nada
+
+No ejecutes `docker rm`, `docker volume rm`, el script de instalación ni crees
+otra base con el mismo nombre mientras se investiga. Primero lista los
+contenedores y volúmenes:
+
+```bash
+sudo docker ps -a --no-trunc \
+  --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+sudo docker volume ls
+```
+
+### 2. Identificar qué volumen usa cada motor
+
+```bash
+sudo docker inspect mysql8 --format \
+  'image={{.Config.Image}} mounts={{range .Mounts}}{{.Name}} -> {{.Destination}} {{end}}'
+sudo docker inspect mariadb11 --format \
+  'image={{.Config.Image}} mounts={{range .Mounts}}{{.Name}} -> {{.Destination}} {{end}}'
+```
+
+Si conoces nombres de bases anteriores, puedes localizar sus directorios sin
+modificarlos. Sustituye los nombres del ejemplo por los tuyos:
+
+```bash
+sudo find /var/lib/docker/volumes -maxdepth 4 -type d -print | \
+  grep -E '/(prueba_db|blog_db|laravel_demo_db|readernews_db)$'
+```
+
+El volumen que contiene esos directorios es el runtime que se debe conservar.
+
+### 3. Detener ambos motores y seleccionar el correcto
+
+Detener un contenedor es seguro para sus datos y evita que ambos compitan por
+`127.0.0.1:3306`:
+
+```bash
+sudo docker stop mysql8 mariadb11
+wslaragon mysql use mysql8
+wslaragon on
+```
+
+Usa `mariadb11` en el comando `mysql use` si ese fue el contenedor cuyo volumen
+contenía las bases. La selección queda guardada y será respetada por
+`wslaragon on`, `wslaragon off` y `wslaragon service start|stop|restart mysql`.
+
+Importante: si ejecutas `wslaragon on` antes de `wslaragon mysql use`, primero
+detén el motor que ocupó el puerto y vuelve a iniciar el entorno después de
+guardar la selección.
+
+### 4. Validar los datos y el ciclo de encendido
+
+```bash
+wslaragon mysql status
+wslaragon mysql databases
+```
+
+Comprueba también `https://pma.test` y un proyecto que use base de datos. Cuando
+las bases esperadas aparezcan, valida que la selección persiste:
+
+```bash
+wslaragon off
+wslaragon on
+wslaragon mysql status
+wslaragon mysql databases
+```
+
+No elimines el segundo contenedor o su volumen hasta tener una copia de
+seguridad y confirmar qué información contiene.
+
+### El contenedor está activo pero no publica el puerto 3306
+
+Si `docker ps` muestra el contenedor como `Up`, pero `docker port` no devuelve
+nada y `NetworkSettings.Networks` está vacío, recupera su conexión a la red
+Docker. Sustituye `mysql8` por el runtime seleccionado si corresponde:
+
+```bash
+sudo docker network connect bridge mysql8
+sudo docker restart mysql8
+sudo docker port mysql8
+```
+
+Después confirma la conexión real con `wslaragon mysql status`. Que Docker
+muestre un contenedor como `running` no garantiza por sí solo que MySQL acepte
+conexiones en `127.0.0.1:3306`.
+
+---
+
 ## Verificar Logs
 
 ```bash

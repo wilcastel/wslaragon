@@ -70,6 +70,19 @@ def restart():
     _change_runtime('restart')
 
 
+@mysql.command('use')
+@click.argument('container', type=click.Choice(['mysql8', 'mariadb11']))
+def use_runtime(container):
+    """Select the Docker database container managed by WSLaragon."""
+    config = Config()
+    if config.get('mysql.backend', 'systemd') != 'docker':
+        console.print('[red]✗ Database container selection is only available with Docker[/red]')
+        return
+    config.set('mysql.container', container)
+    console.print(f"[green]✓ Database runtime set to '{container}'[/green]")
+    console.print('[yellow]Run wslaragon service start mysql to start it.[/yellow]')
+
+
 @mysql.command()
 def databases():
     """List MySQL databases"""
