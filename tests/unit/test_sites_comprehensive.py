@@ -572,6 +572,22 @@ class TestCloneSite:
         assert ["php", "artisan", "migrate"] in commands
         assert all(action["success"] for action in actions)
 
+    @patch("wslaragon.services.sites.subprocess.run")
+    def test_setup_clone_builds_frontend_with_pnpm(self, mock_run, site_manager, tmp_path):
+        (tmp_path / "package.json").write_text("{}")
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        actions = site_manager._setup_cloned_project(
+            tmp_path, {"stack": "vite", "domain": "app.test"},
+            False, False, build_assets=True
+        )
+
+        mock_run.assert_called_once_with(
+            ["pnpm", "build"], cwd=tmp_path, check=False,
+            capture_output=True, text=True, timeout=600
+        )
+        assert actions == [{"success": True, "message": "Frontend assets built"}]
+
     @pytest.mark.parametrize(
         ("marker", "expected"),
         [

@@ -298,7 +298,8 @@ class SiteManager:
                    branch: str = None, mysql: bool = None, ssl: bool = True,
                    database_name: str = None, proxy_port: int = None,
                    install_dependencies: bool = False, prepare_env: bool = False,
-                   database_backup: str = None, run_migrations: bool = False) -> Dict:
+                   database_backup: str = None, run_migrations: bool = False,
+                   build_assets: bool = False) -> Dict:
         """Clone a Git repository and register it as a configured local site."""
         site_name = self._normalize_site_name(site_name)
         if not site_name or not self._is_valid_site_name(site_name):
@@ -355,7 +356,7 @@ class SiteManager:
                 self._save_sites()
                 result['setup_actions'] = self._setup_cloned_project(
                     destination, result['site'], install_dependencies,
-                    prepare_env, database_backup, run_migrations
+                    prepare_env, database_backup, run_migrations, build_assets
                 )
             return result
         except subprocess.TimeoutExpired:
@@ -367,7 +368,8 @@ class SiteManager:
 
     def _setup_cloned_project(self, root: Path, site: Dict, install: bool,
                               prepare_env: bool, backup: str = None,
-                              run_migrations: bool = False) -> List[Dict]:
+                              run_migrations: bool = False,
+                              build_assets: bool = False) -> List[Dict]:
         """Run optional setup without replacing an existing environment file."""
         actions = []
         env_file = root / '.env'
@@ -425,6 +427,19 @@ class SiteManager:
             actions.append({'success': result.returncode == 0, 'message':
                             'Laravel application key generated' if result.returncode == 0
                             else 'Laravel application key could not be generated'})
+
+        if build_assets:
+            if not (root / 'package.json').exists():
+                actions.append({'success': False, 'message': 'No package.json found; build skipped'})
+            else:
+                try:
+                    result = subprocess.run(['pnpm', 'build'], cwd=root, check=False,
+                                            capture_output=True, text=True, timeout=600)
+                    actions.append({'success': result.returncode == 0, 'message':
+                                    'Frontend assets built' if result.returncode == 0
+                                    else (result.stderr.strip() or 'Frontend build failed')})
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    actions.append({'success': False, 'message': f'pnpm build failed: {exc}'})
 
         if backup:
             database = site.get('database')

@@ -156,8 +156,9 @@ def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astr
 @click.option('--env/--no-env', 'prepare_env', default=False, help='Prepare .env without overwriting it')
 @click.option('--import-db', type=click.Path(exists=True, dir_okay=False), help='Import a MySQL SQL backup')
 @click.option('--migrate', is_flag=True, help='Run Laravel migrations after setup')
+@click.option('--build', 'build_assets', is_flag=True, help='Run pnpm build after installation')
 def clone(repository, name, stack, branch, mysql, database, ssl, proxy,
-          install, prepare_env, import_db, migrate):
+          install, prepare_env, import_db, migrate, build_assets):
     """Clone a Git repository and configure it as a local site."""
     guided = repository is None
     repository = repository or click.prompt('Git repository URL')
@@ -176,6 +177,7 @@ def clone(repository, name, stack, branch, mysql, database, ssl, proxy,
     if guided:
         prepare_env = click.confirm('Prepare .env from .env.example?', default=True)
         install = click.confirm('Install Composer/pnpm dependencies?', default=True)
+        build_assets = install and click.confirm('Build frontend assets?', default=False)
         migrate = click.confirm('Run Laravel migrations when applicable?', default=False)
 
     config = Config()
@@ -194,7 +196,8 @@ def clone(repository, name, stack, branch, mysql, database, ssl, proxy,
             repository, name, stack=stack, branch=branch, mysql=mysql,
             ssl=ssl, database_name=database, proxy_port=proxy,
             install_dependencies=install, prepare_env=prepare_env,
-            database_backup=import_db, run_migrations=migrate
+            database_backup=import_db, run_migrations=migrate,
+            build_assets=build_assets
         )
 
     if not result['success']:
