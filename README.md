@@ -58,7 +58,7 @@ WSLaragon administra un entorno local estilo Laragon en Omarchy y WSL2. Permite 
 - **Omarchy** actualizado, o
 - **WSL2** con Ubuntu 20.04+ o Debian 10+
 - **Windows 10/11** para integración con hosts
-- **Python 3.9+** instalado
+- **Python 3.10+** instalado
 - **Permisos sudo** para configuración de servicios
 
 ### Software
