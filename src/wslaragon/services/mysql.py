@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 import pymysql
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -53,7 +54,7 @@ class MySQLManager:
 
     def _resolve_container(self) -> str:
         """Resolve Omarchy's conventional container name from the SQL engine."""
-        version = self.get_version()
+        version = self.get_version(log_errors=False)
         if version:
             return 'mariadb11' if 'mariadb' in version.lower() else 'mysql8'
         return self.container
@@ -63,16 +64,14 @@ class MySQLManager:
         try:
             if self.backend == 'docker':
                 # A successful SQL handshake is the authoritative health check
-                # and does not require Docker socket permissions or sudo.
+                # and does not require Docker socket permissions or sudo. A
+                # merely running container may still be booting or may have
+                # failed before MariaDB opened its port.
                 connection = self.get_connection(log_errors=False)
                 if connection:
                     connection.close()
                     return True
-                result = subprocess.run(
-                    ['sudo', '-n', 'docker', 'inspect', '-f', '{{.State.Running}}', self.container],
-                    capture_output=True, text=True
-                )
-                return result.returncode == 0 and result.stdout.strip() == 'true'
+                return False
             result = subprocess.run(
                 ['systemctl', 'is-active', self.service], capture_output=True, text=True
             )
@@ -92,7 +91,11 @@ class MySQLManager:
             )
             if result.returncode != 0:
                 logger.error(f"Failed to start MySQL: {result.stderr}")
-            return result.returncode == 0
+                return False
+            if self.backend == 'docker' and not self.wait_until_ready():
+                logger.error("MariaDB container started but SQL was not ready within 30 seconds")
+                return False
+            return True
         except Exception as e:
             logger.error(f"Error starting MySQL: {e}")
             return False
@@ -118,10 +121,25 @@ class MySQLManager:
             )
             if result.returncode != 0:
                 logger.error(f"Failed to restart MySQL: {result.stderr}")
-            return result.returncode == 0
+                return False
+            if self.backend == 'docker' and not self.wait_until_ready():
+                logger.error("MariaDB container restarted but SQL was not ready within 30 seconds")
+                return False
+            return True
         except Exception as e:
             logger.error(f"Error restarting MySQL: {e}")
             return False
+
+    def wait_until_ready(self, timeout: int = 30, interval: float = 1.0) -> bool:
+        """Wait until MariaDB accepts authenticated SQL connections."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            connection = self.get_connection(log_errors=False)
+            if connection:
+                connection.close()
+                return True
+            time.sleep(interval)
+        return False
     
     def get_connection(self, user: str = None, password: str = None,
                        database: str = None,
@@ -162,11 +180,11 @@ class MySQLManager:
                 logger.error(f"Unexpected error connecting to MySQL: {e}")
             return None
     
-    def get_version(self) -> Optional[str]:
+    def get_version(self, log_errors: bool = True) -> Optional[str]:
         """Get MySQL version"""
         connection = None
         try:
-            connection = self.get_connection()
+            connection = self.get_connection(log_errors=log_errors)
             if connection:
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT VERSION()")

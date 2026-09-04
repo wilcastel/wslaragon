@@ -105,6 +105,7 @@ sudo systemctl start mi-app-worker
 | "Permission denied" en Nginx | Home directory sin permisos | `chmod 755 $HOME` o `wslaragon site fix-permissions mi-sitio` |
 | WordPress no puede subir archivos | Permisos incorrectos | `wslaragon site fix-permissions mi-sitio --check` y luego `wslaragon site fix-permissions mi-sitio` |
 | VSCode no puede guardar archivos | Permisos incorrectos | `wslaragon site fix-permissions mi-sitio --check` y luego `wslaragon site fix-permissions mi-sitio` |
+| MariaDB está `running` en Docker pero rechaza `127.0.0.1:3306` | El contenedor perdió su conexión a la red `bridge` | `sudo docker network connect bridge mariadb11 && sudo docker restart mariadb11` |
 | SSL muestra "No seguro" en navegador | CA root no instalada en Windows | Ver [Guía de Instalación → Paso 4](INSTALL.md#4-instalar-la-ca-root-para-ssl-️-importante) |
 | Certificado CN dice "mkcert development" | Certificado viejo generado con mkcert puro | Regenerar con `wslaragon ssl generate dominio.test` |
 | WordPress muestra "Error establishing a database" | Base de datos no creada | `wslaragon site create blog --wordpress` (ya crea la DB automáticamente) |
