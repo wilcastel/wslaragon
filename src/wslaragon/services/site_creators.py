@@ -641,6 +641,7 @@ class ViteSiteCreator(SiteCreator):
         site_name = self.site_name
         site_base_dir = self.site_base_dir
         vite_template = self.vite_template
+        domain = f"{site_name}{self.tld}"
         
         try:
             run_as_user = self._prepare_run_as_user(site_base_dir)
@@ -655,8 +656,8 @@ class ViteSiteCreator(SiteCreator):
                 pkg = json.load(f)
             
             if 'scripts' in pkg:
-                pkg['scripts']['dev'] = f"vite --port {proxy_port} --host"
-                pkg['scripts']['start'] = f"vite --port {proxy_port} --host"
+                pkg['scripts']['dev'] = f"vite --port {proxy_port} --host 0.0.0.0 --strictPort"
+                pkg['scripts']['start'] = f"vite --port {proxy_port} --host 0.0.0.0 --strictPort"
             
             with open(pkg_path, 'w') as f:
                 json.dump(pkg, f, indent=2)
@@ -668,7 +669,10 @@ class ViteSiteCreator(SiteCreator):
                         content = f.read()
                     
                     if 'defineConfig({' in content and 'allowedHosts' not in content:
-                        new_content = content.replace('defineConfig({', 'defineConfig({\n  server: {\n    allowedHosts: true\n  },')
+                        new_content = content.replace(
+                            'defineConfig({',
+                            f"defineConfig({{\n  server: {{\n    allowedHosts: ['{domain}']\n  }},"
+                        )
                         with open(cfg_path, 'w') as f:
                             f.write(new_content)
                     break

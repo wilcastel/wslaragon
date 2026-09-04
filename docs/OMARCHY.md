@@ -127,3 +127,18 @@ Nginx reverse proxy, local domain, and HTTPS certificate, then start it:
 
 Open `https://node-demo.test`. Process lifecycle is managed with `node list`,
 `node stop`, `node restart`, and `node delete`.
+
+## Phase 6: Vite
+
+Create a Vite project using pnpm and any supported template, then start its
+development server through PM2:
+
+```bash
+.venv/bin/wslaragon site create vite-demo --vite react
+.venv/bin/wslaragon node start vite-demo
+```
+
+Open `https://vite-demo.test`. Nginx proxies HTTP and secure WebSocket traffic
+to Vite, so hot module replacement works through the local HTTPS domain. The
+generated scripts bind to the allocated port with `--strictPort`, and Vite only
+accepts the generated `.test` hostname.

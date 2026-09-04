@@ -836,6 +836,9 @@ class TestViteSiteCreator:
         # Check package.json was modified
         pkg = json.loads((site_base_dir / "package.json").read_text())
         assert "5173" in pkg["scripts"]["dev"]
+        assert "--host 0.0.0.0" in pkg["scripts"]["dev"]
+        assert "--strictPort" in pkg["scripts"]["dev"]
+        assert pkg["scripts"]["start"] == pkg["scripts"]["dev"]
 
     def test_vite_creator_with_vanilla_template(self, tmp_path, mock_config):
         """Test ViteSiteCreator with vanilla template"""
@@ -1381,7 +1384,7 @@ class TestViteEdgeCases:
                     creator.create()
 
                     config_content = (site_base_dir / "vite.config.js").read_text()
-                    assert "allowedHosts: true" in config_content
+                    assert "allowedHosts: ['vitesite.test']" in config_content
                     assert "server: {" in config_content
 
     def test_vite_creator_modifies_vite_config_ts(self, tmp_path, mock_config):
@@ -1411,7 +1414,7 @@ class TestViteEdgeCases:
                     creator.create()
 
                     config_content = (site_base_dir / "vite.config.ts").read_text()
-                    assert "allowedHosts: true" in config_content
+                    assert "allowedHosts: ['vitesite.test']" in config_content
 
     def test_vite_creator_skips_config_if_allowedhosts_exists(self, tmp_path, mock_config):
         """Test ViteSiteCreator skips modification if allowedHosts already exists"""
