@@ -39,7 +39,7 @@ class SiteCreator(ABC):
     def _prepare_run_as_user(self, site_base_dir: Path):
         """Chown site_base_dir to the invoking (non-root) user and return a
         run_as_user(cmd, **kwargs) callable that runs shell commands as that
-        user — npm/npx scaffolding tools must not run as root.
+        user — pnpm scaffolding tools must not run as root.
         """
         current_user = os.getenv('SUDO_USER') or os.getenv('USER')
         is_root = os.geteuid() == 0 and current_user
@@ -645,10 +645,10 @@ class ViteSiteCreator(SiteCreator):
         try:
             run_as_user = self._prepare_run_as_user(site_base_dir)
 
-            run_as_user(f"npm create vite@latest . -- --template {vite_template}",
+            run_as_user(f"pnpm create vite@latest . --template {vite_template}",
                        cwd=str(site_base_dir), check=True, input="\nn\n", text=True)
             
-            run_as_user("npm install", cwd=str(site_base_dir), check=True)
+            run_as_user("pnpm install", cwd=str(site_base_dir), check=True)
             
             pkg_path = site_base_dir / "package.json"
             with open(pkg_path, 'r') as f:
@@ -674,7 +674,7 @@ class ViteSiteCreator(SiteCreator):
                     break
 
             messages.append(f"[green]Vite ({vite_template}) project created successfully![/green]")
-            messages.append(f"[yellow]Node process prepared. Run 'wslaragon node start {site_name}' to serve 'npm run dev'.[/yellow]")
+            messages.append(f"[yellow]Node process prepared. Run 'wslaragon node start {site_name}' to serve 'pnpm run dev'.[/yellow]")
 
         except Exception as e:
             raise Exception(f"Vite scaffolding failed: {str(e)}")
@@ -695,17 +695,17 @@ class SvelteKitSiteCreator(SiteCreator):
         try:
             run_as_user = self._prepare_run_as_user(site_base_dir)
 
-            scaffold_cmd = "npx sv create . --template minimal --types ts --no-add-ons --no-install"
+            scaffold_cmd = "pnpm dlx sv create . --template minimal --types ts --no-add-ons --no-install"
             result = run_as_user(scaffold_cmd, cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
-                fallback_cmd = "npm create svelte@latest . -- --template skeleton --types typescript --no-add-ons --no-install"
+                fallback_cmd = "pnpm create svelte@latest . --template skeleton --types typescript --no-add-ons --no-install"
                 result = run_as_user(fallback_cmd, cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
                 if result.returncode != 0:
                     raise Exception(f"SvelteKit scaffolding failed: {result.stderr}")
 
-            result = run_as_user("npm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+            result = run_as_user("pnpm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
-                raise Exception(f"SvelteKit npm install failed: {result.stderr}")
+                raise Exception(f"SvelteKit pnpm install failed: {result.stderr}")
 
             pkg_path = site_base_dir / "package.json"
             if pkg_path.exists():
@@ -732,7 +732,7 @@ class SvelteKitSiteCreator(SiteCreator):
                     vite_config.write_text(content)
 
             messages.append(f"[green]SvelteKit project created successfully![/green]")
-            messages.append(f"[yellow]Node process prepared. Run 'wslaragon node start {site_name}' to serve 'npm run dev'.[/yellow]")
+            messages.append(f"[yellow]Node process prepared. Run 'wslaragon node start {site_name}' to serve 'pnpm run dev'.[/yellow]")
 
         except Exception as e:
             raise Exception(f"SvelteKit project creation failed: {str(e)}")
@@ -765,18 +765,18 @@ class AstroSiteCreator(SiteCreator):
         try:
             run_as_user = self._prepare_run_as_user(site_base_dir)
 
-            scaffold_cmd = f"npm create astro@latest . -- --template {astro_template} --no-install --no-git --yes"
+            scaffold_cmd = f"pnpm create astro@latest . --template {astro_template} --no-install --no-git --yes"
             result = run_as_user(scaffold_cmd, cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             
             if result.returncode != 0:
-                scaffold_cmd = f"npm create astro@latest . --yes"
+                scaffold_cmd = f"pnpm create astro@latest . --yes"
                 result = run_as_user(scaffold_cmd, cwd=str(site_base_dir), input=f"{astro_template}\n\n", capture_output=True, text=True, timeout=120)
                 if result.returncode != 0:
                     raise Exception(f"Astro scaffolding failed: {result.stderr}")
             
-            result = run_as_user("npm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+            result = run_as_user("pnpm install", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
-                raise Exception(f"Astro npm install failed: {result.stderr}")
+                raise Exception(f"Astro pnpm install failed: {result.stderr}")
             
             pkg_path = site_base_dir / "package.json"
             if pkg_path.exists():
@@ -792,7 +792,7 @@ class AstroSiteCreator(SiteCreator):
                 with open(pkg_path, 'w') as f:
                     json.dump(pkg, f, indent=2)
             
-            result = run_as_user("npm run build", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+            result = run_as_user("pnpm run build", cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
                 raise Exception(f"Astro build failed: {result.stderr}")
             
@@ -802,7 +802,7 @@ class AstroSiteCreator(SiteCreator):
             
             messages.append(f"[green]Astro ({astro_template}) project created successfully![/green]")
             messages.append(f"[green]Static site built -> dist/ ({dist_dir})[/green]")
-            messages.append(f"[dim]Dev mode: npm run dev (from {site_base_dir})[/dim]")
+            messages.append(f"[dim]Dev mode: pnpm run dev (from {site_base_dir})[/dim]")
             
         except subprocess.CalledProcessError as e:
             raise Exception(f"Astro project creation failed: {str(e)}")
@@ -1326,26 +1326,26 @@ const endpoints = getConfiguredEndpoints();
             # Install dependencies
             if os.geteuid() == 0 and current_user:
                 result = subprocess.run(
-                    ['runuser', '-l', current_user, '-c', 'npm install'],
+                    ['runuser', '-l', current_user, '-c', 'pnpm install'],
                     cwd=str(site_base_dir), capture_output=True, text=True, timeout=180
                 )
             else:
-                result = subprocess.run(['npm', 'install'], cwd=str(site_base_dir), capture_output=True, text=True, timeout=180)
+                result = subprocess.run(['pnpm', 'install'], cwd=str(site_base_dir), capture_output=True, text=True, timeout=180)
             if result.returncode != 0:
-                messages.append(f"[yellow]npm install had warnings[/yellow]")
+                messages.append(f"[yellow]pnpm install had warnings[/yellow]")
             
             # Build static site
             if os.geteuid() == 0 and current_user:
                 build_result = subprocess.run(
-                    ['runuser', '-l', current_user, '-c', 'npm run build'],
+                    ['runuser', '-l', current_user, '-c', 'pnpm run build'],
                     cwd=str(site_base_dir), capture_output=True, text=True, timeout=120
                 )
             else:
-                build_result = subprocess.run(['npm', 'run', 'build'], cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
+                build_result = subprocess.run(['pnpm', 'run', 'build'], cwd=str(site_base_dir), capture_output=True, text=True, timeout=120)
             
             dist_dir = site_base_dir / "dist"
             if build_result.returncode != 0 or not dist_dir.exists():
-                messages.append(f"[yellow]Build failed — run 'npm run build' manually from {site_base_dir}[/yellow]")
+                messages.append(f"[yellow]Build failed — run 'pnpm run build' manually from {site_base_dir}[/yellow]")
             else:
                 messages.append(f"[green]Static site built -> dist/ ({dist_dir})[/green]")
             
@@ -1355,7 +1355,7 @@ const endpoints = getConfiguredEndpoints();
             messages.append(f"[green]Astro Headless project created successfully![/green]")
             messages.append(f"[yellow]Edit .env to configure your API endpoints[/yellow]")
             messages.append(f"[yellow]Add API proxies: wslaragon site api add {site_name} /api https://api.{domain}/api[/yellow]")
-            messages.append(f"[dim]Dev mode: npm run dev (from {site_base_dir})[/dim]")
+            messages.append(f"[dim]Dev mode: pnpm run dev (from {site_base_dir})[/dim]")
             
         except subprocess.CalledProcessError as e:
             raise Exception(f"Astro Headless project creation failed: {str(e)}")

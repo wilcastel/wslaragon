@@ -262,6 +262,9 @@ class TestCreateSiteWithProxyPort:
 
         assert result["success"] is True
         assert result["site"]["proxy_port"] == 3000
+        document_root = Path(result["site"]["document_root"])
+        assert (document_root / "app.js").exists()
+        assert (document_root / "package.json").exists()
 
     @patch("subprocess.run")
     def test_create_site_with_python_auto_assigns_port(self, mock_run, site_manager):
@@ -272,6 +275,7 @@ class TestCreateSiteWithProxyPort:
 
         assert result["success"] is True
         assert result["site"]["proxy_port"] == 8000
+        assert (Path(result["site"]["document_root"]) / "main.py").exists()
 
     @patch("subprocess.run")
     def test_create_site_with_explicit_proxy_port(self, mock_run, site_manager):

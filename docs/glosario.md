@@ -29,7 +29,7 @@ Gestión de aplicaciones back-end (Node, Python) con PM2.
 | Comando | Argumentos | Descripción |
 | :--- | :--- | :--- |
 | `node list` | - | Lista procesos activos en PM2. |
-| `node start` | `<site_name>` | Inicia la aplicación del sitio (app.js, npm start, main.py). |
+| `node start` | `<site_name>` | Inicia la aplicación del sitio (app.js, pnpm start, main.py). |
 | `node stop` | `<site_name>` | Detiene el proceso del sitio. |
 | `node restart` | `<site_name>` | Reinicia el proceso del sitio. |
 | `node delete` | `<site_name>` | Elimina el proceso de la lista y lo detiene. |

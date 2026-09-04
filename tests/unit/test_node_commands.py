@@ -223,7 +223,7 @@ class TestNodeStartCommand:
         mock_deps['pm2'].save.assert_called_once()
 
     def test_node_start_with_package_json_fallback(self, runner, mock_deps, tmp_path):
-        """Test 'node start' falls back to npm start when package.json exists"""
+        """Test 'node start' falls back to pnpm start when package.json exists"""
         web_root = tmp_path / "web" / "testsite"
         web_root.mkdir(parents=True)
         package_json = web_root / "package.json"
@@ -242,7 +242,7 @@ class TestNodeStartCommand:
         result = runner.invoke(node, ['start', 'testsite'])
 
         assert result.exit_code == 0
-        assert 'npm start' in result.output.lower() or 'Process' in result.output
+        assert 'pnpm start' in result.output.lower() or 'Process' in result.output
 
     def test_node_start_with_python_main(self, runner, mock_deps, tmp_path):
         """Test 'node start' starts Python main.py"""
@@ -646,7 +646,7 @@ class TestNodeStartEdgeCases:
         }
         mock_deps['pm2'].start_process.return_value = {
             'success': False,
-            'error': "PM2 not found. Install it with 'npm install -g pm2'"
+            'error': "PM2 not found. Install it with 'pnpm install -g pm2'"
         }
 
         from wslaragon.cli.node_commands import node

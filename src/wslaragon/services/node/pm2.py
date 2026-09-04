@@ -32,7 +32,7 @@ class PM2Manager:
             Dict with 'success', 'data', and 'error' keys
         """
         try:
-            cmd = ['pm2'] + args + ['--json']
+            cmd = ['pm2'] + args
             run_env = os.environ.copy()
             if env:
                 run_env.update(env)
@@ -67,8 +67,8 @@ class PM2Manager:
                     'error': f"PM2 output: {result.stdout[:200]}"
                 }
         except FileNotFoundError:
-            logger.error("PM2 not found. Install with 'npm install -g pm2'")
-            return {'success': False, 'error': "PM2 not found. Install it with 'npm install -g pm2'"}
+            logger.error("PM2 not found. Install it with './scripts/setup-omarchy-node.sh'")
+            return {'success': False, 'error': "PM2 not found. Run './scripts/setup-omarchy-node.sh'"}
         except Exception as e:
             logger.error(f"Error running PM2 command: {e}")
             return {'success': False, 'error': str(e)}
@@ -103,10 +103,6 @@ class PM2Manager:
         
         # Build PM2 arguments
         args = ['start', script_path, '--name', site_name]
-        
-        # Set environment variables via PM2 --env flag
-        # PM2 respects PORT env var for most frameworks
-        args.extend(['--env', f'PORT={port}'])
         
         if cwd:
             args.extend(['--cwd', cwd])

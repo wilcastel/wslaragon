@@ -39,7 +39,7 @@ wslaragon site create mi-api --node
 # Ejemplo Python (Auto-puerto desde 8000)
 wslaragon site create mi-script --python
 
-# Ejemplo Vite React (Auto-puerto 3000+, npm install automático)
+# Ejemplo Vite React (Auto-puerto 3000+, pnpm install automático)
 wslaragon site create mi-app-react --vite react
 
 # Ejemplo Astro SSG (sitio estático, nginx sirve dist/, sin proceso)
@@ -58,7 +58,7 @@ wslaragon site api add dash /api https://api.dash.test/api
 wslaragon site create --headless --backend=wordpress --frontend=sveltekit --url=misitio
 ```
 
-> **Astro SSG**: El sitio se compila a HTML estático (`npm run build` → `dist/`). Nginx sirve los archivos directamente, sin proxy ni proceso corriendo. Para desarrollo con HMR, ejecutá `npm run dev` manualmente desde la carpeta del proyecto.
+> **Astro SSG**: El sitio se compila a HTML estático (`pnpm run build` → `dist/`). Nginx sirve los archivos directamente, sin proxy ni proceso corriendo. Para desarrollo con HMR, ejecutá `pnpm run dev` manualmente desde la carpeta del proyecto.
 
 > **⚠️ No confundir `--astro=headless` con `--headless`**: son dos features distintas.
 > - `--astro=headless` es un template de Astro: UN solo sitio con "islas" que consumen APIs externas vía `site api add` (documentado arriba).
@@ -284,7 +284,7 @@ wslaragon ssl delete midominio.test
 
 Para aplicaciones Node.js (Express, NestJS, etc.) o Python que requieren un servidor de aplicaciones persistente, `wslaragon` integra PM2.
 
-> **Nota**: Cuando creas un sitio con `--node`, se genera un archivo `app.js` básico de prueba. Debes reemplazarlo con tu propio proyecto (ej. `npm init`, `npm create vite`, clonar repo) y luego iniciar el proceso.
+> **Nota**: Cuando creas un sitio con `--node`, se genera un archivo `app.js` básico de prueba. Debes reemplazarlo con tu propio proyecto (ej. `pnpm init`, `pnpm create vite`, clonar repo) y luego iniciar el proceso.
 
 ### 1. Listar procesos
 ```bash
@@ -292,7 +292,7 @@ wslaragon node list
 ```
 
 ### 2. Iniciar aplicación
-Detecta automáticamente `app.js`, `main.py` o `npm start` en la carpeta del sitio.
+Detecta automáticamente `app.js`, `main.py` o `pnpm start` en la carpeta del sitio.
 ```bash
 wslaragon node start mi-app-node
 ```

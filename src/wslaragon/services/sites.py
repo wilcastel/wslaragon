@@ -161,14 +161,13 @@ class SiteManager:
                 web_root.mkdir(exist_ok=True, parents=True)
                 messages.append(f"[green]Created public folder: {web_root}[/green]")
             # IMPORTANT: For Astro SSG we must NOT pre-create dist/ before scaffolding.
-            # `npm create astro@latest .` writes to a random subfolder when cwd is not empty.
+            # `pnpm create astro@latest .` writes to a random subfolder when cwd is not empty.
             elif not use_public and not web_root.exists() and not is_astro_ssg:
                 web_root.mkdir(exist_ok=True, parents=True)
 
 # Use Strategy pattern for site creation
-            # Run creator for all sites that have a site_type or template.
-            # Generic proxy-only sites (node/python without template) skip scaffolding.
-            needs_scaffolding = site_type in ('html', 'wordpress', 'phpmyadmin', 'laravel') or \
+            # Run creator for all sites that have a site type or template.
+            needs_scaffolding = site_type in ('html', 'wordpress', 'phpmyadmin', 'laravel', 'node', 'python') or \
                                 site_type and site_type.isdigit() or \
                                 vite_template or astro_template
             

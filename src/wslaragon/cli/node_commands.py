@@ -62,7 +62,7 @@ def list_node():
 @node.command('start')
 @click.argument('site_name')
 def start_node(site_name):
-    """Start app for a site (looks for app.js/server.js/npm start)"""
+    """Start app for a site (looks for app.js/main.py/pnpm start)"""
     config = Config()
     nginx = NginxManager(config)
     # But we can read sites.json directly or via SiteManager
@@ -81,10 +81,10 @@ def start_node(site_name):
     
     # Heuristic to find entry point
     web_root = Path(site['document_root'])
-    script_to_run = "npm"
+    script_to_run = "pnpm"
     
     # Simplified logic: 
-    # If package.json exists -> pm2 start npm --name "site" -- start
+    # If package.json exists -> pm2 start pnpm --name "site" -- start
     # If app.js exists -> pm2 start app.js --name "site"
     
     if (web_root / "app.js").exists():
@@ -94,7 +94,7 @@ def start_node(site_name):
         # For python we need interpreter
         # This will be handled by auto-detection or we can force it
         
-    # We'll use the generic PM2 start logic we built, but we need to refine it for 'npm' case vs 'file' case
+    # We'll use the generic PM2 start logic we built, but we need to refine it for 'pnpm' case vs 'file' case
     # The current PM2Manager.start_process assumes a file path.
     
     # Let's trust PM2 to be smart or just point to the likely entry file if we created it.
@@ -106,11 +106,11 @@ def start_node(site_name):
         if (web_root / "app.js").exists():
              result = pm2.start_process(site_name, str(web_root / "app.js"), site['proxy_port'], cwd=str(web_root))
         elif (web_root / "package.json").exists():
-             # Fallback to npm start
-             console.print("[yellow]Notice: package.json found but no app.js. Attempting to start 'npm start' via PM2...[/yellow]")
+             # Fallback to pnpm start
+             console.print("[yellow]Notice: package.json found but no app.js. Attempting to start 'pnpm start' via PM2...[/yellow]")
              # We must pass --cwd so PM2 finds package.json
              # Also --port env var is good practice
-             result = pm2._run_pm2(['start', 'npm', '--name', site_name, '--cwd', str(web_root), '--', 'start'])
+             result = pm2._run_pm2(['start', 'pnpm', '--name', site_name, '--cwd', str(web_root), '--', 'start'])
         elif (web_root / "main.py").exists():
              result = pm2.start_process(site_name, str(web_root / "main.py"), site['proxy_port'], interpreter='python3', cwd=str(web_root))
         else:

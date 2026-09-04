@@ -108,3 +108,22 @@ Nginx `public/` document root, local domain, and HTTPS certificate:
 Open `https://myapp.test`. The generated `.env` uses the configured Omarchygon
 MySQL host, port, username, and password. To suppress database creation, pass
 `--no-mysql` explicitly.
+
+## Phase 5: Node.js and PM2
+
+Install the native Arch Node.js runtime, pnpm, and PM2 process manager:
+
+```bash
+./scripts/setup-omarchy-node.sh
+```
+
+Create a basic Node.js application with an automatically allocated port,
+Nginx reverse proxy, local domain, and HTTPS certificate, then start it:
+
+```bash
+.venv/bin/wslaragon site create node-demo --node
+.venv/bin/wslaragon node start node-demo
+```
+
+Open `https://node-demo.test`. Process lifecycle is managed with `node list`,
+`node stop`, `node restart`, and `node delete`.
