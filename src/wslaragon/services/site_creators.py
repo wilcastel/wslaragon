@@ -1328,58 +1328,33 @@ class PhpMyAdminSiteCreator(SiteCreator):
         web_root = self.web_root
         site_name = self.site_name
         current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+        web_user = self.config.get('nginx.user', 'www-data')
         
         # Download phpMyAdmin
         pma_version = '5.2.2'
         pma_tar_path = f'/tmp/phpMyAdmin-{site_name}.tar.xz'
         pma_url = f'https://files.phpmyadmin.net/phpMyAdmin/{pma_version}/phpMyAdmin-{pma_version}-all-languages.tar.xz'
-        
-        # Download
-        result = subprocess.run(
-            ['wget', '-q', '-O', pma_tar_path, pma_url],
-            capture_output=True, text=True
-        )
-        if result.returncode != 0:
-            # Fallback to .tar.gz
-            pma_url_gz = f'https://files.phpmyadmin.net/phpMyAdmin/{pma_version}/phpMyAdmin-{pma_version}-all-languages.tar.gz'
-            result = subprocess.run(
-                ['wget', '-q', '-O', pma_tar_path, pma_url_gz],
-                capture_output=True, text=True
-            )
-            if result.returncode != 0:
-                raise Exception(f"Failed to download phpMyAdmin: {result.stderr}")
-        
-        # Extract
-        result = subprocess.run(
-            ['tar', '-xf', pma_tar_path, '-C', '/tmp'],
-            capture_output=True, text=True,
-            cwd='/tmp'
-        )
-        if result.returncode != 0:
-            raise Exception(f"Failed to extract phpMyAdmin: {result.stderr}")
-        
-        # Find extracted directory
-        pma_extracted = Path(f'/tmp/phpMyAdmin-{pma_version}-all-languages')
-        if not pma_extracted.exists():
-            # Try to find it
-            pma_dirs = list(Path('/tmp').glob('phpMyAdmin-*-all-languages'))
-            if pma_dirs:
-                pma_extracted = pma_dirs[0]
-            else:
-                raise Exception("Could not find extracted phpMyAdmin directory")
-        
-        # Clear web_root and copy files
-        if web_root.exists():
-            shutil.rmtree(str(web_root))
-        
-        subprocess.run(['cp', '-r', f'{pma_extracted}/.', str(web_root)], check=True)
-        subprocess.run(['rm', '-rf', str(pma_extracted)], check=False)
-        subprocess.run(['rm', '-f', pma_tar_path], check=False)
-        
+        system_pma = Path('/usr/share/webapps/phpMyAdmin')
+
+        # Arch ships a maintained phpMyAdmin package. Prefer it on Omarchy so
+        # site creation is fast, reproducible, and does not depend on a remote
+        # download server.
+        if self.config.get('platform.name') == 'omarchy':
+            if not system_pma.exists():
+                raise Exception(
+                    "phpMyAdmin is not installed; run: omarchy pkg add phpmyadmin"
+                )
+            if web_root.exists():
+                shutil.rmtree(str(web_root))
+            shutil.copytree(system_pma, web_root)
+            pma_version = 'system'
+        else:
+            self._download_phpmyadmin(pma_url, pma_tar_path, pma_version, web_root)
+
         # Set permissions
-        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:www-data', str(web_root)], check=True)
+        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{web_user}', str(web_root)], check=True)
         subprocess.run(['sudo', 'chmod', '-R', '755', str(web_root)], check=True)
-        
+
         # Create blowfish_secret for cookie auth
         blowfish_secret = secrets.token_urlsafe(32)
 
@@ -1395,8 +1370,8 @@ class PhpMyAdminSiteCreator(SiteCreator):
 $cfg['Servers'][1]['auth_type'] = 'cookie';
 
 // Server settings
-$cfg['Servers'][1]['host'] = 'localhost';
-$cfg['Servers'][1]['port'] = '3306';
+$cfg['Servers'][1]['host'] = '{self.config.get('mysql.host', 'localhost')}';
+$cfg['Servers'][1]['port'] = '{self.config.get('mysql.port', 3306)}';
 $cfg['Servers'][1]['connect_type'] = 'tcp';
 $cfg['Servers'][1]['compress'] = false;
 
@@ -1425,17 +1400,72 @@ $cfg['NavigationDBSeparator'] = '_';
 // Hide databases pattern (system databases)
 // $cfg['Servers'][1]['hide_db'] = '^(information_schema|performance_schema|mysql|sys)$';
 ?>"""
-        
+
         with open(web_root / "config.inc.php", 'w') as f:
             f.write(config_content)
-        
+
         # Create tmp directory for phpMyAdmin
         tmp_dir = web_root / 'tmp'
         tmp_dir.mkdir(exist_ok=True)
-        subprocess.run(['sudo', 'chown', '-R', f'www-data:www-data', str(tmp_dir)], check=False)
-        
+        subprocess.run(['sudo', 'chown', '-R', f'{web_user}:{web_user}', str(tmp_dir)], check=False)
+
         return [f"[green]phpMyAdmin {pma_version} installed successfully![/green]",
                 f"[yellow]Access at: https://{site_name}{self.tld}[/yellow]"]
+
+    @staticmethod
+    def _download_phpmyadmin(pma_url: str, pma_tar_path: str,
+                             pma_version: str, web_root: Path) -> None:
+        """Download phpMyAdmin for non-Omarchy platforms."""
+
+        def download_command(url: str) -> List[str]:
+            if shutil.which('wget'):
+                return ['wget', '-q', '-O', pma_tar_path, url]
+            if shutil.which('curl'):
+                return ['curl', '-fsSL', '-o', pma_tar_path, url]
+            raise Exception("phpMyAdmin download requires curl or wget")
+
+        # Download
+        result = subprocess.run(
+            download_command(pma_url),
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            # Fallback to .tar.gz
+            pma_url_gz = f'https://files.phpmyadmin.net/phpMyAdmin/{pma_version}/phpMyAdmin-{pma_version}-all-languages.tar.gz'
+            result = subprocess.run(
+                download_command(pma_url_gz),
+                capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                raise Exception(f"Failed to download phpMyAdmin: {result.stderr}")
+
+        # Extract
+        result = subprocess.run(
+            ['tar', '-xf', pma_tar_path, '-C', '/tmp'],
+            capture_output=True, text=True,
+            cwd='/tmp'
+        )
+        if result.returncode != 0:
+            raise Exception(f"Failed to extract phpMyAdmin: {result.stderr}")
+
+        # Find extracted directory
+        pma_extracted = Path(f'/tmp/phpMyAdmin-{pma_version}-all-languages')
+        if not pma_extracted.exists():
+            # Try to find it
+            pma_dirs = list(Path('/tmp').glob('phpMyAdmin-*-all-languages'))
+            if pma_dirs:
+                pma_extracted = pma_dirs[0]
+            else:
+                raise Exception("Could not find extracted phpMyAdmin directory")
+
+        # Clear web_root and copy files
+        if web_root.exists():
+            shutil.rmtree(str(web_root))
+
+        subprocess.run(['cp', '-r', f'{pma_extracted}/.', str(web_root)], check=True)
+        subprocess.run(['rm', '-rf', str(pma_extracted)], check=False)
+        subprocess.run(['rm', '-f', pma_tar_path], check=False)
+
 
 
 class DefaultSiteCreator(SiteCreator):

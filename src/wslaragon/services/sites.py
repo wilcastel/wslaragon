@@ -699,9 +699,10 @@ class SiteManager:
             
             # Get current user
             current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+            web_user = self.config.get('nginx.user', 'www-data')
             
             # Set owner to current_user:www-data
-            cmd_chown = ['sudo', 'chown', '-R', f'{current_user}:www-data', doc_root]
+            cmd_chown = ['sudo', 'chown', '-R', f'{current_user}:{web_user}', doc_root]
             subprocess.run(cmd_chown, check=True, capture_output=True)
             
             # Set permissions to 775 (rwxrwxr-x)
@@ -738,7 +739,7 @@ class SiteManager:
                             f.write(new_content)
                             
                         # Re-apply ownership to wp-config.php just in case
-                        subprocess.run(['sudo', 'chown', f'{current_user}:www-data', str(wp_config)], check=True)
+                        subprocess.run(['sudo', 'chown', f'{current_user}:{web_user}', str(wp_config)], check=True)
                 except Exception:
                     pass # Non-critical failure, continue
             

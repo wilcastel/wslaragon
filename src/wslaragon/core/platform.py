@@ -66,7 +66,8 @@ def platform_defaults(platform: str, home_dir: Path) -> Dict:
             },
             "mysql": {
                 "data_dir": "/var/lib/mysql", "config_file": "/etc/my.cnf.d/server.cnf",
-                "user": "root", "password": "",
+                "user": "root", "password": "", "host": "127.0.0.1", "port": 3306,
+                "backend": "docker", "container": "mariadb11",
             },
             "hosts": {"file": "/etc/hosts", "mode": "local"},
             "windows": {"hosts_file": "/mnt/c/Windows/System32/drivers/etc/hosts"},
@@ -90,7 +91,8 @@ def platform_defaults(platform: str, home_dir: Path) -> Dict:
             "mysql": {
                 "data_dir": "/var/lib/mysql",
                 "config_file": "/etc/mysql/mariadb.conf.d/50-server.cnf",
-                "user": "root", "password": "",
+                "user": "root", "password": "", "host": "localhost", "port": 3306,
+                "backend": "systemd", "service": "mariadb",
             },
             "hosts": {"file": windows_hosts, "mode": "windows"},
             "windows": {"hosts_file": windows_hosts},

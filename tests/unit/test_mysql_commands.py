@@ -285,6 +285,7 @@ class TestMysqlCommandGroup:
         assert 'databases' in result.output
         assert 'create-db' in result.output
         assert 'drop-db' in result.output
+        assert 'status' in result.output
 
     def test_mysql_command_without_subcommand(self, runner):
         from wslaragon.cli.mysql_commands import mysql
@@ -313,6 +314,41 @@ class TestMysqlCommandGroup:
         assert result.exit_code == 0
         assert 'Create' in result.output or 'create' in result.output
         assert 'database' in result.output.lower()
+
+
+class TestMysqlRuntimeCommands:
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    @patch('wslaragon.cli.mysql_commands.MySQLManager')
+    @patch('wslaragon.cli.mysql_commands.Config')
+    def test_status_reports_ready_container(self, mock_config, mock_mysql, runner):
+        config = mock_config.return_value
+        config.get.side_effect = lambda key, default=None: {
+            'mysql.backend': 'docker', 'mysql.container': 'mariadb11'
+        }.get(key, default)
+        manager = mock_mysql.return_value
+        manager.is_running.return_value = True
+        manager.get_version.return_value = '11.8.3-MariaDB'
+
+        from wslaragon.cli.mysql_commands import mysql
+        result = runner.invoke(mysql, ['status'])
+
+        assert result.exit_code == 0
+        assert 'ready' in result.output
+        assert '127.0.0.1:3306' in result.output
+
+    @patch('wslaragon.cli.mysql_commands.MySQLManager')
+    @patch('wslaragon.cli.mysql_commands.Config')
+    def test_start_controls_runtime(self, mock_config, mock_mysql, runner):
+        mock_mysql.return_value.start.return_value = True
+
+        from wslaragon.cli.mysql_commands import mysql
+        result = runner.invoke(mysql, ['start'])
+
+        assert result.exit_code == 0
+        assert 'started' in result.output
 
     def test_mysql_drop_db_help(self, runner):
         from wslaragon.cli.mysql_commands import mysql

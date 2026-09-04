@@ -39,3 +39,33 @@ user home directory through an ACL. It also imports the local CA into Firefox
 and Zen profiles stored below `~/.config/mozilla`, which `mkcert` does not detect
 automatically on every Omarchy installation. Restart an already-open browser
 after the initial setup so it reloads its certificate database.
+
+## Phase 2: MariaDB
+
+The database phase supports both container conventions provided by Omarchy:
+`mariadb11` and `mysql8`, exposed only on `127.0.0.1:3306`. Install or start
+MariaDB with:
+
+```bash
+./scripts/setup-omarchy-mariadb.sh
+```
+
+Verify the runtime and SQL connection, then manage databases:
+
+```bash
+.venv/bin/wslaragon mysql status
+.venv/bin/wslaragon mysql create-db example_db
+.venv/bin/wslaragon mysql databases
+```
+
+Lifecycle commands (`mysql start`, `mysql stop`, and `mysql restart`) control
+the detected Docker engine on Omarchy and retain systemd compatibility on
+WSL/Ubuntu. The setup also enables PHP's `mysqli` extension for phpMyAdmin.
+
+Create the phpMyAdmin virtual host with:
+
+```bash
+.venv/bin/wslaragon site create pma --phpmyadmin
+```
+
+It uses the existing database server and is available at `https://pma.test`.

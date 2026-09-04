@@ -39,13 +39,42 @@ class MySQLManager:
         self.mysql_config_file = Path(config.get('mysql.config_file'))
         self.default_user = config.get('mysql.user', 'root')
         self.default_password = config.get('mysql.password', '')
+        self.host = config.get('mysql.host', 'localhost')
+        self.port = int(config.get('mysql.port', 3306))
+        self.backend = config.get('mysql.backend', 'systemd')
+        self.container = config.get('mysql.container', 'mariadb11')
+        self.service = config.get('mysql.service', 'mysql')
+
+    def _lifecycle_command(self, action: str) -> List[str]:
+        """Build the platform-specific service lifecycle command."""
+        if self.backend == 'docker':
+            return ['sudo', 'docker', action, self._resolve_container()]
+        return ['sudo', 'systemctl', action, self.service]
+
+    def _resolve_container(self) -> str:
+        """Resolve Omarchy's conventional container name from the SQL engine."""
+        version = self.get_version()
+        if version:
+            return 'mariadb11' if 'mariadb' in version.lower() else 'mysql8'
+        return self.container
     
     def is_running(self) -> bool:
         """Check if MySQL service is running"""
         try:
+            if self.backend == 'docker':
+                # A successful SQL handshake is the authoritative health check
+                # and does not require Docker socket permissions or sudo.
+                connection = self.get_connection()
+                if connection:
+                    connection.close()
+                    return True
+                result = subprocess.run(
+                    ['sudo', 'docker', 'inspect', '-f', '{{.State.Running}}', self.container],
+                    capture_output=True, text=True
+                )
+                return result.returncode == 0 and result.stdout.strip() == 'true'
             result = subprocess.run(
-                ['systemctl', 'is-active', 'mysql'],
-                capture_output=True, text=True
+                ['systemctl', 'is-active', self.service], capture_output=True, text=True
             )
             return result.stdout.strip() == 'active'
         except FileNotFoundError:
@@ -58,10 +87,7 @@ class MySQLManager:
     def start(self) -> bool:
         """Start MySQL service"""
         try:
-            result = subprocess.run(
-                ['sudo', 'systemctl', 'start', 'mysql'],
-                capture_output=True, text=True
-            )
+            result = subprocess.run(self._lifecycle_command('start'), capture_output=True, text=True)
             if result.returncode != 0:
                 logger.error(f"Failed to start MySQL: {result.stderr}")
             return result.returncode == 0
@@ -72,10 +98,7 @@ class MySQLManager:
     def stop(self) -> bool:
         """Stop MySQL service"""
         try:
-            result = subprocess.run(
-                ['sudo', 'systemctl', 'stop', 'mysql'],
-                capture_output=True, text=True
-            )
+            result = subprocess.run(self._lifecycle_command('stop'), capture_output=True, text=True)
             if result.returncode != 0:
                 logger.error(f"Failed to stop MySQL: {result.stderr}")
             return result.returncode == 0
@@ -86,10 +109,7 @@ class MySQLManager:
     def restart(self) -> bool:
         """Restart MySQL service"""
         try:
-            result = subprocess.run(
-                ['sudo', 'systemctl', 'restart', 'mysql'],
-                capture_output=True, text=True
-            )
+            result = subprocess.run(self._lifecycle_command('restart'), capture_output=True, text=True)
             if result.returncode != 0:
                 logger.error(f"Failed to restart MySQL: {result.stderr}")
             return result.returncode == 0
@@ -114,7 +134,8 @@ class MySQLManager:
             password = password or self.default_password
             
             connection = pymysql.connect(
-                host='localhost',
+                host=self.host,
+                port=self.port,
                 user=user,
                 password=password,
                 database=database,
