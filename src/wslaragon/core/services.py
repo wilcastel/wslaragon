@@ -5,12 +5,15 @@ from typing import Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 class ServiceManager:
-    def __init__(self):
+    def __init__(self, config=None):
+        php_service = config.get('php.fpm_service', 'php8.3-fpm') if config else 'php8.3-fpm'
+        platform = config.get('platform.name') if config else None
+        redis_service = 'redis' if platform in {'arch', 'omarchy'} else 'redis-server'
         self.services = {
             'nginx': {'service': 'nginx', 'port': 80},
             'mysql': {'service': 'mariadb', 'port': 3306},
-            'php-fpm': {'service': 'php8.3-fpm', 'port': 9000},
-            'redis': {'service': 'redis-server', 'port': 6379}
+            'php-fpm': {'service': php_service, 'port': 9000},
+            'redis': {'service': redis_service, 'port': 6379}
         }
     
     def is_running(self, service_name: str) -> bool:

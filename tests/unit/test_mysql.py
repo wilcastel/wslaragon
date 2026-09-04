@@ -201,7 +201,8 @@ class TestMySQLManagerDockerLifecycle:
         mysql_manager.get_version = MagicMock(return_value=None)
         assert mysql_manager.start() is True
         mock_run.assert_called_once_with(
-            ['sudo', 'docker', 'start', 'mariadb11'], capture_output=True, text=True
+            ['sudo', 'docker', 'start', 'mariadb11'], capture_output=True,
+            text=True, timeout=30
         )
 
     @patch('wslaragon.services.mysql.subprocess.run')
@@ -210,7 +211,8 @@ class TestMySQLManagerDockerLifecycle:
         mysql_manager.get_version = MagicMock(return_value='11.8.3-MariaDB')
         assert mysql_manager.restart() is True
         mock_run.assert_called_once_with(
-            ['sudo', 'docker', 'restart', 'mariadb11'], capture_output=True, text=True
+            ['sudo', 'docker', 'restart', 'mariadb11'], capture_output=True,
+            text=True, timeout=30
         )
 
     @patch('wslaragon.services.mysql.subprocess.run')
@@ -219,7 +221,8 @@ class TestMySQLManagerDockerLifecycle:
         mysql_manager.get_version = MagicMock(return_value='8.4.11')
         assert mysql_manager.stop() is True
         mock_run.assert_called_once_with(
-            ['sudo', 'docker', 'stop', 'mysql8'], capture_output=True, text=True
+            ['sudo', 'docker', 'stop', 'mysql8'], capture_output=True,
+            text=True, timeout=30
         )
 
 

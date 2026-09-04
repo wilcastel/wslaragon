@@ -2,6 +2,28 @@
 
 El comando principal es `wslaragon`. Aquí tienes todos los comandos disponibles y ejemplos de uso.
 
+## Entorno centralizado
+
+```bash
+wslaragon on       # Enciende PHP, MariaDB, Redis opcional, Nginx y PM2
+wslaragon status   # Muestra el estado conjunto sin iniciar servicios
+wslaragon off      # Detiene todo y evita el arranque automático
+```
+
+Docker no se detiene globalmente: `off` sólo para el contenedor de base de
+datos administrado por WSLaragon, evitando afectar otros proyectos.
+
+## Entorno centralizado
+
+```bash
+wslaragon on       # Enciende PHP, MariaDB, Redis opcional, Nginx y PM2
+wslaragon status   # Consulta el estado conjunto sin iniciar servicios
+wslaragon off      # Detiene todo y evita el arranque automático
+```
+
+Docker no se detiene globalmente: `off` sólo para el contenedor de base de
+datos administrado por WSLaragon, evitando afectar otros proyectos.
+
 ## 📁 Gestión de Sitios (`site`)
 
 ### 1. Crear un Sitio

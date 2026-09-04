@@ -19,6 +19,7 @@ from .mysql_commands import mysql
 from .ssl_commands import ssl
 from .node_commands import node
 from .nginx_commands import nginx
+from .runtime_commands import runtime_off, runtime_on, runtime_status
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -139,6 +140,9 @@ cli.add_command(mysql)
 cli.add_command(ssl)
 cli.add_command(node)
 cli.add_command(nginx)
+cli.add_command(runtime_on)
+cli.add_command(runtime_off)
+cli.add_command(runtime_status)
 
 
 def main():

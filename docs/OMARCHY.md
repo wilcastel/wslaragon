@@ -5,6 +5,38 @@ local `.test` domains, trusted HTTPS, Nginx virtual hosts, and static or generic
 PHP document roots. Database provisioning and framework scaffolding remain out
 of scope until later phases.
 
+## Centralized runtime
+
+Keep the development stack stopped when it is not needed:
+
+```bash
+wslaragon on
+wslaragon status
+wslaragon off
+```
+
+`on` starts PHP-FPM, the Omarchy MariaDB container, optional Redis, Nginx and
+the PM2 process list saved by `wslaragon node start`. `off` stops the PM2 daemon,
+Nginx, PHP-FPM, optional Redis and MariaDB. It disables autostart for the native
+web services so they remain stopped after reboot. Docker itself is not stopped,
+because other applications may depend on it.
+
+## Centralized runtime
+
+Keep the development stack stopped when it is not needed:
+
+```bash
+wslaragon on
+wslaragon status
+wslaragon off
+```
+
+`on` starts PHP-FPM, the Omarchy MariaDB container, optional Redis, Nginx and
+the PM2 process list saved by `wslaragon node start`. `off` stops those
+components and disables autostart for the native web services, so they remain
+stopped after reboot. Docker itself is not stopped because unrelated containers
+may depend on it.
+
 ## Global command
 
 Expose the editable virtual-environment installation through the user-local

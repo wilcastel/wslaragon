@@ -87,7 +87,9 @@ class MySQLManager:
     def start(self) -> bool:
         """Start MySQL service"""
         try:
-            result = subprocess.run(self._lifecycle_command('start'), capture_output=True, text=True)
+            result = subprocess.run(
+                self._lifecycle_command('start'), capture_output=True, text=True, timeout=30
+            )
             if result.returncode != 0:
                 logger.error(f"Failed to start MySQL: {result.stderr}")
             return result.returncode == 0
@@ -98,7 +100,9 @@ class MySQLManager:
     def stop(self) -> bool:
         """Stop MySQL service"""
         try:
-            result = subprocess.run(self._lifecycle_command('stop'), capture_output=True, text=True)
+            result = subprocess.run(
+                self._lifecycle_command('stop'), capture_output=True, text=True, timeout=30
+            )
             if result.returncode != 0:
                 logger.error(f"Failed to stop MySQL: {result.stderr}")
             return result.returncode == 0
@@ -109,7 +113,9 @@ class MySQLManager:
     def restart(self) -> bool:
         """Restart MySQL service"""
         try:
-            result = subprocess.run(self._lifecycle_command('restart'), capture_output=True, text=True)
+            result = subprocess.run(
+                self._lifecycle_command('restart'), capture_output=True, text=True, timeout=30
+            )
             if result.returncode != 0:
                 logger.error(f"Failed to restart MySQL: {result.stderr}")
             return result.returncode == 0
@@ -140,6 +146,9 @@ class MySQLManager:
                 password=password,
                 database=database,
                 charset='utf8mb4',
+                connect_timeout=3,
+                read_timeout=5,
+                write_timeout=5,
                 cursorclass=pymysql.cursors.DictCursor
             )
             return connection

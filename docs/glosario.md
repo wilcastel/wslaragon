@@ -2,6 +2,22 @@
 
 Este documento sirve como referencia completa de todos los comandos disponibles en el CLI de `wslaragon`.
 
+## ⚡ Entorno centralizado
+
+| Comando | Argumentos / Opciones | Descripción |
+| :--- | :--- | :--- |
+| `on` | - | Inicia Nginx, PHP-FPM, MariaDB, Redis opcional y los procesos PM2 guardados. |
+| `off` | - | Detiene el runtime y deshabilita el arranque automático de los servicios web. |
+| `status` | - | Consulta el estado central sin iniciar componentes. |
+
+## ⚡ Entorno centralizado
+
+| Comando | Descripción |
+| :--- | :--- |
+| `on` | Inicia Nginx, PHP-FPM, MariaDB, Redis opcional y los procesos PM2 guardados. |
+| `off` | Detiene el runtime completo y deshabilita el arranque automático de los servicios web. |
+| `status` | Consulta el estado central sin iniciar componentes. |
+
 ## 🏗️ Gestión de Sitios (`wslaragon site`)
 
 Comando principal para la creación y administración de proyectos web.

@@ -157,3 +157,13 @@ class PM2Manager:
         """
         logger.info("Saving PM2 process list")
         return self._run_pm2(['save'])
+
+    def resurrect(self) -> Dict:
+        """Restore the process list saved by ``pm2 save``."""
+        logger.info("Restoring saved PM2 processes")
+        return self._run_pm2(['resurrect'])
+
+    def kill(self) -> Dict:
+        """Stop every PM2 process and its user daemon."""
+        logger.info("Stopping the PM2 daemon")
+        return self._run_pm2(['kill'])
