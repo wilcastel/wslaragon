@@ -550,6 +550,28 @@ class TestCloneSite:
         site_manager.mysql.restore_database.assert_called_once_with("app_db", str(backup))
         assert actions == [{"success": True, "message": "Database imported into app_db"}]
 
+    @patch("wslaragon.services.sites.subprocess.run")
+    def test_setup_clone_generates_key_and_runs_explicit_migrations(
+        self, mock_run, site_manager, tmp_path
+    ):
+        root = tmp_path / "laravel"
+        root.mkdir()
+        (root / "artisan").touch()
+        (root / "composer.json").write_text("{}")
+        (root / ".env.example").write_text("APP_KEY=\n")
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        actions = site_manager._setup_cloned_project(
+            root, {"stack": "laravel", "domain": "app.test", "database": "app_db"},
+            True, True, run_migrations=True
+        )
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        assert ["composer", "install"] in commands
+        assert ["php", "artisan", "key:generate"] in commands
+        assert ["php", "artisan", "migrate"] in commands
+        assert all(action["success"] for action in actions)
+
     @pytest.mark.parametrize(
         ("marker", "expected"),
         [

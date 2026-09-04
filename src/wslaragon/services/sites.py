@@ -298,7 +298,7 @@ class SiteManager:
                    branch: str = None, mysql: bool = None, ssl: bool = True,
                    database_name: str = None, proxy_port: int = None,
                    install_dependencies: bool = False, prepare_env: bool = False,
-                   database_backup: str = None) -> Dict:
+                   database_backup: str = None, run_migrations: bool = False) -> Dict:
         """Clone a Git repository and register it as a configured local site."""
         site_name = self._normalize_site_name(site_name)
         if not site_name or not self._is_valid_site_name(site_name):
@@ -355,7 +355,7 @@ class SiteManager:
                 self._save_sites()
                 result['setup_actions'] = self._setup_cloned_project(
                     destination, result['site'], install_dependencies,
-                    prepare_env, database_backup
+                    prepare_env, database_backup, run_migrations
                 )
             return result
         except subprocess.TimeoutExpired:
@@ -366,20 +366,23 @@ class SiteManager:
             return {'success': False, 'error': str(e)}
 
     def _setup_cloned_project(self, root: Path, site: Dict, install: bool,
-                              prepare_env: bool, backup: str = None) -> List[Dict]:
+                              prepare_env: bool, backup: str = None,
+                              run_migrations: bool = False) -> List[Dict]:
         """Run optional setup without replacing an existing environment file."""
         actions = []
         env_file = root / '.env'
+        env_created = False
         if prepare_env:
             example = root / '.env.example'
             if env_file.exists():
                 actions.append({'success': True, 'message': 'Existing .env preserved'})
             elif example.exists():
                 shutil.copy2(example, env_file)
+                env_created = True
                 actions.append({'success': True, 'message': '.env created from .env.example'})
             else:
                 actions.append({'success': False, 'message': 'No .env.example found'})
-            if env_file.exists() and site.get('stack') == 'laravel':
+            if env_created and site.get('stack') == 'laravel':
                 values = {
                     'APP_URL': f"https://{site['domain']}",
                     'DB_CONNECTION': 'mysql',
@@ -416,12 +419,28 @@ class SiteManager:
                 except (OSError, subprocess.TimeoutExpired) as exc:
                     actions.append({'success': False, 'message': f'{command[0]} failed: {exc}'})
 
+        if env_created and install and site.get('stack') == 'laravel':
+            result = subprocess.run(['php', 'artisan', 'key:generate'], cwd=root, check=False,
+                                    capture_output=True, text=True, timeout=60)
+            actions.append({'success': result.returncode == 0, 'message':
+                            'Laravel application key generated' if result.returncode == 0
+                            else 'Laravel application key could not be generated'})
+
         if backup:
             database = site.get('database')
             restored = bool(database) and self.mysql.restore_database(database, backup)
             actions.append({'success': restored, 'message':
                             f'Database imported into {database}' if restored
                             else 'Database backup could not be imported'})
+        if run_migrations:
+            if site.get('stack') != 'laravel' or not env_file.exists():
+                actions.append({'success': False, 'message': 'Laravel migrations are not applicable'})
+            else:
+                result = subprocess.run(['php', 'artisan', 'migrate'], cwd=root, check=False,
+                                        capture_output=True, text=True, timeout=600)
+                actions.append({'success': result.returncode == 0, 'message':
+                                'Laravel migrations completed' if result.returncode == 0
+                                else (result.stderr.strip() or 'Laravel migrations failed')})
         return actions
 
     @staticmethod
