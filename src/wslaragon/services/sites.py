@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 from datetime import datetime
 
 from ..services.ssl import SSLManager
+from .node.pm2 import PM2Manager
 from .site_creators import database_name_for_site, get_site_creator
 
 logger = logging.getLogger(__name__)
@@ -537,8 +538,21 @@ class SiteManager:
             for name in names_to_delete:
                 info = self.sites[name]
 
+                # Stop and unregister proxy processes before removing Nginx.
+                # A missing PM2 process is harmless: the site may already be stopped.
+                if info.get('proxy_port'):
+                    pm2 = PM2Manager(self.config)
+                    pm2_result = pm2.delete_process(name)
+                    if pm2_result.get('success'):
+                        pm2.save()
+
                 # Remove Nginx configuration
                 self.nginx.remove_site(name)
+
+                # Remove the certificate and local hosts entry together.
+                if info.get('ssl'):
+                    domain = info.get('domain') or f"{name}{self.tld}"
+                    SSLManager(self.config).revoke_certificate(domain)
 
                 # Remove database if requested
                 if remove_database and info.get('database'):

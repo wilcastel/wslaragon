@@ -518,6 +518,37 @@ class TestDeleteSite:
         assert result["success"] is True
         site_manager.mysql.drop_database.assert_not_called()
 
+    @patch("wslaragon.services.sites.SSLManager")
+    @patch("wslaragon.services.sites.PM2Manager")
+    def test_delete_proxy_site_removes_pm2_ssl_and_hosts(self, mock_pm2_class, mock_ssl_class, site_manager):
+        site_manager.sites["todelete"].update({
+            "domain": "todelete.test",
+            "proxy_port": 3000,
+            "ssl": True,
+        })
+        mock_pm2 = mock_pm2_class.return_value
+        mock_pm2.delete_process.return_value = {"success": True}
+
+        result = site_manager.delete_site("todelete")
+
+        assert result["success"] is True
+        mock_pm2.delete_process.assert_called_once_with("todelete")
+        mock_pm2.save.assert_called_once_with()
+        mock_ssl_class.return_value.revoke_certificate.assert_called_once_with("todelete.test")
+
+    @patch("wslaragon.services.sites.SSLManager")
+    @patch("wslaragon.services.sites.PM2Manager")
+    def test_delete_continues_when_pm2_process_is_absent(self, mock_pm2_class, mock_ssl_class, site_manager):
+        site_manager.sites["todelete"].update({"proxy_port": 3000, "ssl": True})
+        mock_pm2 = mock_pm2_class.return_value
+        mock_pm2.delete_process.return_value = {"success": False, "error": "not found"}
+
+        result = site_manager.delete_site("todelete")
+
+        assert result["success"] is True
+        mock_pm2.save.assert_not_called()
+        mock_ssl_class.return_value.revoke_certificate.assert_called_once_with("todelete.test")
+
     @patch("subprocess.run")
     def test_delete_site_handles_exception(self, mock_run, site_manager):
         site_manager.nginx.remove_site.side_effect = Exception("Nginx error")

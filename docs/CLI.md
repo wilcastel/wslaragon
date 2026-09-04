@@ -115,7 +115,9 @@ wslaragon site list
 ```
 
 ### 3. Borrar un Sitio
-Elimina la configuración Nginx, SSL, y opcionalmente los archivos y la base de datos.
+Elimina la configuración Nginx, el certificado SSL y las entradas locales de
+`hosts`. Si el sitio usa un proxy Node/Astro/SvelteKit, también detiene y retira
+su proceso de PM2. Los archivos y la base de datos son opcionales.
 
 ```bash
 # Borrar sitio (pregunta si borrar archivos)
@@ -129,6 +131,10 @@ wslaragon site delete mi-web
 ```
 
 > **Nota**: El comando pregunta interactivamente si deseás eliminar los archivos del proyecto. La base de datos se elimina solo con `--remove-database`.
+
+> Si el proceso ya no existe en PM2, la eliminación continúa normalmente. Al
+> terminar, la nueva lista de procesos se guarda para que el sitio tampoco
+> reaparezca después de reiniciar la sesión.
 
 > **⚠️ Sitios headless**: Si `<name>` es una mitad de un par headless (`--headless`), el comando avisa cuál es el sitio pareado y, al confirmar, **elimina ambas mitades** junto con la carpeta raíz compartida.
 
