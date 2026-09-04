@@ -7,7 +7,7 @@ if [[ ! -d /usr/share/omarchy ]]; then
 fi
 
 echo "Installing the Phase 1 web stack..."
-omarchy pkg add nginx php-fpm mkcert nss
+omarchy pkg add nginx php-fpm mkcert nss acl
 
 echo "Preparing Nginx virtual-host directories..."
 sudo install -d -m 755 /etc/nginx/sites-available /etc/nginx/sites-enabled

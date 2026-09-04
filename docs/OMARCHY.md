@@ -1,25 +1,35 @@
 # Omarchy support
 
-Omarchy support is being delivered in focused phases. The first phase provides
-local `.test` domains, trusted HTTPS, Nginx virtual hosts, and static or generic
-PHP document roots. Database provisioning and framework scaffolding remain out
-of scope until later phases.
+Omarchygon provides local `.test` domains, trusted HTTPS, Nginx, PHP,
+MariaDB/MySQL, phpMyAdmin, Composer, WordPress, Node.js, pnpm and PM2.
 
-## Centralized runtime
+## Unified installation
 
-Keep the development stack stopped when it is not needed:
+From a cloned repository, install or update the complete environment with:
 
 ```bash
-wslaragon on
-wslaragon status
-wslaragon off
+./scripts/install-omarchygon.sh
 ```
 
-`on` starts PHP-FPM, the Omarchy MariaDB container, optional Redis, Nginx and
-the PM2 process list saved by `wslaragon node start`. `off` stops the PM2 daemon,
-Nginx, PHP-FPM, optional Redis and MariaDB. It disables autostart for the native
-web services so they remain stopped after reboot. Docker itself is not stopped,
-because other applications may depend on it.
+Run it as your regular user; it requests `sudo` only when required. The script
+is idempotent, installs the editable Python CLI in `.venv`, exposes
+`wslaragon` through `~/.local/bin`, validates the environment, and leaves all
+WSLaragon services stopped. Use `wslaragon on` when you begin working.
+
+If both Omarchy database containers already exist, the installer stops safely
+and requires an explicit selection because their Docker volumes may contain
+different data:
+
+```bash
+./scripts/install-omarchygon.sh --database mysql8
+# or
+./scripts/install-omarchygon.sh --database mariadb11
+```
+
+Optional components can be omitted with `--skip-database`, `--skip-laravel`,
+`--skip-wordpress`, `--skip-node`, or `--skip-pma`. Skipping the database also
+skips its dependent Laravel, WordPress and phpMyAdmin setup checks. See all
+options with `./scripts/install-omarchygon.sh --help`.
 
 ## Centralized runtime
 

@@ -77,6 +77,25 @@ chmod +x mkcert && sudo mv mkcert /usr/local/bin/
 
 ## 🚀 Instalación
 
+### Omarchy / Omarchygon
+
+En Omarchy, un solo instalador prepara el entorno completo y lo deja apagado
+hasta que se necesite:
+
+```bash
+git clone https://github.com/wilcastel/wslaragon.git
+cd wslaragon
+./scripts/install-omarchygon.sh
+wslaragon on
+```
+
+Si ya existen los contenedores `mysql8` y `mariadb11`, selecciona expresamente
+el que contiene tus datos, por ejemplo
+`./scripts/install-omarchygon.sh --database mysql8`. Consulta la
+[guía de Omarchy](docs/OMARCHY.md) para opciones y actualizaciones seguras.
+
+### WSL2 / Ubuntu
+
 Ver **[docs/INSTALL.md](docs/INSTALL.md)** para la guía completa (setup automático con `scripts/setup-env.sh`, instalación manual con `pip install -e .`, y verificación con `scripts/test-setup.sh`).
 
 Resumen rápido:
