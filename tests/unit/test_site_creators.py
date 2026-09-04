@@ -177,11 +177,12 @@ class TestWordPressSiteCreator:
         )
 
     def test_wp_creator_calls_wget_for_download(self, wp_creator, tmp_path):
-        """Test that WordPressSiteCreator downloads WordPress via wget"""
+        """Test that WordPressSiteCreator prefers wget when available"""
         web_root = tmp_path / "web" / "wpsite"
         web_root.mkdir(parents=True, exist_ok=True)
 
-        with patch('subprocess.run') as mock_run:
+        with patch('subprocess.run') as mock_run, \
+             patch('wslaragon.services.site_creators.shutil.which', side_effect=lambda name: name == 'wget'):
             mock_run.return_value = MagicMock(returncode=0)
 
             wp_creator.create()
@@ -190,6 +191,53 @@ class TestWordPressSiteCreator:
             calls = [str(c) for c in mock_run.call_args_list]
             wget_called = any('wget' in str(call) for call in calls)
             assert wget_called
+
+    def test_wp_creator_falls_back_to_curl(self, wp_creator, tmp_path):
+        """Test that WordPressSiteCreator uses curl when wget is unavailable"""
+        web_root = tmp_path / "web" / "wpsite"
+        web_root.mkdir(parents=True, exist_ok=True)
+
+        with patch('subprocess.run') as mock_run, \
+             patch('wslaragon.services.site_creators.shutil.which', side_effect=lambda name: name == 'curl'):
+            mock_run.return_value = MagicMock(returncode=0)
+
+            wp_creator.create()
+
+        calls = [str(call) for call in mock_run.call_args_list]
+        assert any('curl' in call and 'latest.tar.gz' in call for call in calls)
+
+    def test_wp_creator_copies_arch_package_on_omarchy(self, tmp_path, mock_config):
+        """Test that Omarchy sites are copied from the installed Arch package"""
+        source = tmp_path / "system-wordpress"
+        source.mkdir()
+        (source / "wp-settings.php").write_text("<?php // WordPress")
+        web_root = tmp_path / "web" / "wpsite"
+        creator = WordPressSiteCreator(
+            config=mock_config,
+            site_name="wpsite",
+            web_root=web_root,
+            site_base_dir=tmp_path / "sites" / "wpsite",
+            tld=".test"
+        )
+        creator.SYSTEM_WORDPRESS_DIR = source
+        original_get = mock_config.get.side_effect
+        mock_config.get.side_effect = lambda key, default=None: (
+            'omarchy' if key == 'platform.name' else
+            '127.0.0.1' if key == 'mysql.host' else
+            3306 if key == 'mysql.port' else
+            'http' if key == 'nginx.user' else
+            original_get(key, default)
+        )
+
+        with patch('subprocess.run'):
+            creator.create()
+
+        assert (web_root / "wp-settings.php").exists()
+        config = (web_root / "wp-config.php").read_text()
+        assert "define( 'DB_HOST', '127.0.0.1:3306' );" in config
+        assert "define( 'FORCE_SSL_ADMIN', true );" in config
+        assert config.count("_KEY'") == 4
+        assert config.count("_SALT'") == 4
 
     def test_wp_creator_creates_wp_config(self, wp_creator, tmp_path):
         """Test that WordPressSiteCreator creates wp-config.php"""

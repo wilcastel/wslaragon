@@ -238,6 +238,8 @@ document.addEventListener('DOMContentLoaded', function() {{
 
 class WordPressSiteCreator(SiteCreator):
     """Create a WordPress site."""
+    SYSTEM_WORDPRESS_DIR = Path('/usr/share/webapps/wordpress')
+
     def __init__(self, config, site_name: str, web_root: Path, site_base_dir: Path, tld: str,
                  proxy_port: int = None, database_name: str = None):
         super().__init__(config, site_name, web_root, site_base_dir, tld, proxy_port)
@@ -248,37 +250,63 @@ class WordPressSiteCreator(SiteCreator):
         web_root = self.web_root
         site_name = self.site_name
         database_name = self.database_name or f"{site_name.replace('.', '_')}_db"
+        db_user = self.config.get('mysql.user', 'root')
         db_password = self.config.get('mysql.password')
+        db_host = self.config.get('mysql.host', 'localhost')
+        db_port = self.config.get('mysql.port', 3306)
         current_user = os.getenv('SUDO_USER') or os.getenv('USER')
+        web_user = self.config.get('nginx.user', 'www-data')
         
         if web_root.exists():
             shutil.rmtree(str(web_root))
         
         web_root.mkdir(parents=True)
         
-        wp_tar_path = f'/tmp/wordpress-{site_name}.tar.gz'
-        subprocess.run(['wget', '-q', '-O', wp_tar_path, 'https://wordpress.org/latest.tar.gz'], check=True)
-        subprocess.run(['sudo', 'tar', '-xzf', wp_tar_path, '-C', str(web_root.parent)], check=True)
+        if self.config.get('platform.name') == 'omarchy':
+            if not self.SYSTEM_WORDPRESS_DIR.exists():
+                raise Exception("WordPress is not installed; run: omarchy pkg add wordpress")
+            shutil.rmtree(str(web_root))
+            shutil.copytree(self.SYSTEM_WORDPRESS_DIR, web_root)
+        else:
+            wp_tar_path = f'/tmp/wordpress-{site_name}.tar.gz'
+            if shutil.which('wget'):
+                download_cmd = ['wget', '-q', '-O', wp_tar_path, 'https://wordpress.org/latest.tar.gz']
+            elif shutil.which('curl'):
+                download_cmd = ['curl', '-fsSL', '-o', wp_tar_path, 'https://wordpress.org/latest.tar.gz']
+            else:
+                raise Exception("WordPress download requires curl or wget")
+            subprocess.run(download_cmd, check=True)
+            subprocess.run(['sudo', 'tar', '-xzf', wp_tar_path, '-C', str(web_root.parent)], check=True)
+
+            wordpress_dir = web_root.parent / 'wordpress'
+            if wordpress_dir.exists():
+                subprocess.run(['sudo', 'cp', '-r', f'{wordpress_dir}/.', str(web_root)], check=True)
+                subprocess.run(['sudo', 'rm', '-rf', str(wordpress_dir)], check=True)
+            subprocess.run(['sudo', 'rm', '-f', wp_tar_path], check=True)
         
-        wordpress_dir = web_root.parent / 'wordpress'
-        if wordpress_dir.exists():
-            subprocess.run(['sudo', 'cp', '-r', f'{wordpress_dir}/.', str(web_root)], check=True)
-            subprocess.run(['sudo', 'rm', '-rf', str(wordpress_dir)], check=True)
-        subprocess.run(['sudo', 'rm', '-f', wp_tar_path], check=True)
-        
-        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:www-data', str(web_root)], check=True)
+        subprocess.run(['sudo', 'chown', '-R', f'{current_user}:{web_user}', str(web_root)], check=True)
         subprocess.run(['sudo', 'chmod', '-R', '755', str(web_root)], check=True)
+
+        salt_names = (
+            'AUTH_KEY', 'SECURE_AUTH_KEY', 'LOGGED_IN_KEY', 'NONCE_KEY',
+            'AUTH_SALT', 'SECURE_AUTH_SALT', 'LOGGED_IN_SALT', 'NONCE_SALT'
+        )
+        salts = '\n'.join(
+            f"define( '{name}', '{secrets.token_urlsafe(64)}' );" for name in salt_names
+        )
         
         wp_content = f"""<?php
 /**
  * The base configuration for WordPress
  */
 define( 'DB_NAME', '{database_name}' );
-define( 'DB_USER', 'root' );
+define( 'DB_USER', '{db_user}' );
 define( 'DB_PASSWORD', '{db_password}' );
-define( 'DB_HOST', 'localhost' );
+define( 'DB_HOST', '{db_host}:{db_port}' );
 define( 'DB_CHARSET', 'utf8mb4' );
 define( 'DB_COLLATE', 'utf8mb4_unicode_ci' );
+
+{salts}
 
 $table_prefix = 'wp_';
 
@@ -287,6 +315,7 @@ define( 'WP_DEBUG_LOG', true );
 define( 'WP_DEBUG_DISPLAY', false );
 define( 'WP_MEMORY_LIMIT', '256M' );
 define( 'FS_METHOD', 'direct' );
+define( 'FORCE_SSL_ADMIN', true );
 
 if ( ! defined( 'ABSPATH' ) ) {{
     define( 'ABSPATH', __DIR__ . '/' );

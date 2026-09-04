@@ -69,3 +69,23 @@ Create the phpMyAdmin virtual host with:
 ```
 
 It uses the existing database server and is available at `https://pma.test`.
+
+## Phase 3: WordPress
+
+Install the maintained Arch WordPress distribution once:
+
+```bash
+./scripts/setup-omarchy-wordpress.sh
+```
+
+Create an isolated WordPress project with its database, Nginx virtual host,
+local DNS entry, and HTTPS certificate:
+
+```bash
+.venv/bin/wslaragon site create myblog --wordpress
+```
+
+Open `https://myblog.test` to complete WordPress's browser-based installation.
+On Omarchy, each project receives a copy of `/usr/share/webapps/wordpress` and
+uses the Docker database through `127.0.0.1:3306`. Generated `wp-config.php`
+files include unique authentication salts and force HTTPS for the admin area.
