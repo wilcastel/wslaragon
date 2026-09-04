@@ -3,9 +3,9 @@ name: CI
 
 on:
   push:
-    branches: [master, main, develop]
+    branches: [master, main, develop, omarchygon]
   pull_request:
-    branches: [master, main, develop]
+    branches: [master, main, develop, omarchygon]
 
 jobs:
   lint:

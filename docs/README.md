@@ -1,12 +1,13 @@
 # 🚀 WSLaragon
 
-> **Tu Entorno de Desarrollo Web Profesional en WSL2**
+> **Tu entorno de desarrollo web en Omarchy y WSL2**
 
-WSLaragon es un ecosistema potente diseñado para transformar Windows + WSL2 en un entorno de desarrollo web profesional, rápido y automatizado. Combina la facilidad de uso de Laragon con la potencia nativa de Linux.
+WSLaragon combina la facilidad de Laragon con servicios Linux nativos. En
+Omarchy, la variante del entorno se denomina Omarchygon.
 
 ## ✨ Características Principales
 
-- 🐧 **Linux Nativo**: Corre directamente sobre WSL2 (Ubuntu 22.04+).
+- 🐧 **Linux Nativo**: Funciona sobre Omarchy o WSL2 (Ubuntu 22.04+).
 - ⚡ **Velocidad Extrema**: Sin las capas de lentitud de los sistemas archivos compartidos tradicionales.
 - 🌐 **Dominios .test**: Gestión automática de dominios locales estilo Laragon.
 - 🔒 **SSL/HTTPS Real**: Certificados válidos con candado verde automáticos (CN correcto + SANs).
@@ -18,15 +19,17 @@ WSLaragon es un ecosistema potente diseñado para transformar Windows + WSL2 en 
 
 ## 📂 Índice de Documentación
 
-1.  [**Guía de Instalación**](INSTALL.md): Requisitos, configuración inicial paso a paso y **instalación de CA root para SSL**.
-2.  [**Uso del CLI**](CLI.md): Listado completo de comandos y cómo crear tu primer sitio.
-3.  [**SSL y Base de Datos**](SSL-DB.md): Cómo confiar en el certificado en Windows, generación de certificados y gestión de bases de datos.
-4.  [**Arquitectura**](STRUCTURE.md): Entiende cómo se organiza el proyecto y dónde están tus archivos.
-5.  [**Servidor MCP**](MCP.md): Usá WSLaragon desde Claude (o cualquier cliente MCP) en lenguaje humano.
-6.  [**Solución de Problemas**](TROUBLESHOOTING.md): Diagnóstico y soluciones para errores comunes (502, permisos, SSL, MySQL).
-7.  [**Roadmap**](ROADMAP.md): Próximas funciones planificadas (Node.js, Redis, Varnish).
-8.  [**Contribuir**](CONTRIBUTING.md): Guía para desarrolladores que quieren contribuir.
-9.  [**Desarrollo**](DEVELOPMENT.md): Documentación interna para desarrolladores.
+1.  [**Instalación en Omarchy**](OMARCHY.md): Instalador único, runtime y componentes de Omarchygon.
+2.  [**Guía de Instalación WSL2**](INSTALL.md): Configuración para Ubuntu/Windows y CA root.
+3.  [**Clonar proyectos**](CLONE.md): Migración desde Git, `.env`, dependencias, bases y PM2.
+4.  [**Uso del CLI**](CLI.md): Listado completo de comandos y cómo crear tu primer sitio.
+5.  [**SSL y Base de Datos**](SSL-DB.md): Certificados y gestión de bases de datos.
+6.  [**Arquitectura**](STRUCTURE.md): Organización del proyecto y archivos.
+7.  [**Servidor MCP**](MCP.md): Uso desde clientes MCP.
+8.  [**Solución de Problemas**](TROUBLESHOOTING.md): Errores comunes y recuperación.
+9.  [**Roadmap**](ROADMAP.md): Funciones implementadas y futuras.
+10. [**Contribuir**](CONTRIBUTING.md): Guía para contribuir.
+11. [**Desarrollo**](DEVELOPMENT.md): Documentación interna.
 
 ## 🚀 Inicio Rápido (60 segundos)
 
@@ -53,4 +56,4 @@ wslaragon site create mi-proyecto --php --mysql
 
 ---
 
-**¡Bienvenido al futuro del desarrollo web en Windows!** 🚀
+**¡Bienvenido a WSLaragon / Omarchygon!** 🚀

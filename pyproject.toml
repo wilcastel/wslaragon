@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wslaragon"
-version = "1.0.0"
-description = "Laragon-style development environment manager for WSL2"
+version = "1.1.0"
+description = "Laragon-style development environment manager for Omarchy and WSL2"
 authors = [{name = "WSLaragon Team"}]
 license = {text = "MIT"}
 readme = "README.md"
@@ -48,8 +48,8 @@ wslaragon = "wslaragon.cli.main:main"
 wslaragon-mcp = "wslaragon.mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/your-username/wslaragon"
-Repository = "https://github.com/your-username/wslaragon"
+Homepage = "https://github.com/wilcastel/wslaragon"
+Repository = "https://github.com/wilcastel/wslaragon"
 
 [tool.setuptools.packages.find]
 where = ["src"]

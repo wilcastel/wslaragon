@@ -16,7 +16,7 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP(
     "wslaragon",
     instructions=(
-        "WSLaragon is a Laragon-style dev environment manager for WSL2. "
+        "WSLaragon is a Laragon-style dev environment manager for Omarchy and WSL2. "
         "It manages Nginx, PHP-FPM, MariaDB, Redis and local .test domains with SSL. "
         "Sites live in ~/web/ and are accessible at <name>.test (HTTPS). "
         "Use the available tools to create projects, check services, and manage infrastructure."
