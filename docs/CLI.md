@@ -114,6 +114,40 @@ Muestra todos los sitios creados y su estado actual.
 wslaragon site list
 ```
 
+### Clonar y configurar un proyecto existente
+
+Clona un repositorio dentro de `~/web`, detecta su stack y configura dominio
+`.test`, HTTPS, Nginx, base de datos y proxy cuando corresponda:
+
+```bash
+# Modo guiado: pregunta repositorio, dominio local y stack
+wslaragon site clone
+
+# Detección automática
+wslaragon site clone git@github.com:equipo/proyecto.git proyecto
+
+# Configuración explícita y automatizable
+wslaragon site clone https://github.com/equipo/api.git api \
+  --stack laravel --branch develop --database api_local
+```
+
+Stacks admitidos: `static`, `php`, `wordpress`, `laravel`, `node`, `vite`,
+`sveltekit` y `astro`. Con `auto`, WSLaragon inspecciona los archivos del
+repositorio. WordPress y Laravel crean una base MySQL por defecto; se puede
+evitar con `--no-mysql`. Los proyectos JavaScript reciben un puerto y luego se
+preparan con:
+
+```bash
+cd ~/web/proyecto
+pnpm install
+wslaragon node start proyecto
+```
+
+El comando no ejecuta migraciones ni modifica `.env`: esas decisiones siguen
+perteneciendo a cada repositorio. En Laravel 11/12, verificá especialmente
+`DB_CONNECTION`: si falta o está comentado, Laravel usa SQLite aunque
+WSLaragon haya creado una base MariaDB/MySQL.
+
 ### 3. Borrar un Sitio
 Elimina la configuración Nginx, el certificado SSL y las entradas locales de
 `hosts`. Si el sitio usa un proxy Node/Astro/SvelteKit, también detiene y retira

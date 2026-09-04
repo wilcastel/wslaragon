@@ -467,6 +467,72 @@ class TestCreateSiteNginxFailure:
         assert "Failed to create Nginx configuration" in result["error"]
 
 
+class TestCloneSite:
+    @pytest.fixture
+    def site_manager(self, tmp_path, mock_nginx_manager, mock_mysql_manager):
+        sm = create_site_manager(tmp_path, mock_nginx_manager, mock_mysql_manager)
+        sm.nginx.add_site.return_value = (True, None)
+        return sm
+
+    @patch("subprocess.run")
+    def test_clone_detects_laravel_and_registers_existing_files(self, mock_run, site_manager):
+        def clone_side_effect(command, **kwargs):
+            destination = Path(command[-1])
+            destination.mkdir(parents=True)
+            (destination / "artisan").touch()
+            (destination / "public").mkdir()
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = clone_side_effect
+        site_manager.mysql.database_exists.return_value = True
+
+        with patch.object(site_manager, "fix_permissions", return_value={"success": True}):
+            result = site_manager.clone_site(
+                "https://example.test/acme.git", "acme", ssl=False
+            )
+
+        assert result["success"] is True
+        assert result["detected_stack"] == "laravel"
+        assert result["site"]["stack"] == "laravel"
+        assert result["site"]["web_root"].endswith("/acme/public")
+        assert result["site"]["database"] == "acme_db"
+        assert (site_manager.document_root / "acme" / "artisan").exists()
+
+    @patch("subprocess.run")
+    def test_clone_failure_does_not_register_site(self, mock_run, site_manager):
+        mock_run.return_value = MagicMock(
+            returncode=128, stdout="", stderr="repository not found"
+        )
+
+        result = site_manager.clone_site("bad-url", "broken", ssl=False)
+
+        assert result["success"] is False
+        assert "repository not found" in result["error"]
+        assert "broken" not in site_manager.sites
+
+    @pytest.mark.parametrize(
+        ("marker", "expected"),
+        [
+            ("wp-content", "wordpress"),
+            ("astro.config.mjs", "astro"),
+            ("svelte.config.js", "sveltekit"),
+            ("vite.config.ts", "vite"),
+            ("package.json", "node"),
+            ("index.php", "php"),
+        ],
+    )
+    def test_detect_project_stack(self, tmp_path, marker, expected):
+        marker_path = tmp_path / marker
+        if marker == "wp-content":
+            marker_path.mkdir()
+        else:
+            marker_path.touch()
+
+        from wslaragon.services.sites import SiteManager
+
+        assert SiteManager.detect_project_stack(tmp_path) == expected
+
+
 class TestDeleteSite:
     """Test suite for delete_site scenarios."""
 

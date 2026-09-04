@@ -85,7 +85,8 @@ class SiteManager:
                    database_name: str = None, public_dir: bool = False,
                    proxy_port: int = None, site_type: str = None, 
                    db_type: str = None, recreate: bool = False,
-                   vite_template: str = None, astro_template: str = None) -> Dict:
+                   vite_template: str = None, astro_template: str = None,
+                   existing_files: bool = False, stack: str = None) -> Dict:
         """Create a new site"""
         site_base_dir: Optional[Path] = None
         cleanup_on_failure = False
@@ -136,10 +137,11 @@ class SiteManager:
 
             if site_exists:
                 if recreate or site_name not in self.sites:
-                    # recreate=True OR site was deleted but directory left behind.
-                    # Clean it so the creator gets a fresh directory.
-                    subprocess.run(['sudo', 'rm', '-rf', str(site_base_dir)], check=True)
-                    messages.append(f"[yellow]Cleaned existing directory: {site_base_dir}[/yellow]")
+                    if not existing_files:
+                        # recreate=True OR site was deleted but directory left behind.
+                        # Clean it so the creator gets a fresh directory.
+                        subprocess.run(['sudo', 'rm', '-rf', str(site_base_dir)], check=True)
+                        messages.append(f"[yellow]Cleaned existing directory: {site_base_dir}[/yellow]")
             
             # Proxy-based JavaScript/Python sites and Astro SSG do not use PHP.
             if site_type in ('node', 'python', 'sveltekit') or vite_template or is_astro_ssg:
@@ -172,7 +174,7 @@ class SiteManager:
                                 site_type and site_type.isdigit() or \
                                 vite_template or astro_template
             
-            if needs_scaffolding or (not proxy_port):
+            if not existing_files and (needs_scaffolding or (not proxy_port)):
                 # Directory is fresh or user explicitly asked to recreate — run creator
                 laravel_version = None
                 if is_laravel:
@@ -263,6 +265,7 @@ class SiteManager:
                 'database': database_name if db_type_final else None,
                 'api_proxies': api_proxies,
                 'astro_template': astro_template,
+                'stack': stack,
                 'created_at': datetime.now().isoformat(),
                 'enabled': True
             }
@@ -270,7 +273,7 @@ class SiteManager:
             self.sites[site_name] = site_info
             self._save_sites()
             
-            self.fix_permissions(site_name)
+            self.fix_permissions(site_name, configure_wordpress=not existing_files)
             
             panel_content = f"[bold green]Site created successfully![/bold green]\n\n"
             panel_content += f"Domain: {site_info['domain']}\n"
@@ -290,6 +293,90 @@ class SiteManager:
                 self._cleanup_failed_site_directory(site_base_dir)
             logger.error(f"Failed to create site {site_name}: {e}")
             return {'success': False, 'error': str(e)}
+
+    def clone_site(self, repository: str, site_name: str, stack: str = 'auto',
+                   branch: str = None, mysql: bool = None, ssl: bool = True,
+                   database_name: str = None, proxy_port: int = None) -> Dict:
+        """Clone a Git repository and register it as a configured local site."""
+        site_name = self._normalize_site_name(site_name)
+        if not site_name or not self._is_valid_site_name(site_name):
+            return {'success': False, 'error': 'Invalid site name'}
+        if site_name in self.sites:
+            return {'success': False, 'error': 'Site already exists'}
+
+        destination = self.document_root / site_name
+        if destination.exists():
+            return {'success': False, 'error': f'Destination already exists: {destination}'}
+
+        clone_command = ['git', 'clone']
+        if branch:
+            clone_command.extend(['--branch', branch, '--single-branch'])
+        clone_command.extend([repository, str(destination)])
+
+        try:
+            clone_result = subprocess.run(
+                clone_command, check=False, capture_output=True, text=True, timeout=300
+            )
+            if clone_result.returncode != 0:
+                error = clone_result.stderr.strip() or clone_result.stdout.strip()
+                return {'success': False, 'error': f'Git clone failed: {error}'}
+
+            detected_stack = self.detect_project_stack(destination)
+            selected_stack = detected_stack if stack == 'auto' else stack
+            profiles = {
+                'static': {'php': False, 'site_type': None, 'public_dir': False},
+                'php': {'php': True, 'site_type': None, 'public_dir': False},
+                'wordpress': {'php': True, 'site_type': None, 'public_dir': False},
+                'laravel': {'php': True, 'site_type': None, 'public_dir': True},
+                'node': {'php': False, 'site_type': 'node', 'public_dir': False},
+                'vite': {'php': False, 'site_type': 'node', 'public_dir': False},
+                'sveltekit': {'php': False, 'site_type': 'node', 'public_dir': False},
+                'astro': {'php': False, 'site_type': 'node', 'public_dir': False},
+            }
+            if selected_stack not in profiles:
+                self._cleanup_failed_site_directory(destination)
+                return {'success': False, 'error': f'Unsupported stack: {selected_stack}'}
+
+            if mysql is None:
+                mysql = selected_stack in ('wordpress', 'laravel')
+            profile = profiles[selected_stack]
+            result = self.create_site(
+                site_name, php=profile['php'], mysql=mysql, ssl=ssl,
+                database_name=database_name, public_dir=profile['public_dir'],
+                proxy_port=proxy_port, site_type=profile['site_type'],
+                existing_files=True, stack=selected_stack
+            )
+            if result.get('success'):
+                result['detected_stack'] = detected_stack
+                result['site']['repository'] = repository
+                result['site']['branch'] = branch
+                self._save_sites()
+            return result
+        except subprocess.TimeoutExpired:
+            self._cleanup_failed_site_directory(destination)
+            return {'success': False, 'error': 'Git clone timed out after 5 minutes'}
+        except Exception as e:
+            self._cleanup_failed_site_directory(destination)
+            return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def detect_project_stack(project_root: Path) -> str:
+        """Detect a cloned project's stack from its conventional files."""
+        if (project_root / 'artisan').exists():
+            return 'laravel'
+        if (project_root / 'wp-config.php').exists() or (project_root / 'wp-content').exists():
+            return 'wordpress'
+        if (project_root / 'astro.config.mjs').exists() or (project_root / 'astro.config.ts').exists():
+            return 'astro'
+        if (project_root / 'svelte.config.js').exists() or (project_root / 'svelte.config.ts').exists():
+            return 'sveltekit'
+        if any((project_root / name).exists() for name in ('vite.config.js', 'vite.config.ts', 'vite.config.mjs')):
+            return 'vite'
+        if (project_root / 'package.json').exists():
+            return 'node'
+        if any(project_root.glob('*.php')):
+            return 'php'
+        return 'static'
 
     def create_headless_site(self, site_name: str, backend: str, frontend: str,
                              ssl: bool = True, database_name: str = None,
@@ -704,7 +791,7 @@ class SiteManager:
             return f"{protocol}://{site_name}{self.tld}"
         return None
 
-    def fix_permissions(self, site_name: str) -> Dict:
+    def fix_permissions(self, site_name: str, configure_wordpress: bool = True) -> Dict:
         """Repair ownership and apply framework-aware filesystem permissions."""
         try:
             site_name = self._normalize_site_name(site_name)
@@ -762,7 +849,7 @@ class SiteManager:
             # WordPress specific fix: FS_METHOD direct
             # This prevents WP from asking for FTP credentials
             wp_config = Path(doc_root) / 'wp-config.php'
-            if wp_config.exists():
+            if configure_wordpress and wp_config.exists():
                 try:
                     with open(wp_config, 'r') as f:
                         content = f.read()

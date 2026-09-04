@@ -140,6 +140,80 @@ def create(name, php, mysql, ssl, database, public, proxy, site_type, vite, astr
         console.print(f"[red]✗ Failed to create site: {result['error']}[/red]")
 
 
+@site.command('clone')
+@click.argument('repository', required=False)
+@click.argument('name', required=False)
+@click.option('--stack', type=click.Choice([
+    'auto', 'static', 'php', 'wordpress', 'laravel', 'node', 'vite',
+    'sveltekit', 'astro'
+]), help='Project stack (default: detect automatically)')
+@click.option('--branch', help='Git branch or tag to clone')
+@click.option('--mysql/--no-mysql', default=None, help='Create a MySQL database')
+@click.option('--database', help='Custom database name')
+@click.option('--ssl/--no-ssl', default=True, help='Enable local HTTPS')
+@click.option('--proxy', type=int, help='Custom proxy port for JavaScript projects')
+def clone(repository, name, stack, branch, mysql, database, ssl, proxy):
+    """Clone a Git repository and configure it as a local site."""
+    repository = repository or click.prompt('Git repository URL')
+    suggested_name = repository.rstrip('/').rsplit('/', 1)[-1]
+    if suggested_name.endswith('.git'):
+        suggested_name = suggested_name[:-4]
+    name = name or click.prompt('Local domain/name', default=suggested_name)
+    stack = stack or click.prompt(
+        'Project stack',
+        type=click.Choice([
+            'auto', 'static', 'php', 'wordpress', 'laravel', 'node', 'vite',
+            'sveltekit', 'astro'
+        ]),
+        default='auto',
+    )
+
+    config = Config()
+    nginx = NginxManager(config)
+    mysql_mgr = MySQLManager(config)
+    site_mgr = SiteManager(config, nginx, mysql_mgr)
+
+    try:
+        subprocess.run(['sudo', '-v'], check=True)
+    except subprocess.CalledProcessError:
+        console.print("[red]✗ This command requires sudo privileges[/red]")
+        return
+
+    with console.status(f"[bold green]Cloning and configuring {name}..."):
+        result = site_mgr.clone_site(
+            repository, name, stack=stack, branch=branch, mysql=mysql,
+            ssl=ssl, database_name=database, proxy_port=proxy
+        )
+
+    if not result['success']:
+        console.print(f"[red]✗ Failed to clone site: {result['error']}[/red]")
+        return
+
+    site_info = result['site']
+    console.print(Panel(
+        "[bold green]Repository cloned and site configured![/bold green]\n\n"
+        f"Domain: {site_info['domain']}\n"
+        f"Directory: {site_info['document_root']}\n"
+        f"Stack: {site_info['stack']}"
+        + (f" (detected: {result['detected_stack']})" if stack != 'auto' else '')
+        + f"\nProxy: {site_info.get('proxy_port') or 'No'}\n"
+        f"Database: {site_info.get('database') or 'No'}\n"
+        f"SSL: {'Yes' if site_info['ssl'] else 'No'}",
+        title=f"Cloned Site: {name}",
+    ))
+
+    if site_info.get('proxy_port'):
+        console.print(f"[yellow]Next: cd {site_info['document_root']} && pnpm install[/yellow]")
+        console.print(f"[yellow]Then: wslaragon node start {name}[/yellow]")
+    elif site_info['stack'] == 'laravel':
+        console.print(f"[yellow]Next: cd {site_info['document_root']} && composer install[/yellow]")
+        if site_info.get('database'):
+            console.print(
+                "[yellow]Configure DB_CONNECTION=mysql and the generated database "
+                f"({site_info['database']}) in .env, then run php artisan migrate.[/yellow]"
+            )
+
+
 @site.command()
 def list():
     """List all sites"""
